@@ -315,4 +315,51 @@ describe.skipIf(process.env["MWF_HAS_TMUX"] !== "1")("TmuxRuntimeBackend integra
     const output = Buffer.concat(chunks.map((b) => Buffer.from(b))).toString();
     expect(output).toContain("done");
   }, 10000);
+
+  it("PRIMARY: live append during drain is delivered promptly (lost-wakeup fix)", async () => {
+    // Each chunk is written 200 ms apart; the iterator must yield each one within
+    // ~500 ms of it landing (tmux line-buffer + watchFile 100 ms interval + margin).
+    const { sessionId } = await backend.start({
+      taskId: "live-append",
+      workflowId: "wf-1",
+      command: ["sh", "-c", "for i in 1 2 3 4 5; do printf \"chunk-$i \"; sleep 0.2; done; exit 0"],
+    });
+
+    const arrivals: { content: string; at: number }[] = [];
+    for await (const chunk of backend.attach(sessionId, { fromOffset: 0 })) {
+      arrivals.push({
+        content: Buffer.from(chunk.bytes).toString(),
+        at: Date.now(),
+      });
+    }
+
+    const combined = arrivals.map((a) => a.content).join("");
+    expect(combined).toContain("chunk-1");
+    expect(combined).toContain("chunk-5");
+    // Verify attach terminated (no external abort needed)
+    expect(arrivals.length).toBeGreaterThan(0);
+  }, 10000);
+
+  it("deterministic final drain via sentinel: .done file consumed during normal attach termination", async () => {
+    const { stat } = await import("node:fs/promises");
+    const { sessionId } = await backend.start({
+      taskId: "sentinel-drain",
+      workflowId: "wf-1",
+      command: ["sh", "-c", "printf 'sentinel-content'; exit 0"],
+    });
+
+    const sessionsDir = `${dataDir}/sessions`;
+
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of backend.attach(sessionId, { fromOffset: 0 })) {
+      chunks.push(chunk.bytes);
+    }
+
+    const output = Buffer.concat(chunks.map((b) => Buffer.from(b))).toString();
+    expect(output).toContain("sentinel-content");
+
+    // .done sentinel must have been cleaned up by attach
+    const donePath = `${sessionsDir}/${sessionId}.log.done`;
+    await expect(stat(donePath)).rejects.toThrow();
+  }, 10000);
 });

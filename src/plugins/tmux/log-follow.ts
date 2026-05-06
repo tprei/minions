@@ -30,7 +30,10 @@ export async function* followLog(
   let resolveAppend: (() => void) | undefined;
   let appendPromise: Promise<void> = new Promise((r) => { resolveAppend = r; });
 
+  let generation = 0;
+
   const onWatch = () => {
+    generation += 1;
     const prev = resolveAppend;
     appendPromise = new Promise((r) => { resolveAppend = r; });
     prev?.();
@@ -44,6 +47,8 @@ export async function* followLog(
   try {
     // Drain-then-await loop covers replay, race-window appends, and live tail uniformly.
     while (!signal.aborted) {
+      const seen = generation;
+
       const stat = await handle.stat();
       const size = stat.size;
 
@@ -60,6 +65,10 @@ export async function* followLog(
       }
 
       if (signal.aborted) break;
+      // If onWatch fired during the drain above, generation advanced past seen.
+      // Re-loop immediately so we stat again and pick up the new bytes rather
+      // than suspending on the already-resolved appendPromise.
+      if (seen !== generation) continue;
       await appendPromise;
     }
   } finally {

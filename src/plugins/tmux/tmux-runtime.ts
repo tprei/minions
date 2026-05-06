@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, open, writeFile } from "node:fs/promises";
+import * as fsp from "node:fs/promises";
 import type { RuntimeProbeState } from "../../application/recovery.js";
 import type {
   RuntimeAttachOptions,
@@ -46,19 +46,19 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
   }
 
   async start(spec: RuntimeStartSpec): Promise<RuntimeStartResult> {
-    if (spec.command.length === 0 || spec.command.every((s) => s.trim() === "")) {
+    if (spec.command.length === 0 || (spec.command[0] ?? "").trim() === "") {
       throw new Error("command must be non-empty");
     }
 
     const sessionId = makeSessionId(spec.taskId, this.config.shortIdLen);
     const releaseToken = `release-${sessionId}`;
 
-    await mkdir(`${this.config.dataDir}/sessions`, { recursive: true });
+    await fsp.mkdir(`${this.config.dataDir}/sessions`, { recursive: true });
 
     const scriptPath = `${this.config.dataDir}/sessions/${sessionId}.sh`;
     const logPath = `${this.config.dataDir}/sessions/${sessionId}.log`;
 
-    await writeFile(
+    await fsp.writeFile(
       scriptPath,
       buildLauncherScript({
         command: spec.command,
@@ -72,7 +72,7 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
     );
 
     // Touch the log file so followLog can open it immediately
-    await writeFile(logPath, "", { flag: "a" });
+    await fsp.writeFile(logPath, "", { flag: "a" });
 
     await this.client.newSession({ name: sessionId, scriptPath });
 
@@ -113,6 +113,7 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
     opts: RuntimeAttachOptions = {},
   ): AsyncIterable<RuntimeOutputChunk> {
     const logPath = `${this.config.dataDir}/sessions/${sessionId}.log`;
+    const donePath = `${logPath}.done`;
     const fromOffset = opts.fromOffset ?? 0;
     const internal = new AbortController();
     const signal = opts.signal
@@ -120,7 +121,8 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
       : internal.signal;
 
     const POLL_INTERVAL_MS = 250;
-    const SETTLE_MS = 150;
+    const SENTINEL_POLL_MS = 25;
+    const SENTINEL_CAP_MS = 1000;
     const READ_SIZE = 64 * 1024;
 
     let terminated = false;
@@ -161,9 +163,21 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
       throw err;
     });
 
-    await new Promise<void>((r) => setTimeout(r, SETTLE_MS));
+    // Poll for the sentinel written by the pipe-pane wrapper (`cat >> log; touch log.done`).
+    // The sentinel only appears after cat exits (i.e., after all bytes are flushed to the
+    // log). The cap is a safety net; under normal conditions the sentinel appears first.
+    const deadline = Date.now() + SENTINEL_CAP_MS;
+    while (Date.now() < deadline) {
+      try {
+        await fsp.access(donePath);
+        break;
+      } catch {
+        // sentinel not yet present
+      }
+      await new Promise<void>((r) => setTimeout(r, SENTINEL_POLL_MS));
+    }
 
-    const handle = await open(logPath, "r").catch(() => null);
+    const handle = await fsp.open(logPath, "r").catch(() => null);
     if (handle === null) return;
     try {
       const stat = await handle.stat();
@@ -179,6 +193,8 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
       }
     } finally {
       await handle.close();
+      // Clean up the transient drain sentinel; swallow if already gone.
+      await fsp.unlink(donePath).catch(() => {});
     }
   }
 }

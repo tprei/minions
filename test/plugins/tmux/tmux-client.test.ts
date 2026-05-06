@@ -66,14 +66,22 @@ describe("TmuxClient", () => {
     );
   });
 
-  it("pipePane shell-quotes the log path", async () => {
+  it("pipePane shell-quotes the log path and appends sentinel touch", async () => {
     spawnMock.mockReturnValue(makeMockProc("", "", 0));
     await client.pipePane("mwf-task-abc-123456", "/tmp/log file's path.log");
 
     const [, args] = spawnMock.mock.calls[0] as [string, string[]];
-    // The -o argument should have the path quoted with single quotes and ' escaped
     const oArg = args[args.indexOf("-o") + 1];
-    expect(oArg).toBe("cat >> '/tmp/log file'\\''s path.log'");
+    expect(oArg).toBe("cat >> '/tmp/log file'\\''s path.log'; touch '/tmp/log file'\\''s path.log.done'");
+  });
+
+  it("pipePane sentinel path is log path with .done suffix", async () => {
+    spawnMock.mockReturnValue(makeMockProc("", "", 0));
+    await client.pipePane("session", "/data/sessions/mwf-task.log");
+
+    const [, args] = spawnMock.mock.calls[0] as [string, string[]];
+    const oArg = args[args.indexOf("-o") + 1];
+    expect(oArg).toBe("cat >> '/data/sessions/mwf-task.log'; touch '/data/sessions/mwf-task.log.done'");
   });
 
   it("waitForSignal constructs correct argv", async () => {

@@ -149,6 +149,64 @@ describe("followLog", () => {
     expect(chunks).toHaveLength(0);
   });
 
+  it("watch firing during drain does not lose wakeup (generation counter)", async () => {
+    // Write initial bytes to a file, start the iterator, append more before the
+    // iterator reaches the await-appendPromise line.  The generation counter must
+    // cause the loop to re-stat without sleeping so no bytes are lost.
+    const path = join(testDir, "test.log");
+    writeFileSync(path, "first");
+
+    const controller = new AbortController();
+    const chunks: { offset: number; bytes: Uint8Array }[] = [];
+
+    const iterPromise = (async () => {
+      for await (const chunk of followLog(path, 0, controller.signal)) {
+        chunks.push(chunk);
+        const total = chunks.reduce((s, c) => s + c.bytes.byteLength, 0);
+        if (total >= 11) controller.abort();
+      }
+    })();
+
+    // Append immediately (before watchFile's 100 ms poll interval fires), so the
+    // append lands during the drain of "first".  The generation counter re-loops
+    // without sleeping and picks it up.
+    await appendFile(path, "-second");
+
+    await iterPromise;
+
+    const allBytes = Buffer.concat(chunks.map((c) => Buffer.from(c.bytes))).toString();
+    expect(allBytes).toBe("first-second");
+  });
+
+  it("append during drain wakes loop without deadlock", async () => {
+    const path = join(testDir, "test.log");
+    writeFileSync(path, "A".repeat(32));
+
+    const controller = new AbortController();
+    const chunks: { offset: number; bytes: Uint8Array }[] = [];
+
+    const iterPromise = (async () => {
+      for await (const chunk of followLog(path, 0, controller.signal)) {
+        chunks.push(chunk);
+        const total = chunks.reduce((s, c) => s + c.bytes.byteLength, 0);
+        if (total >= 32 + 8) controller.abort();
+      }
+    })();
+
+    // Append new bytes immediately; because the loop re-stats after each drain
+    // these must be delivered without waiting for the next watchFile tick.
+    await appendFile(path, "B".repeat(8));
+    const start = Date.now();
+    await iterPromise;
+
+    const elapsed = Date.now() - start;
+    const allBytes = Buffer.concat(chunks.map((c) => Buffer.from(c.bytes))).toString();
+    expect(allBytes).toContain("A".repeat(32));
+    expect(allBytes).toContain("B".repeat(8));
+    // Should resolve well within a watchFile interval (100 ms); use 500 ms budget
+    expect(elapsed).toBeLessThan(500);
+  });
+
   it("truncation: file replaced with shorter content resets offset to 0 and yields new bytes", async () => {
     const path = join(testDir, "test.log");
     writeFileSync(path, "hello-world-long");

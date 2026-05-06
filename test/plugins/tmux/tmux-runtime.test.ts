@@ -117,6 +117,8 @@ async function getFsMock() {
     mkdir: mod.mkdir as unknown as Mock,
     writeFile: mod.writeFile as unknown as Mock,
     open: mod.open as unknown as Mock,
+    access: mod.access as unknown as Mock,
+    unlink: mod.unlink as unknown as Mock,
   };
 }
 
@@ -145,6 +147,7 @@ beforeEach(async () => {
   mockFileHandle.close.mockReset().mockResolvedValue(undefined);
   const fsp = await import("node:fs/promises");
   (fsp.unlink as unknown as Mock).mockReset().mockResolvedValue(undefined);
+  (fsp.access as unknown as Mock).mockReset().mockResolvedValue(undefined);
 
   const followLog = await getFollowLogMock();
   followLog.mockReset().mockImplementation(async function* () {});
@@ -448,5 +451,113 @@ describe("TmuxRuntimeBackend", () => {
     }
 
     expect(chunks).toHaveLength(0);
+  });
+
+  it("start rejects command with empty argv0 but non-empty args before touching filesystem", async () => {
+    const backend = await makeBackend();
+    const fs = await getFsMock();
+
+    await expect(
+      backend.start({ taskId: "t1", workflowId: "wf-1", command: ["", "foo"] }),
+    ).rejects.toThrow("command must be non-empty");
+
+    expect(fs.mkdir).not.toHaveBeenCalled();
+    expect(fs.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("attach final-drain polls for .done sentinel before reading", async () => {
+    const backend = await makeBackend();
+    const client = await getMockClientInner();
+    const followLog = await getFollowLogMock();
+    const fs = await getFsMock();
+
+    followLog.mockImplementation(async function* (_path: string, _offset: number, signal: AbortSignal) {
+      await new Promise<void>((r) => signal.addEventListener("abort", () => r(), { once: true }));
+    });
+
+    client.paneDead.mockResolvedValue(true);
+
+    const tailBytes = Buffer.from("sentinel-tail");
+    let sentinelCallCount = 0;
+    fs.access.mockImplementation(async () => {
+      sentinelCallCount += 1;
+      if (sentinelCallCount < 3) throw new Error("ENOENT");
+    });
+
+    fs.open.mockResolvedValue({
+      stat: vi.fn().mockResolvedValue({ size: tailBytes.length }),
+      read: vi.fn().mockImplementation(async (buf: Buffer, _off: number, len: number) => {
+        tailBytes.copy(buf, 0, 0, len);
+        return { bytesRead: tailBytes.length };
+      }),
+      close: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const chunks: RuntimeOutputChunk[] = [];
+    for await (const chunk of backend.attach("polled-session", { fromOffset: 0 })) {
+      chunks.push(chunk);
+    }
+
+    expect(sentinelCallCount).toBeGreaterThanOrEqual(3);
+    const combined = Buffer.concat(chunks.map((c) => Buffer.from(c.bytes))).toString();
+    expect(combined).toBe("sentinel-tail");
+  });
+
+  it("attach final-drain proceeds and reads after sentinel cap timeout when .done never appears", async () => {
+    const backend = await makeBackend();
+    const client = await getMockClientInner();
+    const followLog = await getFollowLogMock();
+    const fs = await getFsMock();
+
+    followLog.mockImplementation(async function* (_path: string, _offset: number, signal: AbortSignal) {
+      await new Promise<void>((r) => signal.addEventListener("abort", () => r(), { once: true }));
+    });
+
+    client.paneDead.mockResolvedValue(true);
+
+    // sentinel never appears
+    fs.access.mockRejectedValue(new Error("ENOENT"));
+
+    const capBytes = Buffer.from("cap-tail");
+    fs.open.mockResolvedValue({
+      stat: vi.fn().mockResolvedValue({ size: capBytes.length }),
+      read: vi.fn().mockImplementation(async (buf: Buffer, _off: number, len: number) => {
+        capBytes.copy(buf, 0, 0, len);
+        return { bytesRead: capBytes.length };
+      }),
+      close: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const chunks: RuntimeOutputChunk[] = [];
+    for await (const chunk of backend.attach("cap-session", { fromOffset: 0 })) {
+      chunks.push(chunk);
+    }
+
+    const combined = Buffer.concat(chunks.map((c) => Buffer.from(c.bytes))).toString();
+    expect(combined).toBe("cap-tail");
+  }, 2000);
+
+  it("attach final-drain deletes .done sentinel after reading", async () => {
+    const backend = await makeBackend();
+    const client = await getMockClientInner();
+    const followLog = await getFollowLogMock();
+    const fs = await getFsMock();
+
+    followLog.mockImplementation(async function* (_path: string, _offset: number, signal: AbortSignal) {
+      await new Promise<void>((r) => signal.addEventListener("abort", () => r(), { once: true }));
+    });
+
+    client.paneDead.mockResolvedValue(true);
+    fs.access.mockResolvedValue(undefined);
+
+    for await (const _chunk of backend.attach("cleanup-session", { fromOffset: 0 })) {
+      // no-op
+    }
+
+    const fsp = await import("node:fs/promises");
+    const unlinkMock = fsp.unlink as unknown as Mock;
+    expect(unlinkMock).toHaveBeenCalledWith(
+      expect.stringContaining("cleanup-session.log.done"),
+    );
   });
 });

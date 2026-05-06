@@ -81,7 +81,8 @@ export class TmuxClient {
 
   async pipePane(name: string, logPath: string): Promise<void> {
     const quotedPath = shellQuotePath(logPath);
-    await this.run(["pipe-pane", "-t", name, "-o", `cat >> ${quotedPath}`]);
+    const quotedDone = shellQuotePath(`${logPath}.done`);
+    await this.run(["pipe-pane", "-t", name, "-o", `cat >> ${quotedPath}; touch ${quotedDone}`]);
   }
 
   async pipePaneOff(name: string): Promise<void> {
