@@ -12,7 +12,6 @@ export type TransitionKind =
   | "complete-quality-gate"
   | "start-ci-gate"
   | "complete-ci-gate"
-  | "land-task"
   | "merge-task"
   | "cancel-task"
   | "recover-task"
@@ -29,6 +28,97 @@ export interface TransitionCommand {
   reason?: string;
   now: string;
 }
+
+interface TransitionEffect {
+  patch: Partial<TaskNode>;
+  clearSession?: boolean;
+}
+
+interface TransitionRule {
+  from: TaskExecutionStatus[];
+  apply: (task: TaskNode, command: TransitionCommand) => TransitionEffect;
+}
+
+const appendArtifacts = (task: TaskNode, command: TransitionCommand): Artifact[] => [
+  ...task.artifacts,
+  ...(command.artifacts ?? []),
+];
+
+const TRANSITIONS: Record<TransitionKind, TransitionRule> = {
+  "mark-ready": {
+    from: ["pending"],
+    apply: () => ({ patch: { executionStatus: "ready" } }),
+  },
+  "mark-running": {
+    from: ["ready"],
+    apply: (task, command) => {
+      if (!command.sessionId) {
+        throw new DomainError("invalid_transition", "running task requires session id", {
+          taskId: task.id,
+        });
+      }
+      return { patch: { executionStatus: "running", sessionId: command.sessionId } };
+    },
+  },
+  "complete-runtime": {
+    from: ["running"],
+    apply: (task, command) => ({
+      patch: { executionStatus: "completed", artifacts: appendArtifacts(task, command) },
+    }),
+  },
+  "start-finalization": {
+    from: ["completed"],
+    apply: () => ({ patch: { executionStatus: "finalizing" } }),
+  },
+  "open-review": {
+    from: ["finalizing"],
+    apply: (task, command) => ({
+      patch: { executionStatus: "pr-open", artifacts: appendArtifacts(task, command) },
+    }),
+  },
+  "start-quality-gate": {
+    from: ["completed", "finalizing"],
+    apply: () => ({ patch: { executionStatus: "quality-pending" } }),
+  },
+  "complete-quality-gate": {
+    from: ["quality-pending"],
+    apply: (task, command) => ({
+      patch: {
+        executionStatus: command.passed === false ? "needs-review" : "finalizing",
+        artifacts: appendArtifacts(task, command),
+      },
+    }),
+  },
+  "start-ci-gate": {
+    from: ["pr-open"],
+    apply: () => ({ patch: { executionStatus: "ci-pending" } }),
+  },
+  "complete-ci-gate": {
+    from: ["ci-pending"],
+    apply: (task, command) => ({
+      patch: { executionStatus: "pr-open", artifacts: appendArtifacts(task, command) },
+    }),
+  },
+  "merge-task": {
+    from: ["pr-open"],
+    apply: () => ({ patch: { executionStatus: "merged" } }),
+  },
+  "cancel-task": {
+    from: ["pending", "ready", "running", "finalizing", "quality-pending", "ci-pending"],
+    apply: () => ({ patch: { executionStatus: "cancelled" } }),
+  },
+  "recover-task": {
+    from: ["ready", "running", "quality-pending", "ci-pending"],
+    apply: (task) => ({
+      patch: { executionStatus: task.artifacts.length > 0 ? "needs-review" : "pending" },
+      clearSession: true,
+    }),
+  },
+  "fail-task": {
+    from: ["pending", "ready", "running", "finalizing", "quality-pending", "ci-pending"],
+    apply: () => ({ patch: { executionStatus: "failed" } }),
+  },
+};
 
 export function transitionTask(workflow: Workflow, command: TransitionCommand): Workflow {
   const task = workflow.graph[command.taskId];
@@ -52,7 +142,18 @@ export function transitionTask(workflow: Workflow, command: TransitionCommand): 
     });
   }
 
-  const next = applyTaskTransition(task, command);
+  const rule = TRANSITIONS[command.kind];
+  if (!rule.from.includes(task.executionStatus)) {
+    throw new DomainError("invalid_transition", "task status does not allow transition", {
+      taskId: task.id,
+      kind: command.kind,
+      status: task.executionStatus,
+      allowed: rule.from,
+    });
+  }
+
+  const effect = rule.apply(task, command);
+  const next = updateTask(task, command, effect);
   const graph = { ...workflow.graph, [task.id]: next };
 
   return {
@@ -64,106 +165,15 @@ export function transitionTask(workflow: Workflow, command: TransitionCommand): 
   };
 }
 
-function applyTaskTransition(task: TaskNode, command: TransitionCommand): TaskNode {
-  switch (command.kind) {
-    case "mark-ready":
-      requireStatus(task, ["pending"]);
-      return updateTask(task, command, { executionStatus: "ready" });
-    case "mark-running":
-      requireStatus(task, ["ready"]);
-      if (!command.sessionId) {
-        throw new DomainError("invalid_transition", "running task requires session id", {
-          taskId: task.id,
-        });
-      }
-      return updateTask(task, command, {
-        executionStatus: "running",
-        sessionId: command.sessionId,
-      });
-    case "complete-runtime":
-      requireStatus(task, ["running"]);
-      return updateTask(task, command, {
-        executionStatus: "completed",
-        artifacts: [...task.artifacts, ...(command.artifacts ?? [])],
-      });
-    case "start-finalization":
-      requireStatus(task, ["completed"]);
-      return updateTask(task, command, { executionStatus: "finalizing" });
-    case "open-review":
-      requireStatus(task, ["finalizing"]);
-      return updateTask(task, command, {
-        executionStatus: "pr-open",
-        artifacts: [...task.artifacts, ...(command.artifacts ?? [])],
-      });
-    case "start-quality-gate":
-      requireStatus(task, ["completed", "finalizing"]);
-      return updateTask(task, command, { executionStatus: "quality-pending" });
-    case "complete-quality-gate":
-      requireStatus(task, ["quality-pending"]);
-      if (command.passed === false) {
-        return updateTask(task, command, {
-          executionStatus: "needs-review",
-          artifacts: [...task.artifacts, ...(command.artifacts ?? [])],
-        });
-      }
-      return updateTask(task, command, {
-        executionStatus: "finalizing",
-        artifacts: [...task.artifacts, ...(command.artifacts ?? [])],
-      });
-    case "start-ci-gate":
-      requireStatus(task, ["pr-open"]);
-      return updateTask(task, command, { executionStatus: "ci-pending" });
-    case "complete-ci-gate":
-      requireStatus(task, ["ci-pending"]);
-      return updateTask(task, command, {
-        executionStatus: "pr-open",
-        artifacts: [...task.artifacts, ...(command.artifacts ?? [])],
-      });
-    case "land-task":
-      requireStatus(task, ["pr-open", "finalizing"]);
-      return updateTask(task, command, { executionStatus: "landed" });
-    case "merge-task":
-      requireStatus(task, ["landed", "pr-open"]);
-      return updateTask(task, command, { executionStatus: "merged" });
-    case "cancel-task":
-      requireStatus(task, ["pending", "ready", "running", "finalizing", "quality-pending", "ci-pending"]);
-      return updateTask(task, command, { executionStatus: "cancelled" });
-    case "recover-task":
-      requireStatus(task, ["ready", "running", "quality-pending", "ci-pending"]);
-      if (task.artifacts.length > 0) {
-        return updateTask(task, command, { executionStatus: "needs-review" }, { clearSession: true });
-      }
-      return updateTask(task, command, { executionStatus: "pending" }, { clearSession: true });
-    case "fail-task":
-      requireStatus(task, ["pending", "ready", "running", "finalizing", "quality-pending", "ci-pending"]);
-      return updateTask(task, command, { executionStatus: "failed" });
-  }
-}
-
-function requireStatus(task: TaskNode, allowed: TaskExecutionStatus[]): void {
-  if (!allowed.includes(task.executionStatus)) {
-    throw new DomainError("invalid_transition", "task status does not allow transition", {
-      taskId: task.id,
-      status: task.executionStatus,
-      allowed,
-    });
-  }
-}
-
-function updateTask(
-  task: TaskNode,
-  command: TransitionCommand,
-  patch: Partial<TaskNode>,
-  options: { clearSession?: boolean } = {},
-): TaskNode {
+function updateTask(task: TaskNode, command: TransitionCommand, effect: TransitionEffect): TaskNode {
   const updated: TaskNode = {
     ...task,
-    ...patch,
+    ...effect.patch,
     version: task.version + 1,
     updatedAt: command.now,
   };
 
-  if (options.clearSession) delete updated.sessionId;
+  if (effect.clearSession) delete updated.sessionId;
 
   return updated;
 }
