@@ -1,0 +1,220 @@
+import { describe, expect, it } from "vitest";
+import { DomainError } from "../src/domain/errors.js";
+import { createSingleTaskWorkflow, createWorkflow } from "../src/domain/workflow.js";
+import { transitionTask } from "../src/application/transitions.js";
+
+const now = "2026-05-04T11:19:00.000Z";
+
+describe("guarded transitions", () => {
+  it("moves a task through ready, running, and completed", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+    workflow = transitionTask(workflow, {
+      kind: "complete-runtime",
+      taskId: "task-1:task",
+      expectedSessionId: "session-1",
+      artifacts: [{ kind: "branch", ref: "feature/task-1", producedBy: "task-1:task", createdAt: now }],
+      now,
+    });
+
+    expect(workflow.graph["task-1:task"]?.executionStatus).toBe("completed");
+    expect(workflow.graph["task-1:task"]?.artifacts).toHaveLength(1);
+    expect(workflow.status).toBe("completed");
+  });
+
+  it("rejects stale task versions", () => {
+    const workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+
+    expect(() =>
+      transitionTask(workflow, {
+        kind: "mark-ready",
+        taskId: "task-1:task",
+        expectedVersion: 2,
+        now,
+      }),
+    ).toThrow(DomainError);
+  });
+
+  it("rejects session-bound completion with the wrong session", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+
+    expect(() =>
+      transitionTask(workflow, {
+        kind: "complete-runtime",
+        taskId: "task-1:task",
+        expectedSessionId: "session-2",
+        now,
+      }),
+    ).toThrow("task session does not match");
+  });
+
+  it("complete-runtime preserves sessionId; recover-task clears it", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+    workflow = transitionTask(workflow, {
+      kind: "complete-runtime",
+      taskId: "task-1:task",
+      expectedSessionId: "session-1",
+      now,
+    });
+
+    expect(workflow.graph["task-1:task"]?.sessionId).toBe("session-1");
+
+    workflow = transitionTask(workflow, { kind: "start-quality-gate", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, { kind: "recover-task", taskId: "task-1:task", now });
+
+    expect(workflow.graph["task-1:task"]?.sessionId).toBeUndefined();
+  });
+});
+
+describe("recover-task routing", () => {
+  it("routes to pending when task has no artifacts", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+    workflow = transitionTask(workflow, { kind: "recover-task", taskId: "task-1:task", now });
+
+    expect(workflow.graph["task-1:task"]?.executionStatus).toBe("pending");
+  });
+
+  it("routes to needs-review when task has artifacts", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+    workflow = transitionTask(workflow, {
+      kind: "complete-runtime",
+      taskId: "task-1:task",
+      artifacts: [{ kind: "branch", ref: "feature/task-1", producedBy: "task-1:task", createdAt: now }],
+      now,
+    });
+    workflow = transitionTask(workflow, { kind: "start-quality-gate", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, { kind: "recover-task", taskId: "task-1:task", now });
+
+    expect(workflow.graph["task-1:task"]?.executionStatus).toBe("needs-review");
+    expect(workflow.graph["task-1:task"]?.sessionId).toBeUndefined();
+  });
+});
+
+describe("quality gate", () => {
+  it("routes to finalizing when quality gate passes", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+    workflow = transitionTask(workflow, { kind: "complete-runtime", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, { kind: "start-quality-gate", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "complete-quality-gate",
+      taskId: "task-1:task",
+      passed: true,
+      now,
+    });
+
+    expect(workflow.graph["task-1:task"]?.executionStatus).toBe("finalizing");
+  });
+
+  it("routes to needs-review when quality gate fails", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+    workflow = transitionTask(workflow, {
+      kind: "complete-runtime",
+      taskId: "task-1:task",
+      artifacts: [{ kind: "branch", ref: "feature/task-1", producedBy: "task-1:task", createdAt: now }],
+      now,
+    });
+    workflow = transitionTask(workflow, { kind: "start-quality-gate", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "complete-quality-gate",
+      taskId: "task-1:task",
+      passed: false,
+      artifacts: [{ kind: "quality-report", ref: "reports/q1", producedBy: "quality-gate", createdAt: now }],
+      now,
+    });
+
+    expect(workflow.graph["task-1:task"]?.executionStatus).toBe("needs-review");
+    expect(workflow.graph["task-1:task"]?.artifacts).toHaveLength(2);
+  });
+});
+
+describe("workflow status derivation", () => {
+  it("returns failed when some tasks failed and others were cancelled", () => {
+    const workflow = createWorkflow(
+      {
+        id: "wf-1",
+        kind: "manual-dag",
+        tasks: [
+          { id: "a", title: "A", prompt: "A" },
+          { id: "b", title: "B", prompt: "B" },
+        ],
+        policy: { maxConcurrent: 2 },
+      },
+      () => now,
+    );
+
+    let next = transitionTask(workflow, { kind: "mark-ready", taskId: "a", now });
+    next = transitionTask(next, { kind: "mark-running", taskId: "a", sessionId: "s1", now });
+    next = transitionTask(next, { kind: "fail-task", taskId: "a", now });
+    next = transitionTask(next, { kind: "cancel-task", taskId: "b", now });
+
+    expect(next.status).toBe("failed");
+  });
+
+  it("returns cancelled only when every task is cancelled", () => {
+    const workflow = createWorkflow(
+      {
+        id: "wf-2",
+        kind: "manual-dag",
+        tasks: [
+          { id: "a", title: "A", prompt: "A" },
+          { id: "b", title: "B", prompt: "B" },
+        ],
+        policy: { maxConcurrent: 2 },
+      },
+      () => now,
+    );
+
+    let next = transitionTask(workflow, { kind: "cancel-task", taskId: "a", now });
+    next = transitionTask(next, { kind: "cancel-task", taskId: "b", now });
+
+    expect(next.status).toBe("cancelled");
+  });
+});
