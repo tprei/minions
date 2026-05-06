@@ -107,6 +107,7 @@ function createTaskNode(workflowId: string, spec: TaskSpec, now: string): TaskNo
       expectedArtifacts: [...(spec.contract?.expectedArtifacts ?? [])],
     },
     artifacts: [],
+    runs: [],
     readiness: "unknown",
     version: 1,
     createdAt: now,

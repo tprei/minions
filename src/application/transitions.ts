@@ -1,4 +1,6 @@
 import { DomainError } from "../domain/errors.js";
+import { appendRun, closeLatestRun } from "../domain/runs.js";
+import type { NodeRun, NodeRunTerminalReason } from "../domain/runs.js";
 import type { Artifact, TaskExecutionStatus, TaskNode, Workflow } from "../domain/types.js";
 import { TASK_TERMINAL_EXECUTION_STATUSES } from "../domain/types.js";
 
@@ -23,6 +25,9 @@ export interface TransitionCommand {
   expectedVersion?: number;
   expectedSessionId?: string;
   sessionId?: string;
+  // slice 5 plumbs real provider/runtime values; "unknown" is the default for slice 2
+  providerType?: string;
+  runtimeType?: string;
   artifacts?: Artifact[];
   passed?: boolean;
   reason?: string;
@@ -32,6 +37,7 @@ export interface TransitionCommand {
 interface TransitionEffect {
   patch: Partial<TaskNode>;
   clearSession?: boolean;
+  runEffect?: { kind: "append"; run: NodeRun } | { kind: "close"; reason: NodeRunTerminalReason };
 }
 
 interface TransitionRule {
@@ -57,13 +63,27 @@ const TRANSITIONS: Record<TransitionKind, TransitionRule> = {
           taskId: task.id,
         });
       }
-      return { patch: { executionStatus: "running", sessionId: command.sessionId } };
+      const attempt = task.runs.length + 1;
+      const run: NodeRun = {
+        id: `run-${task.id}-${attempt}`,
+        taskId: task.id,
+        attempt,
+        providerType: command.providerType ?? "unknown",
+        runtimeType: command.runtimeType ?? "unknown",
+        sessionId: command.sessionId,
+        startedAt: command.now,
+      };
+      return {
+        patch: { executionStatus: "running", sessionId: command.sessionId },
+        runEffect: { kind: "append", run },
+      };
     },
   },
   "complete-runtime": {
     from: ["running"],
     apply: (task, command) => ({
       patch: { executionStatus: "completed", artifacts: appendArtifacts(task, command) },
+      runEffect: { kind: "close", reason: "completed" },
     }),
   },
   "start-finalization": {
@@ -105,18 +125,25 @@ const TRANSITIONS: Record<TransitionKind, TransitionRule> = {
   },
   "cancel-task": {
     from: ["pending", "ready", "running", "finalizing", "quality-pending", "ci-pending"],
-    apply: () => ({ patch: { executionStatus: "cancelled" } }),
+    apply: () => ({
+      patch: { executionStatus: "cancelled" },
+      runEffect: { kind: "close", reason: "cancelled" },
+    }),
   },
   "recover-task": {
     from: ["ready", "running", "quality-pending", "ci-pending"],
     apply: (task) => ({
       patch: { executionStatus: task.artifacts.length > 0 ? "needs-review" : "pending" },
       clearSession: true,
+      runEffect: { kind: "close", reason: "recovered" },
     }),
   },
   "fail-task": {
     from: ["pending", "ready", "running", "finalizing", "quality-pending", "ci-pending"],
-    apply: () => ({ patch: { executionStatus: "failed" } }),
+    apply: () => ({
+      patch: { executionStatus: "failed" },
+      runEffect: { kind: "close", reason: "failed" },
+    }),
   },
 };
 
@@ -174,6 +201,14 @@ function updateTask(task: TaskNode, command: TransitionCommand, effect: Transiti
   };
 
   if (effect.clearSession) delete updated.sessionId;
+
+  if (effect.runEffect) {
+    if (effect.runEffect.kind === "append") {
+      updated.runs = appendRun(task.runs, effect.runEffect.run);
+    } else {
+      updated.runs = closeLatestRun(task.runs, effect.runEffect.reason, command.now);
+    }
+  }
 
   return updated;
 }

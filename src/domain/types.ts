@@ -1,3 +1,5 @@
+import type { NodeRun } from "./runs.js";
+
 // Top-level shape of a unit of work in the system. A workflow is one or more
 // task nodes wired into a DAG, with a policy and a status that rolls up from
 // the leaves.
@@ -85,6 +87,7 @@ export interface TaskNode {
   sessionId?: string;
   workspaceId?: string;
   mergeTarget?: string;
+  runs: NodeRun[];
   readiness: Readiness;
   version: number;
   createdAt: string;

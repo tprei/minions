@@ -2,7 +2,8 @@ export type DomainErrorCode =
   | "invalid_workflow"
   | "invalid_transition"
   | "not_found"
-  | "version_conflict";
+  | "version_conflict"
+  | "idempotency_collision";
 
 export class DomainError extends Error {
   readonly code: DomainErrorCode;

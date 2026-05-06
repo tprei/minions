@@ -6,6 +6,7 @@ import {
   requestRestack,
   startRestackOperation,
 } from "../src/application/restack.js";
+import { createWorkflow } from "../src/domain/workflow.js";
 import { completeTask, fixedNow, makeThreeNodeWorkflow } from "../src/testing/builders.js";
 
 describe("restack planning", () => {
@@ -17,6 +18,40 @@ describe("restack planning", () => {
     const plan = planRestack(workflow, "backend");
 
     expect(plan.descendants.map((task) => task.id)).toEqual(["tests"]);
+  });
+
+  it("propagates through transitive descendants", () => {
+    let workflow = createWorkflow(
+      {
+        id: "wf-chain",
+        kind: "manual-dag",
+        tasks: [
+          { id: "a", title: "A", prompt: "A" },
+          { id: "b", title: "B", prompt: "B", dependsOn: ["a"] },
+          { id: "c", title: "C", prompt: "C", dependsOn: ["b"] },
+          { id: "d", title: "D", prompt: "D", dependsOn: ["c"] },
+        ],
+        policy: { maxConcurrent: 1 },
+      },
+      () => fixedNow,
+    );
+    workflow = completeTask(workflow, "a", "feature/a");
+    workflow = completeTask(workflow, "b", "feature/b");
+    workflow = completeTask(workflow, "c", "feature/c");
+    workflow = completeTask(workflow, "d", "feature/d");
+
+    ({ workflow } = requestRestack(workflow, {
+      operationId: "restack-1",
+      ancestorId: "a",
+      idempotencyKey: "k1",
+      now: fixedNow,
+    }));
+
+    expect(workflow.operations["restack-1"]?.affectedNodeIds).toEqual(["b", "c", "d"]);
+    expect(workflow.graph.b?.stackStatus).toBe("restack-pending");
+    expect(workflow.graph.c?.stackStatus).toBe("restack-pending");
+    expect(workflow.graph.d?.stackStatus).toBe("restack-pending");
+    expect(workflow.graph.a?.stackStatus).toBe("clean");
   });
 
   it("persists restack requests before changing stack state", () => {
