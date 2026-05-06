@@ -50,7 +50,7 @@ describe("ClaudeCodeProvider", () => {
       usage: { input_tokens: 10, output_tokens: 5 },
       total_cost_usd: 0.0042,
       duration_ms: 1000,
-      turns: 2,
+      num_turns: 2,
     });
 
     expect(provider.parseFrame(systemInit)).toEqual([]);
@@ -182,6 +182,31 @@ describe("ClaudeCodeProvider", () => {
     const events = provider.parseFrame(line);
     const usageEvent = events.find((e) => e.kind === "usage") as ProviderEvent & { kind: "usage" };
     expect(usageEvent?.costUsd).toBe(0.001);
+  });
+
+  it("result num_turns propagates as numTurns in exitMetadata", () => {
+    const line = encode({
+      type: "result",
+      subtype: "success",
+      session_id: "s",
+      usage: { input_tokens: 1, output_tokens: 1 },
+      num_turns: 3,
+    });
+    const events = provider.parseFrame(line);
+    const finalEvent = events.find((e) => e.kind === "final") as ProviderEvent & { kind: "final" };
+    expect((finalEvent?.exitMetadata as Record<string, unknown>)?.["numTurns"]).toBe(3);
+  });
+
+  it("result without num_turns leaves numTurns undefined in exitMetadata", () => {
+    const line = encode({
+      type: "result",
+      subtype: "success",
+      session_id: "s",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    const events = provider.parseFrame(line);
+    const finalEvent = events.find((e) => e.kind === "final") as ProviderEvent & { kind: "final" };
+    expect((finalEvent?.exitMetadata as Record<string, unknown>)?.["numTurns"]).toBeUndefined();
   });
 
   it("result without total_cost_usd leaves costUsd undefined", () => {

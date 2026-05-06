@@ -99,6 +99,11 @@ export class CodexProvider implements ProviderPlugin {
             recoverable: false,
             message: typeof error?.["message"] === "string" ? error["message"] : "turn failed",
           },
+          {
+            kind: "final",
+            sessionRef: this.lastThreadId ?? "",
+            exitMetadata: { failed: true },
+          },
         ];
       }
 

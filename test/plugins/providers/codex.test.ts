@@ -87,13 +87,33 @@ describe("CodexProvider", () => {
     expect(finalEvent?.sessionRef).toBe("my-thread-id");
   });
 
-  it("turn.failed emits non-recoverable error", () => {
+  it("turn.failed emits non-recoverable error then final", () => {
     const provider = new CodexProvider();
     const events = provider.parseFrame(
       encode({ type: "turn.failed", error: { message: "context window exceeded" } }),
     );
-    expect(events).toHaveLength(1);
+    expect(events).toHaveLength(2);
     expect(events[0]).toEqual({ kind: "error", recoverable: false, message: "context window exceeded" });
+    expect(events[1]).toMatchObject({ kind: "final", exitMetadata: { failed: true } });
+  });
+
+  it("turn.failed after thread.started produces final.sessionRef === thread_id", () => {
+    const provider = new CodexProvider();
+    provider.parseFrame(encode({ type: "thread.started", thread_id: "thread-fail-1" }));
+    const events = provider.parseFrame(
+      encode({ type: "turn.failed", error: { message: "out of context" } }),
+    );
+    const finalEvent = events.find((e) => e.kind === "final") as ProviderEvent & { kind: "final" };
+    expect(finalEvent?.sessionRef).toBe("thread-fail-1");
+  });
+
+  it("turn.failed without prior thread.started produces final.sessionRef === empty string", () => {
+    const provider = new CodexProvider();
+    const events = provider.parseFrame(
+      encode({ type: "turn.failed", error: { message: "no thread" } }),
+    );
+    const finalEvent = events.find((e) => e.kind === "final") as ProviderEvent & { kind: "final" };
+    expect(finalEvent?.sessionRef).toBe("");
   });
 
   it("item-level error emits recoverable error", () => {

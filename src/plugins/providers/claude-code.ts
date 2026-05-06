@@ -140,7 +140,7 @@ export class ClaudeCodeProvider implements ProviderPlugin {
           exitMetadata: {
             subtype,
             ...(typeof json["duration_ms"] === "number" ? { duration_ms: json["duration_ms"] } : {}),
-            ...(typeof json["turns"] === "number" ? { turns: json["turns"] } : {}),
+            ...(typeof json["num_turns"] === "number" ? { numTurns: json["num_turns"] } : {}),
           },
         });
 
