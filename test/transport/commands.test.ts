@@ -105,6 +105,21 @@ describe("POST /commands", () => {
     expect(body.code).toBe("invalid_kind");
   });
 
+  it("returns 400 (not 500) when valid kind is sent with malformed payload", async () => {
+    const { app, repo } = makeApp();
+    await seedWorkflow(repo);
+
+    const res = await app.request("/commands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "request-restack", workflowId: "wf-1" }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { code: string };
+    expect(body.code).toBe("invalid_request");
+  });
+
   it("returns 400 on malformed JSON body", async () => {
     const { app } = makeApp();
 

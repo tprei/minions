@@ -42,6 +42,23 @@ export function createServer(deps: ServerDeps): Hono {
     c.header("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID");
   });
 
+  app.onError((err, c) => {
+    if (err instanceof DomainError) {
+      const mapped = domainErrorToHttp(err);
+      return c.json(mapped.body, mapped.status as 400 | 404 | 409);
+    }
+    // Shape-malformed input that escaped the kind check reaches the domain code
+    // and throws (e.g., reading .idempotencyKey from undefined). Treat as 400.
+    return c.json(
+      {
+        code: "invalid_request",
+        message: err instanceof Error ? err.message : String(err),
+        details: {},
+      },
+      400,
+    );
+  });
+
   app.post("/workflows", async (c) => {
     let spec: WorkflowSpec;
     try {
@@ -50,17 +67,9 @@ export function createServer(deps: ServerDeps): Hono {
       return c.json({ code: "invalid_body", message: "request body is not valid JSON" }, 400);
     }
 
-    try {
-      const workflow = createWorkflow(spec);
-      await repo.save(workflow, []);
-      return c.json(workflow, 201);
-    } catch (err) {
-      if (err instanceof DomainError) {
-        const mapped = domainErrorToHttp(err);
-        return c.json(mapped.body, mapped.status as 400 | 404 | 409);
-      }
-      throw err;
-    }
+    const workflow = createWorkflow(spec);
+    await repo.save(workflow, []);
+    return c.json(workflow, 201);
   });
 
   app.get("/workflows/:id", async (c) => {
@@ -84,16 +93,8 @@ export function createServer(deps: ServerDeps): Hono {
       return c.json({ code: "invalid_kind", message: `unknown command kind: ${String(kind)}` }, 400);
     }
 
-    try {
-      const result = await applyCommand(repo, body as unknown as Command);
-      return c.json(result);
-    } catch (err) {
-      if (err instanceof DomainError) {
-        const mapped = domainErrorToHttp(err);
-        return c.json(mapped.body, mapped.status as 400 | 404 | 409);
-      }
-      throw err;
-    }
+    const result = await applyCommand(repo, body as unknown as Command);
+    return c.json(result);
   });
 
   app.get("/workflows/:id/events", async (c) => {
