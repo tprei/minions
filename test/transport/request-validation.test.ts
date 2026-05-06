@@ -98,20 +98,20 @@ describe("request shape validation", () => {
     expect(body.details.expected).toBe("string");
   });
 
-  it("complete-restack missing input.artifactsByTaskId returns 400 invalid_request", async () => {
+  it("complete-restack missing input.operationId returns 400 invalid_request", async () => {
     const { app } = makeApp();
 
     const res = await postCommand(app, {
       kind: "complete-restack",
       workflowId: "wf-1",
-      input: { operationId: "op-1", now },
+      input: { now },
     });
 
     expect(res.status).toBe(400);
     const body = await res.json() as { code: string; details: { field: string; expected: string } };
     expect(body.code).toBe("invalid_request");
-    expect(body.details.field).toBe("input.artifactsByTaskId");
-    expect(body.details.expected).toBe("object");
+    expect(body.details.field).toBe("input.operationId");
+    expect(body.details.expected).toBe("string");
   });
 
   it("POST /workflows missing tasks returns 400 invalid_request with field tasks", async () => {

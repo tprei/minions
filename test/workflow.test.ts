@@ -29,6 +29,19 @@ describe("workflow creation", () => {
     expect(task?.mergeTarget).toBeUndefined();
   });
 
+  it("rejects unknown workflow kind", () => {
+    expect(() =>
+      createWorkflow(
+        {
+          id: "bad",
+          kind: "totally-made-up" as never,
+          tasks: [{ id: "t", title: "T", prompt: "P" }],
+        },
+        () => now,
+      ),
+    ).toThrow("unknown workflow kind");
+  });
+
   it("rejects cyclic DAGs", () => {
     expect(() =>
       createWorkflow(

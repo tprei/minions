@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { NoopRestackExecutor } from "../../src/application/restack-executor.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
 import { createRecoveryService } from "../../src/application/recovery-service.js";
@@ -115,6 +115,29 @@ describe("POST /commands", () => {
     expect(res.status).toBe(400);
     const body = await res.json() as { code: string };
     expect(body.code).toBe("invalid_kind");
+  });
+
+  it("unexpected internal error returns sanitized 500 internal_error (no leaked message)", async () => {
+    const { app, repo } = makeApp();
+    await seedWorkflow(repo);
+
+    vi.spyOn(repo, "save").mockRejectedValueOnce(new Error("disk caught fire — secret path /var/lib"));
+
+    const res = await app.request("/commands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "transition-task",
+        workflowId: "wf-1",
+        transition: { kind: "mark-ready", taskId: "wf-1:task", now },
+      }),
+    });
+
+    expect(res.status).toBe(500);
+    const body = await res.json() as { code: string; message: string };
+    expect(body.code).toBe("internal_error");
+    expect(body.message).toBe("internal server error");
+    expect(body.message).not.toContain("disk caught fire");
   });
 
   it("returns 400 (not 500) when valid kind is sent with malformed payload", async () => {

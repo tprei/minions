@@ -4,6 +4,7 @@ import { DomainError } from "../domain/errors.js";
 import type { WorkflowEvent } from "../domain/events.js";
 import type { Workflow } from "../domain/types.js";
 import { SubscriberHub } from "../persistence/subscriber-hub.js";
+import { hasNonTerminalOperation } from "./recovery.js";
 
 export interface IdempotencyRecord {
   key: string;
@@ -94,6 +95,8 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
   }
 
   async listRecoverable(): Promise<Workflow[]> {
-    return Array.from(this.workflows.values()).filter((w) => w.status !== "completed");
+    return Array.from(this.workflows.values()).filter(
+      (w) => w.status !== "completed" || hasNonTerminalOperation(w),
+    );
   }
 }

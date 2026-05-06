@@ -3,15 +3,18 @@ import type { NodeRun } from "./runs.js";
 // Top-level shape of a unit of work in the system. A workflow is one or more
 // task nodes wired into a DAG, with a policy and a status that rolls up from
 // the leaves.
-export type WorkflowKind =
-  | "single-task"
-  | "think-thread"
-  | "ship"
-  | "variant-race"
-  | "loop"
-  | "manual-dag"
-  | "ci-heal"
-  | "merge-review";
+export const WORKFLOW_KINDS = [
+  "single-task",
+  "think-thread",
+  "ship",
+  "variant-race",
+  "loop",
+  "manual-dag",
+  "ci-heal",
+  "merge-review",
+] as const;
+
+export type WorkflowKind = (typeof WORKFLOW_KINDS)[number];
 
 export type WorkflowStatus = "active" | "completed" | "failed" | "cancelled";
 

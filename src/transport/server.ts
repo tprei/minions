@@ -48,15 +48,11 @@ export function createServer(deps: ServerDeps): Hono {
       const mapped = domainErrorToHttp(err);
       return c.json(mapped.body, mapped.status as 400 | 404 | 409);
     }
-    // Shape-malformed input that escaped the kind check reaches the domain code
-    // and throws (e.g., reading .idempotencyKey from undefined). Treat as 400.
+    // Validators are the front line for client errors. Anything reaching here
+    // is an unexpected server failure — surface as 500 without leaking details.
     return c.json(
-      {
-        code: "invalid_request",
-        message: err instanceof Error ? err.message : String(err),
-        details: {},
-      },
-      400,
+      { code: "internal_error", message: "internal server error", details: {} },
+      500,
     );
   });
 

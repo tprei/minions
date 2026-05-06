@@ -32,6 +32,10 @@ function isObject(v: unknown): boolean {
   return v !== null && typeof v === "object" && !Array.isArray(v);
 }
 
+function isOptionalObject(v: unknown): boolean {
+  return v === undefined || isObject(v);
+}
+
 function isArray(v: unknown): boolean {
   return Array.isArray(v);
 }
@@ -80,7 +84,7 @@ const COMMAND_CHECKS: { [K in CommandKind]: FieldCheck[] } = {
     BASE_WORKFLOW_ID,
     { path: "input", check: isObject, expected: "object" },
     { path: "input.operationId", check: isString, expected: "string" },
-    { path: "input.artifactsByTaskId", check: isObject, expected: "object" },
+    { path: "input.artifactsByTaskId", check: isOptionalObject, expected: "object or undefined" },
     { path: "input.now", check: isString, expected: "string" },
   ],
   "mark-restack-conflict": [

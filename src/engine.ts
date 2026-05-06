@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import { runBootRecovery } from "./application/boot.js";
+import type { BootRecoveryReport } from "./application/boot.js";
 import { createRecoveryService } from "./application/recovery-service.js";
 import { NoopRestackExecutor } from "./application/restack-executor.js";
 import type { RestackExecutor } from "./application/restack-executor.js";
@@ -19,6 +20,7 @@ export interface EngineConfig {
 
 export interface Engine {
   server: Hono;
+  bootReport: BootRecoveryReport;
   close(): Promise<void>;
 }
 
@@ -32,12 +34,17 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   const repo = new SQLiteWorkflowRepository(config.dbPath);
   const recoveryService = createRecoveryService(repo, executor, runtime, now);
 
-  await runBootRecovery(repo, recoveryService, runtime, { now, staleReadyMs, staleGateMs });
+  const bootReport = await runBootRecovery(repo, recoveryService, runtime, {
+    now,
+    staleReadyMs,
+    staleGateMs,
+  });
 
   const server = createServer({ repo, recoveryService, executor });
 
   return {
     server,
+    bootReport,
     async close() {
       repo.close();
     },

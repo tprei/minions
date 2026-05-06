@@ -1,11 +1,19 @@
 import { DomainError } from "./errors.js";
-import type { TaskNode, TaskSpec, Workflow, WorkflowSpec } from "./types.js";
+import { WORKFLOW_KINDS } from "./types.js";
+import type { TaskNode, TaskSpec, Workflow, WorkflowKind, WorkflowSpec } from "./types.js";
 
 export type Clock = () => string;
 
 export const systemClock: Clock = () => new Date().toISOString();
 
 export function createWorkflow(spec: WorkflowSpec, clock: Clock = systemClock): Workflow {
+  if (!WORKFLOW_KINDS.includes(spec.kind as WorkflowKind)) {
+    throw new DomainError("invalid_workflow", "unknown workflow kind", {
+      workflowId: spec.id,
+      kind: spec.kind,
+    });
+  }
+
   if (spec.tasks.length === 0) {
     throw new DomainError("invalid_workflow", "workflow must contain at least one task", {
       workflowId: spec.id,

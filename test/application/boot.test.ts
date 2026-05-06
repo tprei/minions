@@ -22,7 +22,8 @@ describe("runBootRecovery", () => {
     const runtime = new StubRuntimeBackend();
     const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
 
-    await expect(runBootRecovery(repo, service, runtime, bootOptions)).resolves.toBeUndefined();
+    const report = await runBootRecovery(repo, service, runtime, bootOptions);
+    expect(report).toEqual({ workflowsScanned: 0, failures: [] });
   });
 
   it("recovers a stale-ready task back to pending on boot", async () => {
@@ -119,6 +120,70 @@ describe("runBootRecovery", () => {
 
     const afterSecond = (await repo.eventsSince("wf-1", 0)).length;
     expect(afterSecond).toBe(afterFirst);
+  });
+
+  it("isolates probe failures per workflow: one bad session does not block other workflows", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+
+    const { sessionId: goodSession } = await runtime.start({
+      taskId: "wf-good:task", workflowId: "wf-good", command: ["echo"],
+    });
+
+    // wf-bad has a session that probe will fail on
+    const wfBad = createSingleTaskWorkflow("wf-bad", { title: "B", prompt: "B" }, () => started);
+    const wfBadRunning = {
+      ...wfBad,
+      graph: {
+        "wf-bad:task": { ...wfBad.graph["wf-bad:task"]!, executionStatus: "running" as const, sessionId: "doomed-session" },
+      },
+    };
+    await repo.save(wfBadRunning, []);
+
+    // wf-good has a healthy session
+    const wfGood = createSingleTaskWorkflow("wf-good", { title: "G", prompt: "G" }, () => started);
+    const wfGoodRunning = {
+      ...wfGood,
+      graph: {
+        "wf-good:task": { ...wfGood.graph["wf-good:task"]!, executionStatus: "running" as const, sessionId: goodSession },
+      },
+    };
+    await repo.save(wfGoodRunning, []);
+
+    vi.spyOn(runtime, "probe").mockImplementation(async (sid) => {
+      if (sid === "doomed-session") throw new Error("probe blew up");
+      return "live";
+    });
+
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const report = await runBootRecovery(repo, service, runtime, bootOptions);
+
+    expect(report.failures).toHaveLength(1);
+    expect(report.failures[0]?.workflowId).toBe("wf-bad");
+    expect(report.failures[0]?.phase).toBe("probe");
+    expect(report.workflowsScanned).toBe(1);
+  });
+
+  it("isolates scan failures per workflow", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => started);
+    await repo.save(wf, []);
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-ready", taskId: "wf-1:task", now: started },
+    });
+
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    vi.spyOn(service, "scan").mockRejectedValueOnce(new Error("scan exploded"));
+
+    const report = await runBootRecovery(repo, service, runtime, bootOptions);
+
+    expect(report.failures).toHaveLength(1);
+    expect(report.failures[0]?.phase).toBe("scan");
+    expect(report.failures[0]?.error).toBe("scan exploded");
+    expect(report.workflowsScanned).toBe(0);
   });
 
   it("live runtime probe for a running task produces no recovery action", async () => {

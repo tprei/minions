@@ -120,4 +120,33 @@ describe("InMemoryWorkflowRepository", () => {
     const recoverable = await repo.listRecoverable();
     expect(recoverable).toHaveLength(0);
   });
+
+  it("listRecoverable INCLUDES completed workflows that hold a pending or running graph operation", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(wf, []);
+    const completedWithOp = {
+      ...wf,
+      version: 2,
+      status: "completed" as const,
+      operations: {
+        "op-1": {
+          id: "op-1",
+          workflowId: "wf-1",
+          kind: "restack" as const,
+          targetNodeId: "wf-1:task",
+          affectedNodeIds: ["wf-1:task"],
+          status: "pending" as const,
+          attempt: 0,
+          idempotencyKey: "k1",
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+    };
+    await repo.save(completedWithOp, []);
+
+    const recoverable = await repo.listRecoverable();
+    expect(recoverable.map((w) => w.id)).toEqual(["wf-1"]);
+  });
 });

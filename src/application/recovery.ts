@@ -110,6 +110,19 @@ const OPERATION_RULES: GraphOperationRecoveryRule[] = [
   },
 ];
 
+// Operations whose recovery loop should re-attempt them after a crash.
+const NON_TERMINAL_OPERATION_STATUSES: ReadonlySet<GraphOperation["status"]> = new Set([
+  "pending",
+  "running",
+]);
+
+export function hasNonTerminalOperation(workflow: Workflow): boolean {
+  for (const operation of Object.values(workflow.operations)) {
+    if (NON_TERMINAL_OPERATION_STATUSES.has(operation.status)) return true;
+  }
+  return false;
+}
+
 export function planRecovery(workflow: Workflow, options: RecoveryOptions): RecoveryAction[] {
   const actions: RecoveryAction[] = [];
 

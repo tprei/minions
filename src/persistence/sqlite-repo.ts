@@ -4,34 +4,21 @@ import { DomainError } from "../domain/errors.js";
 import type { WorkflowEvent } from "../domain/events.js";
 import type { Workflow } from "../domain/types.js";
 import type { IdempotencyRecord, WorkflowRepository } from "../application/repository.js";
+import { hasNonTerminalOperation } from "../application/recovery.js";
+import {
+  SCHEMA_DDL,
+  SQL_EVENTS_SINCE,
+  SQL_GET_VERSION,
+  SQL_GET_WORKFLOW,
+  SQL_INSERT_EVENT,
+  SQL_INSERT_IDEMPOTENCY,
+  SQL_LIST_COMPLETED,
+  SQL_LIST_NON_COMPLETED,
+  SQL_LOOKUP_IDEMPOTENCY,
+  SQL_MAX_CURSOR,
+  SQL_UPSERT_WORKFLOW,
+} from "./schema.js";
 import { SubscriberHub } from "./subscriber-hub.js";
-
-const DDL = `
-CREATE TABLE IF NOT EXISTS workflows (
-  id TEXT PRIMARY KEY,
-  status TEXT NOT NULL,
-  version INTEGER NOT NULL,
-  blob TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS events (
-  workflow_id TEXT NOT NULL,
-  cursor INTEGER NOT NULL,
-  kind TEXT NOT NULL,
-  occurred_at TEXT NOT NULL,
-  payload TEXT NOT NULL,
-  PRIMARY KEY (workflow_id, cursor)
-);
-
-CREATE TABLE IF NOT EXISTS idempotency (
-  workflow_id TEXT NOT NULL,
-  key TEXT NOT NULL,
-  result_ref TEXT NOT NULL,
-  PRIMARY KEY (workflow_id, key)
-);
-
-CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
-`;
 
 interface WorkflowRow {
   blob: string;
@@ -69,7 +56,8 @@ export class SQLiteWorkflowRepository implements WorkflowRepository {
   private readonly stmtInsertIdempotency: Statement<[string, string, string]>;
   private readonly stmtEventsSince: Statement<[string, number], EventRow>;
   private readonly stmtLookupIdempotency: Statement<[string, string], IdempotencyRow>;
-  private readonly stmtListRecoverable: Statement<[], WorkflowRow>;
+  private readonly stmtListNonCompleted: Statement<[], WorkflowRow>;
+  private readonly stmtListCompleted: Statement<[], WorkflowRow>;
   private readonly txSave: (
     workflow: Workflow,
     events: WorkflowEvent[],
@@ -78,37 +66,20 @@ export class SQLiteWorkflowRepository implements WorkflowRepository {
 
   constructor(dbPath: string) {
     this.db = new Database(dbPath);
-    this.db.exec(DDL);
+    this.db.exec(SCHEMA_DDL);
 
-    this.stmtGetWorkflow = this.db.prepare<[string], WorkflowRow>(
-      "SELECT blob FROM workflows WHERE id = ?",
-    );
-    this.stmtGetVersion = this.db.prepare<[string], VersionRow>(
-      "SELECT version FROM workflows WHERE id = ?",
-    );
-    this.stmtUpsertWorkflow = this.db.prepare<[string, string, number, string]>(
-      "INSERT INTO workflows (id, status, version, blob) VALUES (?, ?, ?, ?) " +
-      "ON CONFLICT(id) DO UPDATE SET status = excluded.status, version = excluded.version, blob = excluded.blob",
-    );
-    this.stmtMaxCursor = this.db.prepare<[string], CursorRow>(
-      "SELECT COALESCE(MAX(cursor), 0) AS max_cursor FROM events WHERE workflow_id = ?",
-    );
-    this.stmtInsertEvent = this.db.prepare<[string, number, string, string, string]>(
-      "INSERT INTO events (workflow_id, cursor, kind, occurred_at, payload) VALUES (?, ?, ?, ?, ?)",
-    );
-    this.stmtInsertIdempotency = this.db.prepare<[string, string, string]>(
-      "INSERT INTO idempotency (workflow_id, key, result_ref) VALUES (?, ?, ?)",
-    );
-    this.stmtEventsSince = this.db.prepare<[string, number], EventRow>(
-      "SELECT workflow_id, cursor, kind, occurred_at, payload FROM events " +
-      "WHERE workflow_id = ? AND cursor > ? ORDER BY cursor",
-    );
-    this.stmtLookupIdempotency = this.db.prepare<[string, string], IdempotencyRow>(
-      "SELECT result_ref FROM idempotency WHERE workflow_id = ? AND key = ?",
-    );
-    this.stmtListRecoverable = this.db.prepare<[], WorkflowRow>(
-      "SELECT blob FROM workflows WHERE status != 'completed'",
-    );
+    this.stmtGetWorkflow = this.db.prepare<[string], WorkflowRow>(SQL_GET_WORKFLOW);
+    this.stmtGetVersion = this.db.prepare<[string], VersionRow>(SQL_GET_VERSION);
+    this.stmtUpsertWorkflow = this.db.prepare<[string, string, number, string]>(SQL_UPSERT_WORKFLOW);
+    this.stmtMaxCursor = this.db.prepare<[string], CursorRow>(SQL_MAX_CURSOR);
+    this.stmtInsertEvent =
+      this.db.prepare<[string, number, string, string, string]>(SQL_INSERT_EVENT);
+    this.stmtInsertIdempotency = this.db.prepare<[string, string, string]>(SQL_INSERT_IDEMPOTENCY);
+    this.stmtEventsSince = this.db.prepare<[string, number], EventRow>(SQL_EVENTS_SINCE);
+    this.stmtLookupIdempotency =
+      this.db.prepare<[string, string], IdempotencyRow>(SQL_LOOKUP_IDEMPOTENCY);
+    this.stmtListNonCompleted = this.db.prepare<[], WorkflowRow>(SQL_LIST_NON_COMPLETED);
+    this.stmtListCompleted = this.db.prepare<[], WorkflowRow>(SQL_LIST_COMPLETED);
 
     this.txSave = this.db.transaction(
       (workflow: Workflow, events: WorkflowEvent[], idempotency: IdempotencyRecord[]) => {
@@ -209,8 +180,14 @@ export class SQLiteWorkflowRepository implements WorkflowRepository {
   }
 
   async listRecoverable(): Promise<Workflow[]> {
-    const rows = this.stmtListRecoverable.all();
-    return rows.map((row) => JSON.parse(row.blob) as Workflow);
+    const nonCompleted = this.stmtListNonCompleted
+      .all()
+      .map((row) => JSON.parse(row.blob) as Workflow);
+    const completedWithOps = this.stmtListCompleted
+      .all()
+      .map((row) => JSON.parse(row.blob) as Workflow)
+      .filter(hasNonTerminalOperation);
+    return [...nonCompleted, ...completedWithOps];
   }
 
   subscriberCount(workflowId: string): number {
