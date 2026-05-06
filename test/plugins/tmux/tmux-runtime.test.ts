@@ -743,4 +743,20 @@ describe("TmuxRuntimeBackend (docker mode)", () => {
 
     await expect(backend.probe("any-session")).rejects.toThrow(daemonError);
   });
+
+  it("paused container error does NOT match isDockerDown — probe rethrows the TmuxError", async () => {
+    const backend = await makeDockerBackend();
+    const client = await getMockClientInner();
+    const { TmuxError: TE } = await import("../../../src/plugins/tmux/tmux-client.js");
+
+    const pausedError = new TE(
+      "tmux exited with code 1",
+      "",
+      "Error response from daemon: Container abc123 is paused, unpause the container before exec",
+      1,
+    );
+    client.sessionExists.mockRejectedValue(pausedError);
+
+    await expect(backend.probe("paused-session")).rejects.toThrow(pausedError);
+  });
 });

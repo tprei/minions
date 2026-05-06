@@ -27,7 +27,7 @@ export interface TmuxRuntimeConfig {
   workerSessionsDir?: string;
 }
 
-const DOCKER_DOWN_RE = /\b(?:is not running|is dead|is paused|No such container)\b/i;
+const DOCKER_DOWN_RE = /\b(?:is not running|is dead|No such container)\b/i;
 
 function isDockerDown(err: unknown): boolean {
   return err instanceof TmuxError && DOCKER_DOWN_RE.test(err.stderr);
