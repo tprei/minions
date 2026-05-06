@@ -186,6 +186,66 @@ describe("runBootRecovery", () => {
     expect(report.workflowsScanned).toBe(0);
   });
 
+  it("missing probe on boot: task ends in needs-review with interrupted run, sessionId cleared", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => started);
+    await repo.save(wf, []);
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-ready", taskId: "wf-1:task", now: started },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s-missing", now: started },
+    });
+
+    vi.spyOn(runtime, "probe").mockResolvedValue("missing");
+
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    await runBootRecovery(repo, service, runtime, bootOptions);
+
+    const saved = await repo.get("wf-1");
+    const task = saved?.graph["wf-1:task"];
+    expect(task?.executionStatus).toBe("needs-review");
+    expect(task?.sessionId).toBeUndefined();
+    const lastRun = task?.runs[task.runs.length - 1];
+    expect(lastRun?.terminalReason).toBe("interrupted");
+    expect(lastRun?.runtimeSessionId).toBe("s-missing");
+  });
+
+  it("dead probe on boot: task returns to pending (no artifacts) with recovered run", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => started);
+    await repo.save(wf, []);
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-ready", taskId: "wf-1:task", now: started },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s-dead", now: started },
+    });
+
+    vi.spyOn(runtime, "probe").mockResolvedValue("dead");
+
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    await runBootRecovery(repo, service, runtime, bootOptions);
+
+    const saved = await repo.get("wf-1");
+    const task = saved?.graph["wf-1:task"];
+    expect(task?.executionStatus).toBe("pending");
+    const lastRun = task?.runs[task.runs.length - 1];
+    expect(lastRun?.terminalReason).toBe("recovered");
+  });
+
   it("live runtime probe for a running task produces no recovery action", async () => {
     const repo = new InMemoryWorkflowRepository();
     const runtime = new StubRuntimeBackend();

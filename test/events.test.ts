@@ -52,7 +52,7 @@ describe("event derivation", () => {
     expect(result.events.some((e) => e.kind === "task-transitioned")).toBe(true);
     const runStarted = result.events.find((e) => e.kind === "run-started");
     expect(runStarted).toBeDefined();
-    expect(runStarted?.payload.sessionId).toBe("s1");
+    expect(runStarted?.payload.runtimeSessionId).toBe("s1");
     expect(runStarted?.payload.attempt).toBe(1);
   });
 
@@ -99,6 +99,40 @@ describe("event derivation", () => {
     });
 
     expect(result.events.some((e) => e.kind === "graph-operation-changed")).toBe(true);
+  });
+
+  it("run-ended payload carries providerSessionRef when set on the run", async () => {
+    const { repo, seed } = makeRepo();
+    await seed();
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-ready", taskId: "wf-1:task", now },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s1", now },
+    });
+
+    const wf = await repo.get("wf-1");
+    const task = wf!.graph["wf-1:task"]!;
+    const runWithRef = { ...task.runs[0]!, providerSessionRef: "psr-xyz" };
+    const wfWithRef = {
+      ...wf!,
+      version: wf!.version + 1,
+      graph: { ...wf!.graph, "wf-1:task": { ...task, runs: [runWithRef] } },
+    };
+    await repo.save(wfWithRef, []);
+
+    const result = await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "complete-runtime", taskId: "wf-1:task", now },
+    });
+
+    const runEnded = result.events.find((e) => e.kind === "run-ended");
+    expect(runEnded?.payload.providerSessionRef).toBe("psr-xyz");
   });
 
   it("completing the only task produces workflow-status-changed", async () => {

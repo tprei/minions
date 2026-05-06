@@ -35,6 +35,7 @@ type ActionRule<A extends RecoveryAction> = (workflow: Workflow, action: A) => D
 
 const TASK_TRANSITION_BY_ACTION: { [K in TaskRecoveryAction["kind"]]?: TransitionKind } = {
   "recover-task": "recover-task",
+  "interrupt-task": "mark-interrupted",
   "stop-runtime": "cancel-task",
 };
 
@@ -134,6 +135,7 @@ const resumeOperationRule: ActionRule<GraphOperationRecoveryAction> = (workflow,
 
 const ACTION_RULES: { [K in RecoveryAction["kind"]]: ActionRule<Extract<RecoveryAction, { kind: K }>> } = {
   "recover-task": taskActionRule,
+  "interrupt-task": taskActionRule,
   "stop-runtime": taskActionRule,
   "probe-gate": () => null,
   "operator-review": () => null,

@@ -19,7 +19,7 @@ describe("NodeRun lifecycle", () => {
     const task = workflow.graph["wf-1:task"]!;
     expect(task.runs).toHaveLength(1);
     expect(task.runs[0]?.attempt).toBe(1);
-    expect(task.runs[0]?.sessionId).toBe("s1");
+    expect(task.runs[0]?.runtimeSessionId).toBe("s1");
     expect(task.runs[0]?.endedAt).toBeUndefined();
     expect(task.runs[0]?.id).toBe("run-wf-1:task-1");
   });
@@ -109,7 +109,7 @@ describe("NodeRun lifecycle", () => {
     const task = workflow.graph["wf-1:task"]!;
     expect(task.runs).toHaveLength(2);
     expect(task.runs[1]?.attempt).toBe(2);
-    expect(task.runs[1]?.sessionId).toBe("s2");
+    expect(task.runs[1]?.runtimeSessionId).toBe("s2");
     expect(task.runs[1]?.id).toBe("run-wf-1:task-2");
     expect(task.runs[1]?.endedAt).toBeUndefined();
   });
@@ -119,5 +119,36 @@ describe("NodeRun lifecycle", () => {
     workflow = transitionTask(workflow, { kind: "cancel-task", taskId: "wf-1:task", now });
 
     expect(workflow.graph["wf-1:task"]!.runs).toHaveLength(0);
+  });
+
+  it("closing a run preserves providerSessionRef and outputOffset", () => {
+    let workflow = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "wf-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "wf-1:task",
+      sessionId: "s1",
+      now,
+    });
+
+    const task = workflow.graph["wf-1:task"]!;
+    const runWithExtra = {
+      ...task.runs[0]!,
+      providerSessionRef: "psr-abc",
+      outputOffset: 42,
+    };
+    const wfWithExtra = {
+      ...workflow,
+      graph: {
+        ...workflow.graph,
+        "wf-1:task": { ...task, runs: [runWithExtra] },
+      },
+    };
+
+    const closed = transitionTask(wfWithExtra, { kind: "complete-runtime", taskId: "wf-1:task", now: later });
+    const closedRun = closed.graph["wf-1:task"]!.runs[0]!;
+    expect(closedRun.providerSessionRef).toBe("psr-abc");
+    expect(closedRun.outputOffset).toBe(42);
+    expect(closedRun.terminalReason).toBe("completed");
   });
 });

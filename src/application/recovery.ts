@@ -4,6 +4,7 @@ export type RuntimeProbeState = "live" | "dead" | "missing";
 
 export type RecoveryActionKind =
   | "recover-task"
+  | "interrupt-task"
   | "probe-gate"
   | "stop-runtime"
   | "operator-review"
@@ -72,18 +73,25 @@ const TASK_RULES: TaskRecoveryRule[] = [
   },
   {
     name: "running-with-dead-probe",
-    matches: (task, options) => {
-      if (task.executionStatus !== "running" || !task.sessionId) return false;
-      const probe = options.runtimeProbes?.[task.sessionId];
-      return probe === "dead" || probe === "missing";
-    },
-    emit: (task, options) => {
-      const probe = options.runtimeProbes?.[task.sessionId ?? ""];
-      return withSession(
-        { kind: "recover-task", taskId: task.id, reason: `runtime probe is ${probe}` },
-        task.sessionId,
-      );
-    },
+    matches: (task, options) =>
+      task.executionStatus === "running" &&
+      !!task.sessionId &&
+      options.runtimeProbes?.[task.sessionId] === "dead",
+    emit: (task) => withSession(
+      { kind: "recover-task", taskId: task.id, reason: "runtime probe is dead" },
+      task.sessionId,
+    ),
+  },
+  {
+    name: "running-with-missing-probe",
+    matches: (task, options) =>
+      task.executionStatus === "running" &&
+      !!task.sessionId &&
+      options.runtimeProbes?.[task.sessionId] === "missing",
+    emit: (task) => withSession(
+      { kind: "interrupt-task", taskId: task.id, reason: "runtime probe is missing" },
+      task.sessionId,
+    ),
   },
   {
     name: "stale-gate",

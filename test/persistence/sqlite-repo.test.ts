@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SQLiteWorkflowRepository } from "../../src/persistence/sqlite-repo.js";
 import type { WorkflowEvent } from "../../src/domain/events.js";
+import type { NodeRun } from "../../src/domain/runs.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
 
 const now = "2026-05-04T11:19:00.000Z";
@@ -130,6 +131,42 @@ describe("SQLiteWorkflowRepository", () => {
 
     const recoverable = await repo.listRecoverable();
     expect(recoverable).toHaveLength(0);
+  });
+
+  it("NodeRun round-trip: runtimeSessionId, providerSessionRef, outputOffset, terminalReason persist", async () => {
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    const closedRun: NodeRun = {
+      id: "run-wf-1:task-1",
+      taskId: "wf-1:task",
+      attempt: 1,
+      providerType: "claude",
+      runtimeType: "tmux",
+      runtimeSessionId: "rsid-abc",
+      providerSessionRef: "psr-xyz",
+      outputOffset: 1024,
+      startedAt: now,
+      endedAt: now,
+      terminalReason: "interrupted",
+    };
+    const task = wf.graph["wf-1:task"]!;
+    const wfWithRun = {
+      ...wf,
+      graph: { "wf-1:task": { ...task, runs: [closedRun] } },
+    };
+    await repo.save(wfWithRun, []);
+    repo.close();
+
+    const reopened = new SQLiteWorkflowRepository(dbPath);
+    try {
+      const loaded = await reopened.get("wf-1");
+      const loadedRun = loaded?.graph["wf-1:task"]?.runs[0];
+      expect(loadedRun?.runtimeSessionId).toBe("rsid-abc");
+      expect(loadedRun?.providerSessionRef).toBe("psr-xyz");
+      expect(loadedRun?.outputOffset).toBe(1024);
+      expect(loadedRun?.terminalReason).toBe("interrupted");
+    } finally {
+      reopened.close();
+    }
   });
 
   it("durability: data persists after close and reopen", async () => {

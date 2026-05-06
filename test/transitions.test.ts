@@ -175,6 +175,34 @@ describe("quality gate", () => {
   });
 });
 
+describe("mark-interrupted transition", () => {
+  it("moves a running task to needs-review, clears session, closes run with interrupted", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+    workflow = transitionTask(workflow, { kind: "mark-interrupted", taskId: "task-1:task", now });
+
+    const task = workflow.graph["task-1:task"]!;
+    expect(task.executionStatus).toBe("needs-review");
+    expect(task.sessionId).toBeUndefined();
+    expect(task.runs[0]?.terminalReason).toBe("interrupted");
+    expect(task.runs[0]?.endedAt).toBe(now);
+  });
+
+  it("rejects mark-interrupted from a non-running status", () => {
+    const workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+
+    expect(() =>
+      transitionTask(workflow, { kind: "mark-interrupted", taskId: "task-1:task", now }),
+    ).toThrow(DomainError);
+  });
+});
+
 describe("workflow status derivation", () => {
   it("returns failed when some tasks failed and others were cancelled", () => {
     const workflow = createWorkflow(
@@ -196,6 +224,20 @@ describe("workflow status derivation", () => {
     next = transitionTask(next, { kind: "cancel-task", taskId: "b", now });
 
     expect(next.status).toBe("failed");
+  });
+
+  it("stays active when the only task is needs-review (interrupted)", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+    workflow = transitionTask(workflow, { kind: "mark-interrupted", taskId: "task-1:task", now });
+
+    expect(workflow.status).toBe("active");
   });
 
   it("returns cancelled only when every task is cancelled", () => {

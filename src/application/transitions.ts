@@ -2,7 +2,7 @@ import { DomainError } from "../domain/errors.js";
 import { appendRun, closeLatestRun } from "../domain/runs.js";
 import type { NodeRun, NodeRunTerminalReason } from "../domain/runs.js";
 import type { Artifact, TaskExecutionStatus, TaskNode, Workflow } from "../domain/types.js";
-import { TASK_TERMINAL_EXECUTION_STATUSES } from "../domain/types.js";
+import { TASK_WORKFLOW_COMPLETING_STATUSES } from "../domain/types.js";
 
 export type TransitionKind =
   | "mark-ready"
@@ -17,6 +17,7 @@ export type TransitionKind =
   | "merge-task"
   | "cancel-task"
   | "recover-task"
+  | "mark-interrupted"
   | "fail-task";
 
 export interface TransitionCommand {
@@ -69,7 +70,7 @@ const TRANSITIONS: Record<TransitionKind, TransitionRule> = {
         attempt,
         providerType: command.providerType ?? "unknown",
         runtimeType: command.runtimeType ?? "unknown",
-        sessionId: command.sessionId,
+        runtimeSessionId: command.sessionId,
         startedAt: command.now,
       };
       return {
@@ -135,6 +136,14 @@ const TRANSITIONS: Record<TransitionKind, TransitionRule> = {
       patch: { executionStatus: task.artifacts.length > 0 ? "needs-review" : "pending" },
       clearSession: true,
       runEffect: { kind: "close", reason: "recovered" },
+    }),
+  },
+  "mark-interrupted": {
+    from: ["running"],
+    apply: () => ({
+      patch: { executionStatus: "needs-review" },
+      clearSession: true,
+      runEffect: { kind: "close", reason: "interrupted" },
     }),
   },
   "fail-task": {
@@ -215,7 +224,7 @@ function updateTask(task: TaskNode, command: TransitionCommand, effect: Transiti
 function deriveWorkflowStatus(graph: Record<string, TaskNode>): Workflow["status"] {
   const tasks = Object.values(graph);
   if (tasks.every((task) => task.executionStatus === "cancelled")) return "cancelled";
-  if (tasks.every((task) => TASK_TERMINAL_EXECUTION_STATUSES.has(task.executionStatus))) {
+  if (tasks.every((task) => TASK_WORKFLOW_COMPLETING_STATUSES.has(task.executionStatus))) {
     if (tasks.some((task) => task.executionStatus === "failed")) {
       return "failed";
     }

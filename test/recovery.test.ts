@@ -24,7 +24,34 @@ describe("recovery planning", () => {
     ]);
   });
 
-  it("recovers running tasks when the runtime probe is missing", () => {
+  it("emits recover-task for a running task whose probe is dead", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => started);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now: started });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now: started,
+    });
+
+    const actions = planRecovery(workflow, {
+      nowMs: later,
+      staleReadyMs: 60_000,
+      staleGateMs: 300_000,
+      runtimeProbes: { "session-1": "dead" },
+    });
+
+    expect(actions).toEqual([
+      {
+        kind: "recover-task",
+        taskId: "task-1:task",
+        sessionId: "session-1",
+        reason: "runtime probe is dead",
+      },
+    ]);
+  });
+
+  it("emits interrupt-task for a running task whose probe is missing", () => {
     let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => started);
     workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now: started });
     workflow = transitionTask(workflow, {
@@ -43,7 +70,7 @@ describe("recovery planning", () => {
 
     expect(actions).toEqual([
       {
-        kind: "recover-task",
+        kind: "interrupt-task",
         taskId: "task-1:task",
         sessionId: "session-1",
         reason: "runtime probe is missing",

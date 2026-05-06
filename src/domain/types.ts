@@ -173,6 +173,14 @@ export const TASK_TERMINAL_EXECUTION_STATUSES: ReadonlySet<TaskExecutionStatus> 
   "needs-review",
 ]);
 
+export const TASK_WORKFLOW_COMPLETING_STATUSES: ReadonlySet<TaskExecutionStatus> = new Set([
+  "completed",
+  "pr-open",
+  "merged",
+  "failed",
+  "cancelled",
+]);
+
 export interface TaskSpec {
   id: string;
   title: string;

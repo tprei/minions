@@ -39,7 +39,8 @@ export interface RunStartedPayload {
   runId: string;
   taskId: string;
   attempt: number;
-  sessionId: string;
+  runtimeSessionId: string;
+  providerSessionRef?: string;
   providerType: string;
   runtimeType: string;
 }
@@ -49,6 +50,7 @@ export interface RunEndedPayload {
   taskId: string;
   attempt: number;
   terminalReason: NodeRunTerminalReason;
+  providerSessionRef?: string;
 }
 
 export interface WorkflowStatusChangedPayload {
@@ -114,18 +116,18 @@ export function deriveEvents(
     if (nextRuns.length > prevRuns.length) {
       const newRun = nextRuns[nextRuns.length - 1];
       if (newRun) {
-        events.push({
-          ...base,
-          kind: "run-started",
-          payload: {
-            runId: newRun.id,
-            taskId: newRun.taskId,
-            attempt: newRun.attempt,
-            sessionId: newRun.sessionId,
-            providerType: newRun.providerType,
-            runtimeType: newRun.runtimeType,
-          },
-        });
+        const startedPayload: RunStartedPayload = {
+          runId: newRun.id,
+          taskId: newRun.taskId,
+          attempt: newRun.attempt,
+          runtimeSessionId: newRun.runtimeSessionId,
+          providerType: newRun.providerType,
+          runtimeType: newRun.runtimeType,
+        };
+        if (newRun.providerSessionRef !== undefined) {
+          startedPayload.providerSessionRef = newRun.providerSessionRef;
+        }
+        events.push({ ...base, kind: "run-started", payload: startedPayload });
       }
     } else if (nextRuns.length === prevRuns.length && nextRuns.length > 0) {
       const prevLast = prevRuns[prevRuns.length - 1];
@@ -137,16 +139,16 @@ export function deriveEvents(
         nextLast.endedAt !== undefined &&
         nextLast.terminalReason !== undefined
       ) {
-        events.push({
-          ...base,
-          kind: "run-ended",
-          payload: {
-            runId: nextLast.id,
-            taskId: nextLast.taskId,
-            attempt: nextLast.attempt,
-            terminalReason: nextLast.terminalReason,
-          },
-        });
+        const endedPayload: RunEndedPayload = {
+          runId: nextLast.id,
+          taskId: nextLast.taskId,
+          attempt: nextLast.attempt,
+          terminalReason: nextLast.terminalReason,
+        };
+        if (nextLast.providerSessionRef !== undefined) {
+          endedPayload.providerSessionRef = nextLast.providerSessionRef;
+        }
+        events.push({ ...base, kind: "run-ended", payload: endedPayload });
       }
     }
   }

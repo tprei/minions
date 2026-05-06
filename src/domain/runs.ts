@@ -1,4 +1,10 @@
-export type NodeRunTerminalReason = "completed" | "failed" | "cancelled" | "recovered" | "timeout";
+export type NodeRunTerminalReason =
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "recovered"
+  | "timeout"
+  | "interrupted";
 
 export interface NodeRun {
   id: string;
@@ -6,7 +12,9 @@ export interface NodeRun {
   attempt: number;
   providerType: string;
   runtimeType: string;
-  sessionId: string;
+  runtimeSessionId: string;
+  providerSessionRef?: string;
+  outputOffset?: number;
   startedAt: string;
   endedAt?: string;
   terminalReason?: NodeRunTerminalReason;

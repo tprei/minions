@@ -3,6 +3,7 @@ import { applyCommand } from "../src/application/commands.js";
 import { createRecoveryService } from "../src/application/recovery-service.js";
 import { NoopRestackExecutor } from "../src/application/restack-executor.js";
 import { InMemoryWorkflowRepository } from "../src/application/repository.js";
+import type { RuntimeProbeState } from "../src/application/recovery.js";
 import { StubRuntimeBackend } from "../src/plugins/stub-runtime.js";
 import { createSingleTaskWorkflow } from "../src/domain/workflow.js";
 
@@ -93,6 +94,63 @@ describe("RecoveryService.scan", () => {
     const key = `recovery:wf-1:wf-1:task:recover-task:0`;
     const ref = await repo.lookupIdempotency("wf-1", key);
     expect(ref).toBe("recovery:recover-task:wf-1:task");
+  });
+
+  it("scan with missing probe ends task in needs-review with interrupted run", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => started);
+    await repo.save(wf, []);
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-ready", taskId: "wf-1:task", now: started },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s-missing", now: started },
+    });
+
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const results = await service.scan("wf-1", {
+      ...defaultOptions,
+      runtimeProbes: { "s-missing": "missing" as RuntimeProbeState },
+    });
+
+    expect(results).toHaveLength(1);
+    const saved = await repo.get("wf-1");
+    const task = saved?.graph["wf-1:task"];
+    expect(task?.executionStatus).toBe("needs-review");
+    expect(task?.sessionId).toBeUndefined();
+    const lastRun = task?.runs[task.runs.length - 1];
+    expect(lastRun?.terminalReason).toBe("interrupted");
+  });
+
+  it("second scan with missing probe produces no new results (idempotency)", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => started);
+    await repo.save(wf, []);
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-ready", taskId: "wf-1:task", now: started },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s-missing", now: started },
+    });
+
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const options = { ...defaultOptions, runtimeProbes: { "s-missing": "missing" as RuntimeProbeState } };
+    await service.scan("wf-1", options);
+
+    const beforeCursor = (await repo.eventsSince("wf-1", 0)).length;
+    const secondResults = await service.scan("wf-1", options);
+    const afterCursor = (await repo.eventsSince("wf-1", 0)).length;
+
+    expect(secondResults).toHaveLength(0);
+    expect(afterCursor).toBe(beforeCursor);
   });
 
   it("skips dispatch when the idempotency key is pre-recorded", async () => {
