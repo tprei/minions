@@ -15,14 +15,12 @@ export function makeThreeNodeWorkflow(): Workflow {
           title: "Backend",
           prompt: "Build backend",
           claims: [{ scope: "src/backend/**", mode: "write" }],
-          stackPosition: 1,
         },
         {
           id: "frontend",
           title: "Frontend",
           prompt: "Build frontend",
           claims: [{ scope: "src/frontend/**", mode: "write" }],
-          stackPosition: 2,
         },
         {
           id: "tests",
@@ -30,7 +28,6 @@ export function makeThreeNodeWorkflow(): Workflow {
           prompt: "Test integration",
           dependsOn: ["backend", "frontend"],
           claims: [{ scope: "test/**", mode: "write" }],
-          stackPosition: 3,
         },
       ],
       policy: { maxConcurrent: 2 },

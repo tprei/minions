@@ -1,6 +1,6 @@
 import { findClaimConflicts } from "../domain/claims.js";
 import type { Artifact, TaskNode, Workflow } from "../domain/types.js";
-import { TASK_ACTIVE_EXECUTION_STATUSES, TASK_RUNTIME_ACTIVE_STATUSES, TASK_SUCCESS_EXECUTION_STATUSES } from "../domain/types.js";
+import { TASK_AGENT_OCCUPYING_STATUSES, TASK_CLAIM_HOLDING_STATUSES, TASK_SUCCESS_EXECUTION_STATUSES } from "../domain/types.js";
 
 export interface DispatchCandidate {
   task: TaskNode;
@@ -10,14 +10,14 @@ export interface DispatchCandidate {
 export function planDispatch(workflow: Workflow): DispatchCandidate[] {
   if (workflow.status !== "active") return [];
 
-  const runtimeActive = Object.values(workflow.graph).filter((task) =>
-    TASK_RUNTIME_ACTIVE_STATUSES.has(task.executionStatus),
+  const agentOccupying = Object.values(workflow.graph).filter((task) =>
+    TASK_AGENT_OCCUPYING_STATUSES.has(task.executionStatus),
   );
-  const capacity = Math.max(0, workflow.policy.maxConcurrent - runtimeActive.length);
+  const capacity = Math.max(0, workflow.policy.maxConcurrent - agentOccupying.length);
   if (capacity === 0) return [];
 
   const claimHolders = Object.values(workflow.graph).filter((task) =>
-    TASK_ACTIVE_EXECUTION_STATUSES.has(task.executionStatus),
+    TASK_CLAIM_HOLDING_STATUSES.has(task.executionStatus),
   );
 
   const candidates = Object.values(workflow.graph)
@@ -60,6 +60,5 @@ function claimsAvailable(task: TaskNode, claimHolders: readonly TaskNode[]): boo
 
 function compareDispatchPriority(left: TaskNode, right: TaskNode): number {
   if (right.priority !== left.priority) return right.priority - left.priority;
-  if (left.stackPosition !== right.stackPosition) return left.stackPosition - right.stackPosition;
   return left.id.localeCompare(right.id);
 }

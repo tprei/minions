@@ -108,7 +108,6 @@ function createTaskNode(workflowId: string, spec: TaskSpec, now: string): TaskNo
     },
     artifacts: [],
     readiness: "unknown",
-    stackPosition: spec.stackPosition ?? 0,
     version: 1,
     createdAt: now,
     updatedAt: now,

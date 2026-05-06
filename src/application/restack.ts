@@ -247,7 +247,7 @@ function topologicalTasks(workflow: Workflow): TaskNode[] {
       .map((taskId) => workflow.graph[taskId])
       .filter((task): task is TaskNode => task !== undefined)
       .filter((task) => task.dependsOn.every((depId) => !remaining.has(depId)))
-      .sort((left, right) => left.stackPosition - right.stackPosition || left.id.localeCompare(right.id));
+      .sort((left, right) => left.id.localeCompare(right.id));
 
     if (ready.length === 0) break;
 
