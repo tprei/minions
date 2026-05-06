@@ -124,7 +124,7 @@ const TRANSITIONS: Record<TransitionKind, TransitionRule> = {
     apply: () => ({ patch: { executionStatus: "merged" } }),
   },
   "cancel-task": {
-    from: ["pending", "ready", "running", "finalizing", "quality-pending", "ci-pending"],
+    from: ["pending", "ready", "running", "finalizing", "quality-pending", "ci-pending", "needs-review"],
     apply: () => ({
       patch: { executionStatus: "cancelled" },
       runEffect: { kind: "close", reason: "cancelled" },

@@ -13,7 +13,7 @@ import type { IdempotencyRecord, WorkflowRepository } from "./repository.js";
 import type { RestackExecutor } from "./restack-executor.js";
 import { planRestack } from "./restack.js";
 import type { RuntimeBackend } from "../plugins/runtime-backend.js";
-import type { TransitionKind } from "./transitions.js";
+import type { TransitionCommand, TransitionKind } from "./transitions.js";
 
 export interface RecoveryService {
   scan(workflowId: string, options: RecoveryOptions): Promise<CommandResult[]>;
@@ -60,10 +60,13 @@ const taskActionRule: ActionRule<TaskRecoveryAction> = (workflow, action) => {
         resultRef: `recovery:${action.kind}:${action.taskId}`,
       };
 
+      const transition: TransitionCommand = { kind: transitionKind, taskId: action.taskId, now: deps.now() };
+      if (action.sessionId) transition.expectedSessionId = action.sessionId;
+
       const command: Command = {
         kind: "transition-task",
         workflowId: workflow.id,
-        transition: { kind: transitionKind, taskId: action.taskId, now: deps.now() },
+        transition,
       };
 
       return applyCommand(deps.repo, command, { recoveryIdempotency: recoveryRecord });

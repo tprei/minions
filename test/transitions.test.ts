@@ -203,6 +203,26 @@ describe("mark-interrupted transition", () => {
   });
 });
 
+describe("cancel-task from needs-review", () => {
+  it("cancels an interrupted task in needs-review", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+    workflow = transitionTask(workflow, { kind: "mark-interrupted", taskId: "task-1:task", now });
+    expect(workflow.graph["task-1:task"]?.executionStatus).toBe("needs-review");
+
+    workflow = transitionTask(workflow, { kind: "cancel-task", taskId: "task-1:task", now });
+
+    expect(workflow.graph["task-1:task"]?.executionStatus).toBe("cancelled");
+    expect(workflow.status).toBe("cancelled");
+  });
+});
+
 describe("workflow status derivation", () => {
   it("returns failed when some tasks failed and others were cancelled", () => {
     const workflow = createWorkflow(

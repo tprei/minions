@@ -3,6 +3,7 @@ import { applyCommand } from "../src/application/commands.js";
 import { createRecoveryService } from "../src/application/recovery-service.js";
 import { NoopRestackExecutor } from "../src/application/restack-executor.js";
 import { InMemoryWorkflowRepository } from "../src/application/repository.js";
+import type { WorkflowRepository } from "../src/application/repository.js";
 import type { RuntimeProbeState } from "../src/application/recovery.js";
 import { StubRuntimeBackend } from "../src/plugins/stub-runtime.js";
 import { createSingleTaskWorkflow } from "../src/domain/workflow.js";
@@ -166,5 +167,83 @@ describe("RecoveryService.scan", () => {
     expect(results).toHaveLength(0);
     const saved = await repo.get("wf-1");
     expect(saved?.graph["wf-1:task"]?.executionStatus).toBe("ready");
+  });
+
+  it("stale-session interrupt-task does not close a task whose session has changed", async () => {
+    // Simulate the race: scan reads a snapshot with sessionId "s-old" and plans an interrupt-task
+    // action. Between planning and applyCommand, the task's session is replaced with "s-new".
+    // The expectedSessionId guard on the transition layer must reject the stale command.
+    const inner = new InMemoryWorkflowRepository();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => started);
+    await inner.save(wf, []);
+    await applyCommand(inner, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-ready", taskId: "wf-1:task", now: started },
+    });
+    await applyCommand(inner, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s-old", now: started },
+    });
+
+    // After the snapshot is taken by scan, the task restarts with a new session.
+    // We model this by wrapping the repo: the first get() returns the old snapshot (s-old),
+    // but the underlying store already has s-new by the time applyCommand fetches it.
+    const snapshotWithOldSession = await inner.get("wf-1");
+
+    // Transition the live store to s-new (simulating a restart between planning and dispatch).
+    await applyCommand(inner, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "recover-task", taskId: "wf-1:task", now: started },
+    });
+    await applyCommand(inner, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-ready", taskId: "wf-1:task", now: started },
+    });
+    await applyCommand(inner, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s-new", now: started },
+    });
+
+    // Wrap the repo so scan sees the old snapshot (triggering interrupt-task with sessionId "s-old"),
+    // while applyCommand reads the live state (sessionId "s-new").
+    let firstGet = true;
+    const staleScanRepo: WorkflowRepository = {
+      get: async (id) => {
+        if (firstGet) {
+          firstGet = false;
+          return snapshotWithOldSession;
+        }
+        return inner.get(id);
+      },
+      save: (w, e, i) => inner.save(w, e, i),
+      eventsSince: (id, cursor) => inner.eventsSince(id, cursor),
+      subscribe: (id, cursor) => inner.subscribe(id, cursor),
+      lookupIdempotency: (id, key) => inner.lookupIdempotency(id, key),
+      listRecoverable: () => inner.listRecoverable(),
+    };
+
+    const service = createRecoveryService(
+      staleScanRepo,
+      new NoopRestackExecutor(),
+      new StubRuntimeBackend(),
+      () => started,
+    );
+
+    await expect(
+      service.scan("wf-1", {
+        ...defaultOptions,
+        runtimeProbes: { "s-old": "missing" as RuntimeProbeState },
+      }),
+    ).rejects.toMatchObject({ code: "invalid_transition" });
+
+    // The task must remain running with s-new — the stale interrupt did not close it.
+    const saved = await inner.get("wf-1");
+    expect(saved?.graph["wf-1:task"]?.executionStatus).toBe("running");
+    expect(saved?.graph["wf-1:task"]?.sessionId).toBe("s-new");
   });
 });

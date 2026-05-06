@@ -95,8 +95,11 @@ Use this procedure to verify that `probe → "missing"` fires correctly after a 
 2. Via the engine, start a session running `sleep 60`. Confirm `probe → "live"`.
 3. Restart the container: `docker restart minions-worker`. Wait ~2 seconds.
 4. Call `probe(sessionId)`. It must return `"missing"` — this is the load-bearing check.
-5. Build a `RuntimeProbeMap` of `{ [sessionId]: "missing" }` and feed it to `planRecovery` (or `applyRecoveryRules`). Assert that exactly one `recover-task` action is emitted with `reason` containing `"missing"`.
-6. `docker start minions-worker` to restore the container for normal operation.
+5. Build a `RuntimeProbeMap` of `{ [sessionId]: "missing" }` and feed it to `planRecovery`. Assert that exactly one `interrupt-task` action is emitted with `reason` containing `"missing"`.
+6. Apply recovery via `RecoveryService.scan`. The task transitions to `needs-review` (run closes with `terminalReason: "interrupted"`). The workflow remains `active` — `needs-review` is a terminal-for-engine state that requires operator intervention to resolve.
+7. `docker start minions-worker` to restore the container for normal operation.
+
+> **Operator path:** cancel the task with the `cancel-task` command to unblock the workflow. The `continue-task` command (slice 10) will be the resume path once the provider session ref is populated.
 
 If step 4 returns anything other than `"missing"`, the slice is not correctly landed.
 
