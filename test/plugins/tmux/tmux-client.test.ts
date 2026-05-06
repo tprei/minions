@@ -46,13 +46,13 @@ afterEach(() => {
 describe("TmuxClient", () => {
   const client = new TmuxClient({ socketName: "minions" });
 
-  it("newSession constructs correct argv", async () => {
+  it("newSession shell-quotes scriptPath so paths with spaces or metachars survive tmux's parser", async () => {
     spawnMock.mockReturnValue(makeMockProc("", "", 0));
-    await client.newSession({ name: "mwf-task-abc-123456", scriptPath: "/tmp/s.sh" });
+    await client.newSession({ name: "mwf-task-abc-123456", scriptPath: "/tmp/with space/s.sh" });
 
     expect(spawnMock).toHaveBeenCalledWith(
       "tmux",
-      ["-L", "minions", "new-session", "-d", "-s", "mwf-task-abc-123456", "/tmp/s.sh"],
+      ["-L", "minions", "new-session", "-d", "-s", "mwf-task-abc-123456", "'/tmp/with space/s.sh'"],
     );
   });
 

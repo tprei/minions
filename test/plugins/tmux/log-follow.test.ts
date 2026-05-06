@@ -106,6 +106,35 @@ describe("followLog", () => {
     expect(chunks).toHaveLength(0);
   });
 
+  it("appends written between stat and watch registration are not lost", async () => {
+    // Race scenario: bytes appended during the replay-vs-watch window must still
+    // be yielded. The drain-then-await loop guarantees this — every iteration
+    // re-stats before awaiting the next append signal.
+    const path = join(testDir, "test.log");
+    writeFileSync(path, "first");
+
+    const controller = new AbortController();
+    const chunks: { offset: number; bytes: Uint8Array }[] = [];
+
+    const iterPromise = (async () => {
+      for await (const chunk of followLog(path, 0, controller.signal)) {
+        chunks.push(chunk);
+        if (chunk.offset + chunk.bytes.byteLength >= 11) {
+          controller.abort();
+        }
+      }
+    })();
+
+    // Append immediately, before fs.watchFile's first poll tick (default 100ms)
+    // — the second drain in the loop should still pick it up.
+    await appendFile(path, "-second");
+
+    await iterPromise;
+
+    const allBytes = Buffer.concat(chunks.map((c) => Buffer.from(c.bytes)));
+    expect(allBytes.toString()).toBe("first-second");
+  });
+
   it("already-aborted signal yields nothing immediately", async () => {
     const path = join(testDir, "test.log");
     writeFileSync(path, "data");

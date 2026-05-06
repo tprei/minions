@@ -25,61 +25,43 @@ export async function* followLog(
   const handle = await fsp.open(path, "r");
   let offset = fromOffset;
 
+  // Register the watcher BEFORE the initial drain so any append landing between
+  // replay and live-loop registration is captured by the appendPromise.
+  let resolveAppend: (() => void) | undefined;
+  let appendPromise: Promise<void> = new Promise((r) => { resolveAppend = r; });
+
+  const onWatch = () => {
+    const prev = resolveAppend;
+    appendPromise = new Promise((r) => { resolveAppend = r; });
+    prev?.();
+  };
+
+  fs.watchFile(path, { interval: 100 }, onWatch);
+
+  const onAbort = () => { resolveAppend?.(); };
+  signal.addEventListener("abort", onAbort);
+
   try {
-    // Replay existing content from fromOffset
-    const stat = await handle.stat();
-    let replayEnd = stat.size;
+    // Drain-then-await loop covers replay, race-window appends, and live tail uniformly.
+    while (!signal.aborted) {
+      const stat = await handle.stat();
+      const size = stat.size;
 
-    while (offset < replayEnd && !signal.aborted) {
-      const toRead = Math.min(READ_SIZE, replayEnd - offset);
-      const buf = Buffer.allocUnsafe(toRead);
-      const { bytesRead } = await handle.read(buf, 0, toRead, offset);
-      if (bytesRead === 0) break;
-      yield { offset, bytes: new Uint8Array(buf.buffer, buf.byteOffset, bytesRead) };
-      offset += bytesRead;
-    }
-
-    if (signal.aborted) return;
-
-    // Watch for appends
-    let resolveAppend: (() => void) | undefined;
-    let appendPromise: Promise<void> = new Promise((r) => { resolveAppend = r; });
-
-    const onWatch = () => {
-      const prev = resolveAppend;
-      appendPromise = new Promise((r) => { resolveAppend = r; });
-      prev?.();
-    };
-
-    fs.watchFile(path, { interval: 100 }, onWatch);
-
-    const onAbort = () => {
-      resolveAppend?.();
-    };
-    signal.addEventListener("abort", onAbort);
-
-    try {
-      while (!signal.aborted) {
-        await appendPromise;
-        if (signal.aborted) break;
-
-        const stat2 = await handle.stat();
-        const newSize = stat2.size;
-
-        while (offset < newSize && !signal.aborted) {
-          const toRead = Math.min(READ_SIZE, newSize - offset);
-          const buf = Buffer.allocUnsafe(toRead);
-          const { bytesRead } = await handle.read(buf, 0, toRead, offset);
-          if (bytesRead === 0) break;
-          yield { offset, bytes: new Uint8Array(buf.buffer, buf.byteOffset, bytesRead) };
-          offset += bytesRead;
-        }
+      while (offset < size && !signal.aborted) {
+        const toRead = Math.min(READ_SIZE, size - offset);
+        const buf = Buffer.allocUnsafe(toRead);
+        const { bytesRead } = await handle.read(buf, 0, toRead, offset);
+        if (bytesRead === 0) break;
+        yield { offset, bytes: new Uint8Array(buf.buffer, buf.byteOffset, bytesRead) };
+        offset += bytesRead;
       }
-    } finally {
-      signal.removeEventListener("abort", onAbort);
-      fs.unwatchFile(path, onWatch);
+
+      if (signal.aborted) break;
+      await appendPromise;
     }
   } finally {
+    signal.removeEventListener("abort", onAbort);
+    fs.unwatchFile(path, onWatch);
     await handle.close();
   }
 }

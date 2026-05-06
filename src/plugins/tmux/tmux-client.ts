@@ -70,7 +70,9 @@ export class TmuxClient {
   }
 
   async newSession(args: { name: string; scriptPath: string }): Promise<void> {
-    await this.run(["new-session", "-d", "-s", args.name, args.scriptPath]);
+    // tmux re-parses the trailing arg as a shell command, so paths with spaces or
+    // metacharacters silently fail unless quoted at the shell-string level.
+    await this.run(["new-session", "-d", "-s", args.name, shellQuotePath(args.scriptPath)]);
   }
 
   async setWindowOption(name: string, key: string, value: string): Promise<void> {

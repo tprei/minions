@@ -131,6 +131,64 @@ describe.skipIf(process.env["MWF_HAS_TMUX"] !== "1")("TmuxRuntimeBackend integra
     await expect(backend.stop(sessionId)).resolves.toBeUndefined();
   });
 
+  it("dataDir with a space in the path still launches (script path is shell-quoted for tmux)", async () => {
+    const spacedDir = mkdtempSync(join(tmpdir(), "mwf with space-"));
+    try {
+      const altSocket = `minions-test-${process.pid}-${randomHex(4)}`;
+      const altBackend = new TmuxRuntimeBackend({ dataDir: spacedDir, socketName: altSocket });
+
+      const { sessionId } = await altBackend.start({
+        taskId: "spaced",
+        workflowId: "wf-spaced",
+        command: ["sh", "-c", "echo spaced; sleep 5"],
+      });
+
+      expect(await altBackend.probe(sessionId)).toBe("live");
+
+      const controller = new AbortController();
+      const chunks: Uint8Array[] = [];
+      setTimeout(() => controller.abort(), 500);
+
+      for await (const chunk of altBackend.attach(sessionId, { fromOffset: 0, signal: controller.signal })) {
+        chunks.push(chunk.bytes);
+      }
+
+      const output = Buffer.concat(chunks.map((b) => Buffer.from(b))).toString();
+      expect(output).toContain("spaced");
+
+      await altBackend.stop(sessionId);
+      const { exec } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      await promisify(exec)(`tmux -L ${altSocket} kill-server`).catch(() => {});
+    } finally {
+      rmSync(spacedDir, { recursive: true, force: true });
+    }
+  });
+
+  it("invalid cwd: cd fails fast and the user command never runs", async () => {
+    const { sessionId } = await backend.start({
+      taskId: "bad-cwd",
+      workflowId: "wf-bad-cwd",
+      command: ["sh", "-c", "echo should-not-run; sleep 5"],
+      workspacePath: "/nonexistent/path/that/does/not/exist",
+    });
+
+    // Wait for the launcher to give up
+    await new Promise((r) => setTimeout(r, 500));
+
+    const controller = new AbortController();
+    const chunks: Uint8Array[] = [];
+    setTimeout(() => controller.abort(), 300);
+
+    for await (const chunk of backend.attach(sessionId, { fromOffset: 0, signal: controller.signal })) {
+      chunks.push(chunk.bytes);
+    }
+
+    const output = Buffer.concat(chunks.map((b) => Buffer.from(b))).toString();
+    expect(output).not.toContain("should-not-run");
+    await backend.stop(sessionId);
+  });
+
   it("argv quoting end-to-end: special chars reach the process intact", async () => {
     const { sessionId } = await backend.start({
       taskId: "t6",

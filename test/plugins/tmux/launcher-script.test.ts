@@ -58,6 +58,38 @@ describe("buildLauncherScript", () => {
     expect(script).toContain("cd '/some/work dir'");
   });
 
+  it("cd line fails fast when the directory is invalid", () => {
+    const script = buildLauncherScript({
+      command: ["echo"],
+      socketName: "minions",
+      releaseToken: "release-token",
+      cwd: "/some/work dir",
+    });
+    expect(script).toContain("cd '/some/work dir' || exit $?");
+  });
+
+  it("rejects malformed env var names", () => {
+    expect(() =>
+      buildLauncherScript({
+        command: ["echo"],
+        socketName: "minions",
+        releaseToken: "release-token",
+        env: { "BAD;NAME": "value" },
+      }),
+    ).toThrow(/invalid env var name/);
+  });
+
+  it("rejects env var names starting with a digit", () => {
+    expect(() =>
+      buildLauncherScript({
+        command: ["echo"],
+        socketName: "minions",
+        releaseToken: "release-token",
+        env: { "1FOO": "value" },
+      }),
+    ).toThrow(/invalid env var name/);
+  });
+
   it("omits export lines when env is not set", () => {
     const script = buildLauncherScript({
       command: ["echo"],
@@ -87,6 +119,18 @@ describe("buildLauncherScript", () => {
     const waitIdx = script.indexOf("wait-for");
     const execIdx = script.indexOf("exec ");
     expect(waitIdx).toBeLessThan(execIdx);
+  });
+
+  it("wait-for line precedes cd so cd-failure does not strand the engine on an unsignaled wait-for", () => {
+    const script = buildLauncherScript({
+      command: ["echo"],
+      socketName: "minions",
+      releaseToken: "tok",
+      cwd: "/nonexistent",
+    });
+    const waitIdx = script.indexOf("wait-for");
+    const cdIdx = script.indexOf("cd ");
+    expect(waitIdx).toBeLessThan(cdIdx);
   });
 
   it("wait-for line uses socketName and releaseToken", () => {
