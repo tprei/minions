@@ -1,0 +1,175 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { ClaudeCodeProvider } from "../../../src/plugins/providers/claude-code.js";
+import type { ProviderEvent } from "../../../src/plugins/provider-plugin.js";
+
+vi.mock("node:child_process", () => ({
+  spawn: vi.fn(),
+}));
+
+function encode(obj: unknown): string {
+  return JSON.stringify(obj);
+}
+
+describe("ClaudeCodeProvider", () => {
+  const provider = new ClaudeCodeProvider();
+
+  it("capability vector has correct literal shape", () => {
+    expect(provider.capabilities).toEqual({
+      resume: true,
+      mcp: true,
+      structuredOutput: false,
+      oauthLogin: true,
+      streamJson: true,
+      sessionRefFormat: "uuid",
+    });
+  });
+
+  it("standard fixture: system init → assistant text → assistant tool_use → user tool_result → result success", () => {
+    const systemInit = encode({ type: "system", subtype: "init" });
+    const assistantText = encode({
+      type: "assistant",
+      message: { content: [{ type: "text", text: "Hello" }] },
+    });
+    const assistantToolUse = encode({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", id: "tu1", name: "read_file", input: { path: "/foo" } }],
+      },
+    });
+    const userToolResult = encode({
+      type: "user",
+      content: [{ type: "tool_result", tool_use_id: "tu1", content: "file contents", is_error: false }],
+    });
+    const resultSuccess = encode({
+      type: "result",
+      subtype: "success",
+      session_id: "abc-uuid",
+      usage: { input_tokens: 10, output_tokens: 5 },
+      duration_ms: 1000,
+      turns: 2,
+    });
+
+    expect(provider.parseFrame(systemInit)).toEqual([]);
+    expect(provider.parseFrame(assistantText)).toEqual([{ kind: "assistant_text", text: "Hello" }]);
+    expect(provider.parseFrame(assistantToolUse)).toEqual([
+      { kind: "tool_call", id: "tu1", name: "read_file", input: { path: "/foo" } },
+    ]);
+    expect(provider.parseFrame(userToolResult)).toEqual([
+      { kind: "tool_result", id: "tu1", output: "file contents", isError: false },
+    ]);
+
+    const resultEvents = provider.parseFrame(resultSuccess);
+    expect(resultEvents).toHaveLength(2);
+    expect(resultEvents[0]).toEqual({ kind: "usage", inputTokens: 10, outputTokens: 5 });
+    expect(resultEvents[1]).toMatchObject({ kind: "final", sessionRef: "abc-uuid" });
+  });
+
+  it("result subtype error_max_turns emits error then usage then final", () => {
+    const line = encode({
+      type: "result",
+      subtype: "error_max_turns",
+      session_id: "sess-1",
+      usage: { input_tokens: 1, output_tokens: 2 },
+    });
+    const events = provider.parseFrame(line);
+    expect(events).toHaveLength(3);
+    expect(events[0]).toMatchObject({ kind: "error", recoverable: false });
+    expect((events[0] as ProviderEvent & { kind: "error" }).message).toContain("error_max_turns");
+    expect(events[1]).toMatchObject({ kind: "usage" });
+    expect(events[2]).toMatchObject({ kind: "final", sessionRef: "sess-1" });
+  });
+
+  it("system api_retry emits recoverable error with source api_retry", () => {
+    const line = encode({ type: "system", subtype: "api_retry", message: "retry attempt 1" });
+    const events = provider.parseFrame(line);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual({
+      kind: "error",
+      recoverable: true,
+      source: "api_retry",
+      message: "retry attempt 1",
+    });
+  });
+
+  it("assistant content with thinking block emits thinking event", () => {
+    const line = encode({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "thinking", thinking: "Let me think..." },
+          { type: "text", text: "Answer" },
+        ],
+      },
+    });
+    const events = provider.parseFrame(line);
+    expect(events).toHaveLength(2);
+    expect(events[0]).toEqual({ kind: "thinking", text: "Let me think..." });
+    expect(events[1]).toEqual({ kind: "assistant_text", text: "Answer" });
+  });
+
+  it("unmapped result subtype emits loud error", () => {
+    const line = encode({
+      type: "result",
+      subtype: "something_new",
+      session_id: "s",
+      usage: { input_tokens: 0, output_tokens: 0 },
+    });
+    const events = provider.parseFrame(line);
+    expect(events[0]).toMatchObject({ kind: "error", recoverable: false });
+    expect((events[0] as ProviderEvent & { kind: "error" }).message).toContain("something_new");
+  });
+
+  it("unknown top-level type emits loud error", () => {
+    const line = encode({ type: "future_event", data: "xyz" });
+    const events = provider.parseFrame(line);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: "error", recoverable: false });
+    expect((events[0] as ProviderEvent & { kind: "error" }).message).toContain("future_event");
+  });
+
+  it("empty line returns empty array", () => {
+    expect(provider.parseFrame("")).toEqual([]);
+    expect(provider.parseFrame("   ")).toEqual([]);
+  });
+
+  it("malformed JSON throws", () => {
+    expect(() => provider.parseFrame("{bad json}")).toThrow("malformed JSON line");
+  });
+
+  it("stream_event returns empty array", () => {
+    const line = encode({ type: "stream_event", data: {} });
+    expect(provider.parseFrame(line)).toEqual([]);
+  });
+
+  describe("loginStatus", () => {
+    beforeEach(() => {
+      vi.resetAllMocks();
+    });
+
+    it("spawn exit 0 → loggedIn true", async () => {
+      const { spawn } = await import("node:child_process");
+      const mockChild = {
+        on: vi.fn((event: string, cb: (code: number | null) => void) => {
+          if (event === "close") setTimeout(() => cb(0), 0);
+        }),
+      };
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ReturnType<typeof spawn>);
+
+      const result = await new ClaudeCodeProvider().loginStatus();
+      expect(result.loggedIn).toBe(true);
+    });
+
+    it("spawn exit 1 → loggedIn false", async () => {
+      const { spawn } = await import("node:child_process");
+      const mockChild = {
+        on: vi.fn((event: string, cb: (code: number | null) => void) => {
+          if (event === "close") setTimeout(() => cb(1), 0);
+        }),
+      };
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ReturnType<typeof spawn>);
+
+      const result = await new ClaudeCodeProvider().loginStatus();
+      expect(result.loggedIn).toBe(false);
+    });
+  });
+});

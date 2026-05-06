@@ -19,6 +19,8 @@ export * from "./persistence/subscriber-hub.js";
 export * from "./plugins/stub-runtime.js";
 export * from "./plugins/provider-plugin.js";
 export * from "./plugins/runtime-backend.js";
+export { LineBuffer } from "./plugins/line-buffer.js";
+export * from "./plugins/providers/index.js";
 export * from "./plugins/tmux/index.js";
 export * from "./plugins/scm-plugin.js";
 export * from "./plugins/workspace-backend.js";
