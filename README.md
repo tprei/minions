@@ -26,7 +26,7 @@ docker volume create minions-worker-home
 docker volume create minions-worker-workspace
 docker volume create minions-worker-cache
 
-# Host bind for session scripts and logs
+# Host data directory (engine appends /sessions internally)
 sudo mkdir -p /var/lib/minions/sessions
 ```
 
@@ -77,13 +77,13 @@ Set these environment variables before starting `minionsd`:
 | `MWF_RUNTIME` | `local` | Set to `docker` to use the container worker |
 | `MWF_DOCKER_CONTAINER` | `minions-worker` | Container name passed to `docker exec` |
 | `MWF_DOCKER_WORKER_SESSIONS_DIR` | `/sessions` | Sessions directory path inside the container |
-| `MWF_DOCKER_HOST_SESSIONS_DIR` | `/var/lib/minions/sessions` | Same directory as seen from the host |
+| `MWF_DOCKER_HOST_DATA_DIR` | `/var/lib/minions` | Host-side data root. The engine appends `/sessions` internally, so the bind mount in `docker-compose.yml` targets `/var/lib/minions/sessions:/sessions`. |
 
 `minionsd` env-var wiring is applied in a future slice. For now, construct `TmuxRuntimeBackend` directly:
 
 ```ts
 new TmuxRuntimeBackend({
-  dataDir: process.env.MWF_DOCKER_HOST_SESSIONS_DIR ?? "/var/lib/minions/sessions",
+  dataDir: process.env.MWF_DOCKER_HOST_DATA_DIR ?? "/var/lib/minions",
   workerSessionsDir: process.env.MWF_DOCKER_WORKER_SESSIONS_DIR ?? "/sessions",
   commandPrefix: ["docker", "exec", process.env.MWF_DOCKER_CONTAINER ?? "minions-worker"],
 })
@@ -112,6 +112,6 @@ If step 4 returns anything other than `"missing"`, the slice is not correctly la
 
 ### Notes
 
-- The sessions bind mount (`/var/lib/minions/sessions`) should live on a local ext4/xfs filesystem. Stat-poll-based `fs.watchFile` works on NFS/SMB but with worse latency.
+- The sessions bind mount (`/var/lib/minions/sessions:/sessions`) should live on a local ext4/xfs filesystem. Stat-poll-based `fs.watchFile` works on NFS/SMB but with worse latency.
 - The engine does **not** manage container lifecycle in v1. The operator is responsible for starting, stopping, and restarting `minions-worker`.
 - Cross-host Docker (`DOCKER_HOST=tcp://...`) is not supported in v1.

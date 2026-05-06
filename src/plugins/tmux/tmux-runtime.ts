@@ -29,6 +29,10 @@ export interface TmuxRuntimeConfig {
 
 const DOCKER_DOWN_RE = /Error response from daemon|is not running|No such container/i;
 
+function isDockerDown(err: unknown): boolean {
+  return err instanceof TmuxError && DOCKER_DOWN_RE.test(err.stderr);
+}
+
 function makeSessionId(taskId: string, shortIdLen: number): string {
   const slug = taskId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24) || "task";
   const hash8 = createHash("sha1").update(taskId).digest("hex").slice(0, 8);
@@ -119,22 +123,17 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
   }
 
   async probe(sessionId: string): Promise<RuntimeProbeState> {
-    let exists: boolean;
     try {
-      exists = await this.client.sessionExists(sessionId);
+      const exists = await this.client.sessionExists(sessionId);
+      if (!exists) return "missing";
+      const dead = await this.client.paneDead(sessionId);
+      return dead ? "dead" : "live";
     } catch (err) {
-      if (
-        this.config.commandPrefix.length > 0 &&
-        err instanceof TmuxError &&
-        DOCKER_DOWN_RE.test(err.stderr)
-      ) {
+      if (this.config.commandPrefix.length > 0 && isDockerDown(err)) {
         return "missing";
       }
       throw err;
     }
-    if (!exists) return "missing";
-    const dead = await this.client.paneDead(sessionId);
-    return dead ? "dead" : "live";
   }
 
   async *attach(
@@ -158,7 +157,10 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
       try {
         dead = await this.client.paneDead(sessionId);
       } catch (err) {
-        if (err instanceof TmuxNoSuchSessionError) {
+        if (
+          err instanceof TmuxNoSuchSessionError ||
+          (this.config.commandPrefix.length > 0 && isDockerDown(err))
+        ) {
           dead = true;
         } else {
           return;

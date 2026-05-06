@@ -10,10 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g \
-    @anthropic-ai/claude-code@1.2.3 \
-    @openai/codex@0.1.2
-# TODO: confirm OpenCode package + version
-# RUN npm install -g opencode-ai@<version>
+    @anthropic-ai/claude-code@2.1.131 \
+    @openai/codex@0.128.0
 
 RUN groupadd -g 1001 minions && useradd -u 1001 -g 1001 -m -d /home/minions minions
 

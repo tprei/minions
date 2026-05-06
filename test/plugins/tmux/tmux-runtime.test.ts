@@ -643,4 +643,40 @@ describe("TmuxRuntimeBackend (docker mode)", () => {
     const sessionCall = client.newSession.mock.calls[0] as [{ name: string; scriptPath: string }];
     expect(sessionCall[0].scriptPath).toMatch(/^\/mydata\/sessions\/.+\.sh$/);
   });
+
+  it("container-down: probe returns 'missing' when paneDead throws docker-down (sessionExists succeeded)", async () => {
+    const backend = await makeDockerBackend();
+    const client = await getMockClientInner();
+    const { TmuxError: TE } = await import("../../../src/plugins/tmux/tmux-client.js");
+
+    client.sessionExists.mockResolvedValue(true);
+    client.paneDead.mockRejectedValue(
+      new TE("tmux exited with code 1", "", "Error response from daemon: is not running", 1),
+    );
+
+    expect(await backend.probe("any-session")).toBe("missing");
+  });
+
+  it("container-down: attach poller terminates and aborts when paneDead throws docker-down", async () => {
+    const backend = await makeDockerBackend();
+    const client = await getMockClientInner();
+    const followLog = await getFollowLogMock();
+    const { TmuxError: TE } = await import("../../../src/plugins/tmux/tmux-client.js");
+
+    followLog.mockImplementation(async function* (_path: string, _offset: number, signal: AbortSignal) {
+      await new Promise<void>((r) => signal.addEventListener("abort", () => r(), { once: true }));
+    });
+
+    client.paneDead.mockRejectedValue(
+      new TE("tmux exited with code 1", "", "Error response from daemon: No such container: minions-worker", 1),
+    );
+
+    const chunks: RuntimeOutputChunk[] = [];
+    for await (const chunk of backend.attach("docker-down-session", { fromOffset: 0 })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toHaveLength(0);
+    expect(client.pipePaneOff).toHaveBeenCalledWith("docker-down-session");
+  });
 });
