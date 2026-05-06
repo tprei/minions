@@ -148,4 +148,38 @@ describe("followLog", () => {
     }
     expect(chunks).toHaveLength(0);
   });
+
+  it("truncation: file replaced with shorter content resets offset to 0 and yields new bytes", async () => {
+    const path = join(testDir, "test.log");
+    writeFileSync(path, "hello-world-long");
+
+    const controller = new AbortController();
+    const chunks: { offset: number; bytes: Uint8Array }[] = [];
+
+    const iterPromise = (async () => {
+      for await (const chunk of followLog(path, 0, controller.signal)) {
+        chunks.push(chunk);
+        // abort once we see a chunk starting at offset 0 after truncation
+        const totalBytes = chunks.reduce((sum, c) => sum + c.bytes.byteLength, 0);
+        if (totalBytes >= 16 + 3) {
+          controller.abort();
+        }
+      }
+    })();
+
+    // Wait for initial replay to complete
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Truncate: replace with shorter content
+    writeFileSync(path, "new");
+
+    await iterPromise;
+
+    const allBytes = Buffer.concat(chunks.map((c) => Buffer.from(c.bytes))).toString();
+    expect(allBytes).toContain("hello-world-long");
+    expect(allBytes).toContain("new");
+    // The new content chunk should start at offset 0 (reset after truncation)
+    const postTruncChunk = chunks.find((c) => c.offset === 0 && chunks.indexOf(c) > 0);
+    expect(postTruncChunk).toBeDefined();
+  });
 });

@@ -128,4 +128,19 @@ describe("TmuxClient", () => {
       expect.arrayContaining(["-L", "minions", "wait-for", "-S", "token"]),
     );
   });
+
+  it("pipePaneOff sends pipe-pane -t <name> with no additional args", async () => {
+    spawnMock.mockReturnValue(makeMockProc("", "", 0));
+    await client.pipePaneOff("mwf-task-abc-123456");
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      "tmux",
+      ["-L", "minions", "pipe-pane", "-t", "mwf-task-abc-123456"],
+    );
+  });
+
+  it("pipePaneOff maps no-such-session stderr to TmuxNoSuchSessionError", async () => {
+    spawnMock.mockReturnValue(makeMockProc("", "no such session", 1));
+    await expect(client.pipePaneOff("gone-session")).rejects.toThrow(TmuxNoSuchSessionError);
+  });
 });

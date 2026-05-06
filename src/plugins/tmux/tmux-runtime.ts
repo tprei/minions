@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, open, writeFile } from "node:fs/promises";
 import type { RuntimeProbeState } from "../../application/recovery.js";
 import type {
   RuntimeAttachOptions,
@@ -46,6 +46,10 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
   }
 
   async start(spec: RuntimeStartSpec): Promise<RuntimeStartResult> {
+    if (spec.command.length === 0 || spec.command.every((s) => s.trim() === "")) {
+      throw new Error("command must be non-empty");
+    }
+
     const sessionId = makeSessionId(spec.taskId, this.config.shortIdLen);
     const releaseToken = `release-${sessionId}`;
 
@@ -86,6 +90,10 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
 
   async stop(sessionId: string): Promise<void> {
     try {
+      await this.client.pipePaneOff(sessionId).catch((err) => {
+        if (err instanceof TmuxNoSuchSessionError) return;
+        throw err;
+      });
       await this.client.killSession(sessionId);
     } catch (err) {
       if (err instanceof TmuxNoSuchSessionError) return;
@@ -110,12 +118,67 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
     const signal = opts.signal
       ? AbortSignal.any([opts.signal, internal.signal])
       : internal.signal;
+
+    const POLL_INTERVAL_MS = 250;
+    const SETTLE_MS = 150;
+    const READ_SIZE = 64 * 1024;
+
+    let terminated = false;
+    let lastOffset = fromOffset;
+
+    const pollTimer = setInterval(async () => {
+      if (terminated || signal.aborted) return;
+      let dead = false;
+      try {
+        dead = await this.client.paneDead(sessionId);
+      } catch (err) {
+        if (err instanceof TmuxNoSuchSessionError) {
+          dead = true;
+        } else {
+          return;
+        }
+      }
+      if (dead && !terminated) {
+        terminated = true;
+        internal.abort();
+      }
+    }, POLL_INTERVAL_MS);
+
     try {
       for await (const chunk of followLog(logPath, fromOffset, signal)) {
+        lastOffset = chunk.offset + chunk.bytes.byteLength;
         yield { sessionId, offset: chunk.offset, bytes: chunk.bytes };
       }
     } finally {
+      clearInterval(pollTimer);
       internal.abort();
+    }
+
+    if (!terminated || opts.signal?.aborted) return;
+
+    await this.client.pipePaneOff(sessionId).catch((err) => {
+      if (err instanceof TmuxNoSuchSessionError) return;
+      throw err;
+    });
+
+    await new Promise<void>((r) => setTimeout(r, SETTLE_MS));
+
+    const handle = await open(logPath, "r").catch(() => null);
+    if (handle === null) return;
+    try {
+      const stat = await handle.stat();
+      const finalSize = stat.size;
+      let readOffset = lastOffset;
+      while (readOffset < finalSize) {
+        const toRead = Math.min(READ_SIZE, finalSize - readOffset);
+        const buf = Buffer.allocUnsafe(toRead);
+        const { bytesRead } = await handle.read(buf, 0, toRead, readOffset);
+        if (bytesRead === 0) break;
+        yield { sessionId, offset: readOffset, bytes: new Uint8Array(buf.buffer, buf.byteOffset, bytesRead) };
+        readOffset += bytesRead;
+      }
+    } finally {
+      await handle.close();
     }
   }
 }

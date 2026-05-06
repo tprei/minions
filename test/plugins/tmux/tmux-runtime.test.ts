@@ -6,6 +6,7 @@ const mockClient = {
   newSession: vi.fn().mockResolvedValue(undefined),
   setWindowOption: vi.fn().mockResolvedValue(undefined),
   pipePane: vi.fn().mockResolvedValue(undefined),
+  pipePaneOff: vi.fn().mockResolvedValue(undefined),
   waitForSignal: vi.fn().mockResolvedValue(undefined),
   sessionExists: vi.fn().mockResolvedValue(true),
   paneDead: vi.fn().mockResolvedValue(false),
@@ -43,6 +44,7 @@ vi.mock("../../../src/plugins/tmux/tmux-client.js", () => {
     newSession: vi.fn().mockResolvedValue(undefined),
     setWindowOption: vi.fn().mockResolvedValue(undefined),
     pipePane: vi.fn().mockResolvedValue(undefined),
+    pipePaneOff: vi.fn().mockResolvedValue(undefined),
     waitForSignal: vi.fn().mockResolvedValue(undefined),
     sessionExists: vi.fn().mockResolvedValue(true),
     paneDead: vi.fn().mockResolvedValue(false),
@@ -54,6 +56,7 @@ vi.mock("../../../src/plugins/tmux/tmux-client.js", () => {
     newSession = mockClientInner.newSession;
     setWindowOption = mockClientInner.setWindowOption;
     pipePane = mockClientInner.pipePane;
+    pipePaneOff = mockClientInner.pipePaneOff;
     waitForSignal = mockClientInner.waitForSignal;
     sessionExists = mockClientInner.sessionExists;
     paneDead = mockClientInner.paneDead;
@@ -63,6 +66,12 @@ vi.mock("../../../src/plugins/tmux/tmux-client.js", () => {
   return { TmuxClient, TmuxError, TmuxNoSuchSessionError, _mockClientInner: mockClientInner };
 });
 
+const mockFileHandle = {
+  stat: vi.fn().mockResolvedValue({ size: 0 }),
+  read: vi.fn().mockResolvedValue({ bytesRead: 0 }),
+  close: vi.fn().mockResolvedValue(undefined),
+};
+
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
@@ -71,6 +80,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     writeFile: vi.fn().mockResolvedValue(undefined),
     access: vi.fn().mockResolvedValue(undefined),
     unlink: vi.fn().mockResolvedValue(undefined),
+    open: vi.fn().mockResolvedValue(mockFileHandle),
   };
 });
 
@@ -82,6 +92,7 @@ interface MockClientInner {
   newSession: Mock;
   setWindowOption: Mock;
   pipePane: Mock;
+  pipePaneOff: Mock;
   waitForSignal: Mock;
   sessionExists: Mock;
   paneDead: Mock;
@@ -105,6 +116,7 @@ async function getFsMock() {
   return {
     mkdir: mod.mkdir as unknown as Mock,
     writeFile: mod.writeFile as unknown as Mock,
+    open: mod.open as unknown as Mock,
   };
 }
 
@@ -118,6 +130,7 @@ beforeEach(async () => {
   client.newSession.mockReset().mockResolvedValue(undefined);
   client.setWindowOption.mockReset().mockResolvedValue(undefined);
   client.pipePane.mockReset().mockResolvedValue(undefined);
+  client.pipePaneOff.mockReset().mockResolvedValue(undefined);
   client.waitForSignal.mockReset().mockResolvedValue(undefined);
   client.sessionExists.mockReset().mockResolvedValue(true);
   client.paneDead.mockReset().mockResolvedValue(false);
@@ -126,6 +139,10 @@ beforeEach(async () => {
   const fs = await getFsMock();
   fs.mkdir.mockReset().mockResolvedValue(undefined);
   fs.writeFile.mockReset().mockResolvedValue(undefined);
+  fs.open.mockReset().mockResolvedValue(mockFileHandle);
+  mockFileHandle.stat.mockReset().mockResolvedValue({ size: 0 });
+  mockFileHandle.read.mockReset().mockResolvedValue({ bytesRead: 0 });
+  mockFileHandle.close.mockReset().mockResolvedValue(undefined);
   const fsp = await import("node:fs/promises");
   (fsp.unlink as unknown as Mock).mockReset().mockResolvedValue(undefined);
 
@@ -175,13 +192,13 @@ describe("TmuxRuntimeBackend", () => {
 
   it("sessionId matches mwf-<slug>-<hash8>-<shortid> pattern", async () => {
     const backend = await makeBackend();
-    const result = await backend.start({ taskId: "wf-1:task", workflowId: "wf-1", command: [] });
+    const result = await backend.start({ taskId: "wf-1:task", workflowId: "wf-1", command: ["echo"] });
     expect(result.sessionId).toMatch(/^mwf-[a-zA-Z0-9_-]+-[a-f0-9]{8}-[a-f0-9]{6}$/);
   });
 
   it("sanitizes task id: strips colon, keeps valid chars", async () => {
     const backend = await makeBackend();
-    const result = await backend.start({ taskId: "wf-1:task", workflowId: "wf-1", command: [] });
+    const result = await backend.start({ taskId: "wf-1:task", workflowId: "wf-1", command: ["echo"] });
     const parts = result.sessionId.split("-");
     // mwf + slug parts + hash8 + shortid; colon stripped so slug won't contain it
     const slugPart = parts.slice(1, parts.length - 2).join("-");
@@ -191,8 +208,8 @@ describe("TmuxRuntimeBackend", () => {
 
   it("two starts with same taskId produce different sessionIds", async () => {
     const backend = await makeBackend();
-    const r1 = await backend.start({ taskId: "t1", workflowId: "wf-1", command: [] });
-    const r2 = await backend.start({ taskId: "t1", workflowId: "wf-1", command: [] });
+    const r1 = await backend.start({ taskId: "t1", workflowId: "wf-1", command: ["echo"] });
+    const r2 = await backend.start({ taskId: "t1", workflowId: "wf-1", command: ["echo"] });
     expect(r1.sessionId).not.toBe(r2.sessionId);
   });
 
@@ -203,7 +220,7 @@ describe("TmuxRuntimeBackend", () => {
     client.pipePane.mockRejectedValue(new Error("pipe failed"));
 
     await expect(
-      backend.start({ taskId: "t1", workflowId: "wf-1", command: [] }),
+      backend.start({ taskId: "t1", workflowId: "wf-1", command: ["echo"] }),
     ).rejects.toThrow("pipe failed");
 
     expect(client.killSession).toHaveBeenCalledOnce();
@@ -217,7 +234,7 @@ describe("TmuxRuntimeBackend", () => {
     client.pipePane.mockRejectedValue(new Error("pipe failed"));
 
     await expect(
-      backend.start({ taskId: "t1", workflowId: "wf-1", command: [] }),
+      backend.start({ taskId: "t1", workflowId: "wf-1", command: ["echo"] }),
     ).rejects.toThrow();
 
     expect(fsp.unlink).not.toHaveBeenCalled();
@@ -311,6 +328,125 @@ describe("TmuxRuntimeBackend", () => {
     for await (const chunk of backend.attach("no-log-session")) {
       chunks.push(chunk);
     }
+    expect(chunks).toHaveLength(0);
+  });
+
+  it("start rejects empty command before touching filesystem", async () => {
+    const backend = await makeBackend();
+    const fs = await getFsMock();
+
+    await expect(
+      backend.start({ taskId: "t1", workflowId: "wf-1", command: [] }),
+    ).rejects.toThrow("command must be non-empty");
+
+    expect(fs.mkdir).not.toHaveBeenCalled();
+    expect(fs.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("start rejects whitespace-only command before touching filesystem", async () => {
+    const backend = await makeBackend();
+    const fs = await getFsMock();
+
+    await expect(
+      backend.start({ taskId: "t1", workflowId: "wf-1", command: ["  ", "\t"] }),
+    ).rejects.toThrow("command must be non-empty");
+
+    expect(fs.mkdir).not.toHaveBeenCalled();
+    expect(fs.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("stop calls pipePaneOff before killSession", async () => {
+    const backend = await makeBackend();
+    const client = await getMockClientInner();
+
+    const callOrder: string[] = [];
+    client.pipePaneOff.mockImplementation(async () => { callOrder.push("pipePaneOff"); });
+    client.killSession.mockImplementation(async () => { callOrder.push("killSession"); });
+
+    await backend.stop("some-session");
+
+    expect(callOrder).toEqual(["pipePaneOff", "killSession"]);
+  });
+
+  it("stop swallows TmuxNoSuchSessionError from pipePaneOff", async () => {
+    const backend = await makeBackend();
+    const client = await getMockClientInner();
+    const { TmuxNoSuchSessionError: TNSE } = await import("../../../src/plugins/tmux/tmux-client.js");
+
+    client.pipePaneOff.mockRejectedValue(new TNSE("", "no such session", 1));
+
+    await expect(backend.stop("gone-session")).resolves.toBeUndefined();
+    expect(client.killSession).toHaveBeenCalledWith("gone-session");
+  });
+
+  it("attach terminates after paneDead returns true and invokes pipePaneOff", async () => {
+    const backend = await makeBackend();
+    const client = await getMockClientInner();
+    const followLog = await getFollowLogMock();
+
+    followLog.mockImplementation(async function* (_path: string, _offset: number, signal: AbortSignal) {
+      await new Promise<void>((r) => signal.addEventListener("abort", () => r(), { once: true }));
+    });
+
+    client.paneDead.mockResolvedValue(true);
+
+    const chunks: RuntimeOutputChunk[] = [];
+    for await (const chunk of backend.attach("dead-session", { fromOffset: 0 })) {
+      chunks.push(chunk);
+    }
+
+    expect(client.pipePaneOff).toHaveBeenCalledWith("dead-session");
+    expect(chunks).toHaveLength(0);
+  });
+
+  it("attach final-drain reads trailing bytes after pane death", async () => {
+    const backend = await makeBackend();
+    const client = await getMockClientInner();
+    const followLog = await getFollowLogMock();
+    const fs = await getFsMock();
+
+    followLog.mockImplementation(async function* (_path: string, _offset: number, signal: AbortSignal) {
+      await new Promise<void>((r) => signal.addEventListener("abort", () => r(), { once: true }));
+    });
+
+    client.paneDead.mockResolvedValue(true);
+
+    const tailBytes = Buffer.from("tail-data");
+    fs.open.mockResolvedValue({
+      stat: vi.fn().mockResolvedValue({ size: tailBytes.length }),
+      read: vi.fn().mockImplementation(async (buf: Buffer, _offset: number, length: number) => {
+        tailBytes.copy(buf, 0, 0, length);
+        return { bytesRead: tailBytes.length };
+      }),
+      close: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const chunks: RuntimeOutputChunk[] = [];
+    for await (const chunk of backend.attach("dead-session", { fromOffset: 0 })) {
+      chunks.push(chunk);
+    }
+
+    const combined = Buffer.concat(chunks.map((c) => Buffer.from(c.bytes))).toString();
+    expect(combined).toBe("tail-data");
+  });
+
+  it("attach swallows TmuxNoSuchSessionError from paneDead probe and treats as terminated", async () => {
+    const backend = await makeBackend();
+    const client = await getMockClientInner();
+    const followLog = await getFollowLogMock();
+    const { TmuxNoSuchSessionError: TNSE } = await import("../../../src/plugins/tmux/tmux-client.js");
+
+    followLog.mockImplementation(async function* (_path: string, _offset: number, signal: AbortSignal) {
+      await new Promise<void>((r) => signal.addEventListener("abort", () => r(), { once: true }));
+    });
+
+    client.paneDead.mockRejectedValue(new TNSE("", "no such session", 1));
+
+    const chunks: RuntimeOutputChunk[] = [];
+    for await (const chunk of backend.attach("gone-session", { fromOffset: 0 })) {
+      chunks.push(chunk);
+    }
+
     expect(chunks).toHaveLength(0);
   });
 });

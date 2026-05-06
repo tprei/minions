@@ -26,7 +26,7 @@ export class TmuxNoSuchSessionError extends TmuxError {
   }
 }
 
-const NO_SUCH_SESSION_RE = /no such session|session not found|can't find session|no server running/i;
+const NO_SUCH_SESSION_RE = /no such session|session not found|can't find session|no server running|target pane has exited/i;
 
 function shellQuotePath(p: string): string {
   return "'" + p.replace(/'/g, "'\\''") + "'";
@@ -82,6 +82,10 @@ export class TmuxClient {
   async pipePane(name: string, logPath: string): Promise<void> {
     const quotedPath = shellQuotePath(logPath);
     await this.run(["pipe-pane", "-t", name, "-o", `cat >> ${quotedPath}`]);
+  }
+
+  async pipePaneOff(name: string): Promise<void> {
+    await this.run(["pipe-pane", "-t", name]);
   }
 
   async waitForSignal(token: string): Promise<void> {

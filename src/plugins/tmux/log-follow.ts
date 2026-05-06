@@ -47,6 +47,9 @@ export async function* followLog(
       const stat = await handle.stat();
       const size = stat.size;
 
+      // treat truncation as rotation; restart from new file head
+      if (size < offset) offset = 0;
+
       while (offset < size && !signal.aborted) {
         const toRead = Math.min(READ_SIZE, size - offset);
         const buf = Buffer.allocUnsafe(toRead);

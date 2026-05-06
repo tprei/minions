@@ -212,4 +212,107 @@ describe.skipIf(process.env["MWF_HAS_TMUX"] !== "1")("TmuxRuntimeBackend integra
     expect(output).toContain("a;b");
     await backend.stop(sessionId);
   });
+
+  it("attach receives final output and terminates without abort (PRIMARY invariant)", async () => {
+    const { sessionId } = await backend.start({
+      taskId: "invariant",
+      workflowId: "wf-1",
+      command: ["sh", "-c", "printf 'tail-line'; exit 0"],
+    });
+
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of backend.attach(sessionId, { fromOffset: 0 })) {
+      chunks.push(chunk.bytes);
+    }
+
+    const output = Buffer.concat(chunks.map((b) => Buffer.from(b))).toString();
+    expect(output).toContain("tail-line");
+    expect(await backend.probe(sessionId)).toBe("dead");
+  }, 10000);
+
+  it("long-running attach can be aborted", async () => {
+    const { sessionId } = await backend.start({
+      taskId: "abort-test",
+      workflowId: "wf-1",
+      command: ["sh", "-c", "echo running; sleep 30"],
+    });
+
+    const controller = new AbortController();
+    const chunks: Uint8Array[] = [];
+    setTimeout(() => controller.abort(), 400);
+
+    for await (const chunk of backend.attach(sessionId, { fromOffset: 0, signal: controller.signal })) {
+      chunks.push(chunk.bytes);
+    }
+
+    const output = Buffer.concat(chunks.map((b) => Buffer.from(b))).toString();
+    expect(output).toContain("running");
+    await backend.stop(sessionId);
+  });
+
+  it("fresh attach after stop returns trailing bytes", async () => {
+    const { sessionId } = await backend.start({
+      taskId: "stop-then-attach",
+      workflowId: "wf-1",
+      command: ["sh", "-c", "printf 'final-bytes'; sleep 30"],
+    });
+
+    await new Promise((r) => setTimeout(r, 500));
+    await backend.stop(sessionId);
+
+    const controller = new AbortController();
+    const chunks: Uint8Array[] = [];
+    setTimeout(() => controller.abort(), 300);
+
+    for await (const chunk of backend.attach(sessionId, { fromOffset: 0, signal: controller.signal })) {
+      chunks.push(chunk.bytes);
+    }
+
+    const output = Buffer.concat(chunks.map((b) => Buffer.from(b))).toString();
+    expect(output).toContain("final-bytes");
+  });
+
+  it("two concurrent attaches both see final output and both terminate", async () => {
+    const { sessionId } = await backend.start({
+      taskId: "concurrent",
+      workflowId: "wf-1",
+      command: ["sh", "-c", "printf 'shared-output'; exit 0"],
+    });
+
+    const collect = async () => {
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of backend.attach(sessionId, { fromOffset: 0 })) {
+        chunks.push(chunk.bytes);
+      }
+      return Buffer.concat(chunks.map((b) => Buffer.from(b))).toString();
+    };
+
+    const [out1, out2] = await Promise.all([collect(), collect()]);
+
+    expect(out1).toContain("shared-output");
+    expect(out2).toContain("shared-output");
+    expect(await backend.probe(sessionId)).toBe("dead");
+  }, 10000);
+
+  it("stop racing in-flight attach does not lose final bytes", async () => {
+    const { sessionId } = await backend.start({
+      taskId: "race-stop",
+      workflowId: "wf-1",
+      command: ["sh", "-c", "printf done; sleep 30"],
+    });
+
+    const chunks: Uint8Array[] = [];
+    const attachPromise = (async () => {
+      for await (const chunk of backend.attach(sessionId, { fromOffset: 0 })) {
+        chunks.push(chunk.bytes);
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 100));
+    await backend.stop(sessionId);
+    await attachPromise;
+
+    const output = Buffer.concat(chunks.map((b) => Buffer.from(b))).toString();
+    expect(output).toContain("done");
+  }, 10000);
 });
