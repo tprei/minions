@@ -219,5 +219,11 @@ describe("InMemoryWorkflowRepository.subscribe", () => {
     const events = await collectPromise;
     expect(events.length).toBeGreaterThan(0);
     expect(events[0]?.workflowId).toBe("wf-1");
+    expect(events[0]?.kind).toBe("task-transitioned");
+    expect(events[0]?.cursor).toBe(1);
+    if (events[0]?.kind === "task-transitioned") {
+      expect(events[0].payload.taskId).toBe(taskId);
+      expect(events[0].payload.toExecutionStatus).toBe("ready");
+    }
   });
 });

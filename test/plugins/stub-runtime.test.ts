@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { StubRuntimeBackend } from "../../src/plugins/legacy-runtime.js";
+import { StubRuntimeBackend } from "../../src/plugins/stub-runtime.js";
 
 describe("StubRuntimeBackend", () => {
   it("start returns incrementing stub session ids and runtimeType stub", async () => {

@@ -4,6 +4,7 @@ import { InMemoryWorkflowRepository } from "../../src/application/repository.js"
 import { createRecoveryService } from "../../src/application/recovery-service.js";
 import { createServer } from "../../src/transport/server.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
+import type { WorkflowEvent } from "../../src/domain/events.js";
 
 const now = "2026-05-04T11:19:00.000Z";
 
@@ -37,9 +38,18 @@ describe("POST /commands", () => {
     });
 
     expect(res.status).toBe(200);
-    const body = await res.json() as { workflow: { version: number }; events: unknown[] };
+    const body = await res.json() as { workflow: { graph: Record<string, { executionStatus: string }>; version: number }; events: WorkflowEvent[] };
     expect(body.workflow.version).toBe(2);
-    expect(body.events.length).toBeGreaterThan(0);
+    expect(body.workflow.graph["wf-1:task"]?.executionStatus).toBe("ready");
+
+    const transitionEvent = body.events.find(
+      (e): e is Extract<WorkflowEvent, { kind: "task-transitioned" }> => e.kind === "task-transitioned",
+    );
+    expect(transitionEvent).toBeDefined();
+    expect(transitionEvent!.payload.taskId).toBe("wf-1:task");
+    expect(transitionEvent!.payload.fromExecutionStatus).toBe("pending");
+    expect(transitionEvent!.payload.toExecutionStatus).toBe("ready");
+    expect(transitionEvent!.payload.transitionKind).toBe("mark-ready");
   });
 
   it("returns 404 when workflow does not exist", async () => {
@@ -169,8 +179,16 @@ describe("POST /commands", () => {
       body: JSON.stringify(command),
     });
     expect(res1.status).toBe(200);
-    const body1 = await res1.json() as { events: unknown[] };
-    expect(body1.events.length).toBeGreaterThan(0);
+    const body1 = await res1.json() as { events: WorkflowEvent[] };
+
+    const opEvent = body1.events.find(
+      (e): e is Extract<WorkflowEvent, { kind: "graph-operation-changed" }> => e.kind === "graph-operation-changed",
+    );
+    expect(opEvent).toBeDefined();
+    expect(opEvent!.payload.operationId).toBe("op-1");
+    expect(opEvent!.payload.kind).toBe("restack");
+    expect(opEvent!.payload.fromStatus).toBeNull();
+    expect(opEvent!.payload.toStatus).toBe("pending");
 
     const res2 = await app.request("/commands", {
       method: "POST",

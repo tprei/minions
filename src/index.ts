@@ -12,7 +12,7 @@ export * from "./domain/events.js";
 export * from "./domain/runs.js";
 export * from "./domain/types.js";
 export * from "./domain/workflow.js";
-export * from "./plugins/legacy-runtime.js";
+export * from "./plugins/stub-runtime.js";
 export * from "./plugins/provider-plugin.js";
 export * from "./plugins/runtime-backend.js";
 export * from "./plugins/scm-plugin.js";

@@ -5,6 +5,7 @@ import { InMemoryWorkflowRepository } from "../../src/application/repository.js"
 import { createRecoveryService } from "../../src/application/recovery-service.js";
 import { createServer } from "../../src/transport/server.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
+import type { WorkflowEvent } from "../../src/domain/events.js";
 
 const now = "2026-05-04T11:19:00.000Z";
 const taskId = "wf-1:task";
@@ -93,7 +94,15 @@ describe("GET /workflows/:id/events (SSE)", () => {
     const frames = await collectSSEFrames(res, eventCount);
     expect(frames.length).toBe(eventCount);
     expect(frames[0]?.id).toBe("1");
-    expect(frames[0]?.event).toBeDefined();
+    expect(frames[0]?.event).toBe("task-transitioned");
+
+    const parsed = JSON.parse(frames[0]!.data!) as WorkflowEvent;
+    expect(parsed.kind).toBe("task-transitioned");
+    expect(parsed.cursor).toBe(1);
+    expect(parsed.workflowId).toBe("wf-1");
+    if (parsed.kind === "task-transitioned") {
+      expect(parsed.payload.taskId).toBe("wf-1:task");
+    }
   });
 
   it("Last-Event-ID overrides since parameter", async () => {
@@ -124,6 +133,13 @@ describe("GET /workflows/:id/events (SSE)", () => {
     expect(frames).toHaveLength(2);
     expect(frames[0]?.id).toBe("4");
     expect(frames[1]?.id).toBe("5");
+
+    for (const frame of frames) {
+      const parsed = JSON.parse(frame.data!) as WorkflowEvent;
+      expect(parsed.kind).toBe("workflow-status-changed");
+      expect(parsed.cursor).toBe(Number(frame.id));
+      expect(parsed.workflowId).toBe("wf-1");
+    }
   });
 
   it("live: applyCommand events arrive via SSE after stream opens", async () => {
@@ -147,7 +163,13 @@ describe("GET /workflows/:id/events (SSE)", () => {
     const frames = await framePromise;
 
     expect(frames.length).toBeGreaterThanOrEqual(1);
-    expect(frames[0]?.event).toBeDefined();
+    expect(frames[0]?.event).toBe("task-transitioned");
     expect(frames[0]?.id).toBeDefined();
+
+    const parsed = JSON.parse(frames[0]!.data!) as WorkflowEvent;
+    if (parsed.kind === "task-transitioned") {
+      expect(parsed.payload.toExecutionStatus).toBe("ready");
+      expect(parsed.payload.taskId).toBe("wf-1:task");
+    }
   });
 });
