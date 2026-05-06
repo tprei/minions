@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { CodexProvider } from "../../../src/plugins/providers/codex.js";
 import type { ProviderEvent } from "../../../src/plugins/provider-plugin.js";
+
+vi.mock("node:child_process", () => ({
+  spawn: vi.fn(),
+}));
 
 function encode(obj: unknown): string {
   return JSON.stringify(obj);
@@ -259,5 +263,106 @@ describe("CodexProvider", () => {
       }),
     );
     expect(events).toEqual([{ kind: "tool_result", id: "mcp-3", output: error, isError: true }]);
+  });
+
+  describe("prepare", () => {
+    it("returns correct argv shape", async () => {
+      const provider = new CodexProvider();
+      const inv = await provider.prepare({
+        taskId: "t1",
+        workflowId: "wf1",
+        prompt: "fix the bug",
+        dependencyArtifacts: [],
+      });
+      expect(inv.command).toEqual(["codex", "exec", "--json", "fix the bug"]);
+      expect(inv.providerType).toBe("codex");
+    });
+
+    it("throws when prompt is empty", async () => {
+      const provider = new CodexProvider();
+      await expect(
+        provider.prepare({ taskId: "t1", workflowId: "wf1", prompt: "", dependencyArtifacts: [] }),
+      ).rejects.toThrow("prompt must be non-empty");
+    });
+
+    it("throws when prompt is whitespace only", async () => {
+      const provider = new CodexProvider();
+      await expect(
+        provider.prepare({ taskId: "t1", workflowId: "wf1", prompt: "   ", dependencyArtifacts: [] }),
+      ).rejects.toThrow("prompt must be non-empty");
+    });
+  });
+
+  describe("resume", () => {
+    it("returns correct argv shape with sessionRef and prompt as positional arg", async () => {
+      const provider = new CodexProvider();
+      const inv = await provider.resume({
+        taskId: "t1",
+        workflowId: "wf1",
+        sessionRef: "thread-abc",
+        prompt: "continue from here",
+      });
+      expect(inv.command).toEqual(["codex", "exec", "resume", "--json", "thread-abc", "continue from here"]);
+      expect(inv.providerType).toBe("codex");
+    });
+
+    it("throws when prompt is empty", async () => {
+      const provider = new CodexProvider();
+      await expect(
+        provider.resume({ taskId: "t1", workflowId: "wf1", sessionRef: "thread-abc", prompt: "" }),
+      ).rejects.toThrow("prompt must be non-empty");
+    });
+
+    it("throws when prompt is whitespace only", async () => {
+      const provider = new CodexProvider();
+      await expect(
+        provider.resume({ taskId: "t1", workflowId: "wf1", sessionRef: "thread-abc", prompt: "  " }),
+      ).rejects.toThrow("prompt must be non-empty");
+    });
+  });
+
+  describe("loginStatus", () => {
+    beforeEach(() => {
+      vi.resetAllMocks();
+    });
+
+    it("spawn exit 0 → loggedIn true", async () => {
+      const { spawn } = await import("node:child_process");
+      const mockChild = {
+        on: vi.fn((event: string, cb: (code: number | null) => void) => {
+          if (event === "close") setTimeout(() => cb(0), 0);
+        }),
+      };
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ReturnType<typeof spawn>);
+
+      const result = await new CodexProvider().loginStatus();
+      expect(result.loggedIn).toBe(true);
+    });
+
+    it("spawn exit 1 → loggedIn false", async () => {
+      const { spawn } = await import("node:child_process");
+      const mockChild = {
+        on: vi.fn((event: string, cb: (code: number | null) => void) => {
+          if (event === "close") setTimeout(() => cb(1), 0);
+        }),
+      };
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ReturnType<typeof spawn>);
+
+      const result = await new CodexProvider().loginStatus();
+      expect(result.loggedIn).toBe(false);
+    });
+
+    it("spawn error event → loggedIn false", async () => {
+      const { spawn } = await import("node:child_process");
+      const mockChild = {
+        on: vi.fn((event: string, cb: () => void) => {
+          if (event === "error") setTimeout(() => cb(), 0);
+        }),
+      };
+      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ReturnType<typeof spawn>);
+
+      const result = await new CodexProvider().loginStatus();
+      expect(result.loggedIn).toBe(false);
+    });
   });
 });

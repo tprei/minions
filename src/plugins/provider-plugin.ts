@@ -20,6 +20,7 @@ export interface ProviderResumeSpec {
   taskId: string;
   workflowId: string;
   sessionRef: string;
+  prompt: string;
 }
 
 export interface ProviderInvocation {

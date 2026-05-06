@@ -21,6 +21,7 @@ export class ClaudeCodeProvider implements ProviderPlugin {
   };
 
   async prepare(spec: ProviderPrepareSpec): Promise<ProviderInvocation> {
+    if (spec.prompt.trim() === "") throw new Error("prompt must be non-empty");
     return {
       command: ["claude", "-p", spec.prompt, "--output-format", "stream-json", "--verbose"],
       providerType: "claude-code",
@@ -28,8 +29,9 @@ export class ClaudeCodeProvider implements ProviderPlugin {
   }
 
   async resume(spec: ProviderResumeSpec): Promise<ProviderInvocation> {
+    if (spec.prompt.trim() === "") throw new Error("prompt must be non-empty");
     return {
-      command: ["claude", "-p", "", "--resume", spec.sessionRef, "--output-format", "stream-json", "--verbose"],
+      command: ["claude", "-p", spec.prompt, "--resume", spec.sessionRef, "--output-format", "stream-json", "--verbose"],
       providerType: "claude-code",
     };
   }

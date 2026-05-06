@@ -1,6 +1,4 @@
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { spawn } from "node:child_process";
 import type {
   ProviderCapabilities,
   ProviderEvent,
@@ -25,6 +23,7 @@ export class CodexProvider implements ProviderPlugin {
   private lastThreadId: string | undefined;
 
   async prepare(spec: ProviderPrepareSpec): Promise<ProviderInvocation> {
+    if (spec.prompt.trim() === "") throw new Error("prompt must be non-empty");
     return {
       command: ["codex", "exec", "--json", spec.prompt],
       providerType: "codex",
@@ -32,8 +31,9 @@ export class CodexProvider implements ProviderPlugin {
   }
 
   async resume(spec: ProviderResumeSpec): Promise<ProviderInvocation> {
+    if (spec.prompt.trim() === "") throw new Error("prompt must be non-empty");
     return {
-      command: ["codex", "exec", "resume", "--json", spec.sessionRef],
+      command: ["codex", "exec", "resume", "--json", spec.sessionRef, spec.prompt],
       providerType: "codex",
     };
   }
@@ -217,15 +217,15 @@ export class CodexProvider implements ProviderPlugin {
     }
   }
 
-  async loginStatus(): Promise<{ loggedIn: boolean; details?: string }> {
-    const authPath = join(homedir(), ".codex", "auth.json");
-    try {
-      const raw = await readFile(authPath, "utf-8");
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const details = typeof parsed["account"] === "string" ? parsed["account"] : undefined;
-      return { loggedIn: true, ...(details !== undefined ? { details } : {}) };
-    } catch {
-      return { loggedIn: false };
-    }
+  loginStatus(): Promise<{ loggedIn: boolean; details?: string }> {
+    return new Promise((resolve) => {
+      const child = spawn("codex", ["login", "status"]);
+      child.on("close", (code: number | null) => {
+        resolve({ loggedIn: code === 0 });
+      });
+      child.on("error", () => {
+        resolve({ loggedIn: false });
+      });
+    });
   }
 }

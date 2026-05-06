@@ -42,9 +42,23 @@ describe("StubProviderPlugin", () => {
 
   it("resume returns echo stub invocation", async () => {
     const stub = new StubProviderPlugin({ frames: [] });
-    const inv = await stub.resume({ taskId: "t1", workflowId: "wf1", sessionRef: "sess-1" });
+    const inv = await stub.resume({ taskId: "t1", workflowId: "wf1", sessionRef: "sess-1", prompt: "continue" });
     expect(inv.command).toEqual(["echo", "stub"]);
     expect(inv.providerType).toBe("stub");
+  });
+
+  it("prepare throws when prompt is empty", async () => {
+    const stub = new StubProviderPlugin({ frames: [] });
+    await expect(
+      stub.prepare({ taskId: "t1", workflowId: "wf1", prompt: "", dependencyArtifacts: [] }),
+    ).rejects.toThrow("prompt must be non-empty");
+  });
+
+  it("resume throws when prompt is empty", async () => {
+    const stub = new StubProviderPlugin({ frames: [] });
+    await expect(
+      stub.resume({ taskId: "t1", workflowId: "wf1", sessionRef: "sess-1", prompt: "" }),
+    ).rejects.toThrow("prompt must be non-empty");
   });
 
   it("loginStatus returns loggedIn true", async () => {

@@ -187,6 +187,60 @@ describe("ClaudeCodeProvider", () => {
     expect(events).toEqual([{ kind: "tool_result", id: "tr1", output: "ok", isError: false }]);
   });
 
+  describe("prepare", () => {
+    it("returns correct argv shape", async () => {
+      const inv = await provider.prepare({
+        taskId: "t1",
+        workflowId: "wf1",
+        prompt: "fix the bug",
+        dependencyArtifacts: [],
+      });
+      expect(inv.command).toEqual([
+        "claude", "-p", "fix the bug", "--output-format", "stream-json", "--verbose",
+      ]);
+      expect(inv.providerType).toBe("claude-code");
+    });
+
+    it("throws when prompt is empty", async () => {
+      await expect(
+        provider.prepare({ taskId: "t1", workflowId: "wf1", prompt: "", dependencyArtifacts: [] }),
+      ).rejects.toThrow("prompt must be non-empty");
+    });
+
+    it("throws when prompt is whitespace only", async () => {
+      await expect(
+        provider.prepare({ taskId: "t1", workflowId: "wf1", prompt: "   ", dependencyArtifacts: [] }),
+      ).rejects.toThrow("prompt must be non-empty");
+    });
+  });
+
+  describe("resume", () => {
+    it("returns correct argv shape with prompt and sessionRef", async () => {
+      const inv = await provider.resume({
+        taskId: "t1",
+        workflowId: "wf1",
+        sessionRef: "abc-uuid",
+        prompt: "continue from here",
+      });
+      expect(inv.command).toEqual([
+        "claude", "-p", "continue from here", "--resume", "abc-uuid", "--output-format", "stream-json", "--verbose",
+      ]);
+      expect(inv.providerType).toBe("claude-code");
+    });
+
+    it("throws when prompt is empty", async () => {
+      await expect(
+        provider.resume({ taskId: "t1", workflowId: "wf1", sessionRef: "abc-uuid", prompt: "" }),
+      ).rejects.toThrow("prompt must be non-empty");
+    });
+
+    it("throws when prompt is whitespace only", async () => {
+      await expect(
+        provider.resume({ taskId: "t1", workflowId: "wf1", sessionRef: "abc-uuid", prompt: "  " }),
+      ).rejects.toThrow("prompt must be non-empty");
+    });
+  });
+
   describe("loginStatus", () => {
     beforeEach(() => {
       vi.resetAllMocks();

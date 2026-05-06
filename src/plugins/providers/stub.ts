@@ -26,11 +26,13 @@ export class StubProviderPlugin implements ProviderPlugin {
     this.frames = frames;
   }
 
-  async prepare(_spec: ProviderPrepareSpec): Promise<ProviderInvocation> {
+  async prepare(spec: ProviderPrepareSpec): Promise<ProviderInvocation> {
+    if (spec.prompt.trim() === "") throw new Error("prompt must be non-empty");
     return { command: ["echo", "stub"], providerType: "stub" };
   }
 
-  async resume(_spec: ProviderResumeSpec): Promise<ProviderInvocation> {
+  async resume(spec: ProviderResumeSpec): Promise<ProviderInvocation> {
+    if (spec.prompt.trim() === "") throw new Error("prompt must be non-empty");
     return { command: ["echo", "stub"], providerType: "stub" };
   }
 
