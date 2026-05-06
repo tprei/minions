@@ -1,3 +1,6 @@
+// Top-level shape of a unit of work in the system. A workflow is one or more
+// task nodes wired into a DAG, with a policy and a status that rolls up from
+// the leaves.
 export type WorkflowKind =
   | "single-task"
   | "think-thread"
@@ -6,8 +9,7 @@ export type WorkflowKind =
   | "loop"
   | "manual-dag"
   | "ci-heal"
-  | "merge-review"
-  | "restack";
+  | "merge-review";
 
 export type WorkflowStatus = "active" | "completed" | "failed" | "cancelled";
 
@@ -20,7 +22,6 @@ export type TaskExecutionStatus =
   | "quality-pending"
   | "ci-pending"
   | "pr-open"
-  | "landed"
   | "merged"
   | "failed"
   | "cancelled"
@@ -35,12 +36,17 @@ export type TaskStackStatus =
 
 export type ClaimMode = "read" | "write";
 
+// A claim is a working-tree lock declared up front. The dispatcher uses
+// claim conflicts to prevent two write-mode tasks from running concurrently
+// against overlapping paths.
 export interface Claim {
   // repo-relative POSIX path, no leading "./" and no trailing "/"
   scope: string;
   mode: ClaimMode;
 }
 
+// What a task promises to produce. Used by reviewers and gates to know what
+// "done" looks like before runtime starts.
 export interface Contract {
   summary: string;
   expectedArtifacts: string[];
@@ -48,6 +54,9 @@ export interface Contract {
 
 export type ArtifactKind = "branch" | "commit" | "patch" | "pr" | "quality-report" | "ci-report";
 
+// A piece of evidence the task produced (a branch, a PR url, a CI report).
+// Artifacts accumulate on the task and are passed to downstream tasks via
+// dependency fan-in.
 export interface Artifact {
   kind: ArtifactKind;
   ref: string;
@@ -57,6 +66,9 @@ export interface Artifact {
 
 export type Readiness = "unknown" | "ready" | "blocked";
 
+// One node in the workflow graph: a unit of work with a lifecycle, claims,
+// a contract, and accumulated artifacts. Execution status and stack status
+// are independent dimensions — a task can be `completed` but `restack-pending`.
 export interface TaskNode {
   id: string;
   workflowId: string;
@@ -74,7 +86,6 @@ export interface TaskNode {
   workspaceId?: string;
   mergeTarget?: string;
   readiness: Readiness;
-  stackPosition: number;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -84,6 +95,8 @@ export type GraphOperationKind = "restack";
 
 export type GraphOperationStatus = "pending" | "running" | "completed" | "conflict" | "failed";
 
+// A long-running mutation against the graph itself (not a single task).
+// Currently only `restack`. Idempotency-keyed and recoverable across crashes.
 export interface GraphOperation {
   id: string;
   workflowId: string;
@@ -100,10 +113,13 @@ export interface GraphOperation {
   updatedAt: string;
 }
 
+// Per-workflow scheduling constraints. Currently just runtime concurrency.
 export interface WorkflowPolicy {
   maxConcurrent: number;
 }
 
+// Aggregate root. Owns its task graph and its in-flight graph operations.
+// Version bumps on every write so concurrent actors detect conflicts.
 export interface Workflow {
   id: string;
   kind: WorkflowKind;
@@ -121,11 +137,12 @@ export interface Workflow {
 export const TASK_SUCCESS_EXECUTION_STATUSES: ReadonlySet<TaskExecutionStatus> = new Set([
   "completed",
   "pr-open",
-  "landed",
   "merged",
 ]);
 
-export const TASK_ACTIVE_EXECUTION_STATUSES: ReadonlySet<TaskExecutionStatus> = new Set([
+// Tasks in these statuses still hold their declared claims, so the dispatcher
+// must check claim conflicts against them even if no agent is running.
+export const TASK_CLAIM_HOLDING_STATUSES: ReadonlySet<TaskExecutionStatus> = new Set([
   "ready",
   "running",
   "finalizing",
@@ -133,7 +150,9 @@ export const TASK_ACTIVE_EXECUTION_STATUSES: ReadonlySet<TaskExecutionStatus> = 
   "ci-pending",
 ]);
 
-export const TASK_RUNTIME_ACTIVE_STATUSES: ReadonlySet<TaskExecutionStatus> = new Set([
+// Tasks in these statuses occupy a runtime/agent slot and count toward
+// `policy.maxConcurrent`. Gate-blocked tasks are excluded — no agent is busy.
+export const TASK_AGENT_OCCUPYING_STATUSES: ReadonlySet<TaskExecutionStatus> = new Set([
   "ready",
   "running",
   "finalizing",
@@ -142,7 +161,6 @@ export const TASK_RUNTIME_ACTIVE_STATUSES: ReadonlySet<TaskExecutionStatus> = ne
 export const TASK_TERMINAL_EXECUTION_STATUSES: ReadonlySet<TaskExecutionStatus> = new Set([
   "completed",
   "pr-open",
-  "landed",
   "merged",
   "failed",
   "cancelled",
@@ -158,7 +176,6 @@ export interface TaskSpec {
   contract?: Partial<Contract>;
   priority?: number;
   mergeTarget?: string;
-  stackPosition?: number;
 }
 
 export interface WorkflowSpec {
