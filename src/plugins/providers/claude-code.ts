@@ -36,6 +36,9 @@ export class ClaudeCodeProvider implements ProviderPlugin {
     };
   }
 
+  // Two distinct failure modes:
+  // - Empty/whitespace OR non-JSON line → [] (silently dropped — stderr noise from merged stream)
+  // - JSON parses but type/shape is unrecognized → [error{...}] (loud — schema gap to investigate)
   parseFrame(line: string): ProviderEvent[] {
     if (line.trim().length === 0) return [];
 
@@ -43,7 +46,7 @@ export class ClaudeCodeProvider implements ProviderPlugin {
     try {
       json = JSON.parse(line) as Record<string, unknown>;
     } catch {
-      throw new Error(`malformed JSON line: ${line}`);
+      return [];
     }
 
     const type = json["type"];
@@ -110,11 +113,14 @@ export class ClaudeCodeProvider implements ProviderPlugin {
 
         const events: ProviderEvent[] = [];
 
-        if (subtype !== "success") {
+        const errored = subtype !== "success" || json["is_error"] === true;
+        if (errored) {
           events.push({
             kind: "error",
             recoverable: false,
-            message: `unmapped result subtype: ${String(subtype ?? "unknown")}`,
+            message: subtype !== "success"
+              ? `unmapped result subtype: ${String(subtype ?? "unknown")}`
+              : `result is_error=true with subtype: ${String(subtype ?? "unknown")}`,
           });
         }
 

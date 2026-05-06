@@ -83,6 +83,22 @@ describe("ClaudeCodeProvider", () => {
     expect(events[2]).toMatchObject({ kind: "final", sessionRef: "sess-1" });
   });
 
+  it("result subtype success with is_error true emits error then usage then final", () => {
+    const line = encode({
+      type: "result",
+      subtype: "success",
+      is_error: true,
+      session_id: "sess-err",
+      usage: { input_tokens: 1, output_tokens: 0 },
+    });
+    const events = provider.parseFrame(line);
+    expect(events).toHaveLength(3);
+    expect(events[0]).toMatchObject({ kind: "error", recoverable: false });
+    expect((events[0] as ProviderEvent & { kind: "error" }).message).toContain("is_error=true");
+    expect(events[1]).toMatchObject({ kind: "usage" });
+    expect(events[2]).toMatchObject({ kind: "final", sessionRef: "sess-err" });
+  });
+
   it("system api_retry emits recoverable error with source api_retry", () => {
     const line = encode({ type: "system", subtype: "api_retry", message: "retry attempt 1" });
     const events = provider.parseFrame(line);
@@ -136,8 +152,13 @@ describe("ClaudeCodeProvider", () => {
     expect(provider.parseFrame("   ")).toEqual([]);
   });
 
-  it("malformed JSON throws", () => {
-    expect(() => provider.parseFrame("{bad json}")).toThrow("malformed JSON line");
+  it("plain-text stderr line returns empty array, does not throw", () => {
+    expect(provider.parseFrame("Error: authentication failed")).toEqual([]);
+    expect(provider.parseFrame("Warning: rate limit approaching")).toEqual([]);
+  });
+
+  it("partial JSON that fails to parse returns empty array, does not throw", () => {
+    expect(provider.parseFrame("{not valid")).toEqual([]);
   });
 
   it("stream_event returns empty array", () => {

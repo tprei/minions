@@ -20,6 +20,7 @@ export class CodexProvider implements ProviderPlugin {
     sessionRefFormat: "opaque",
   };
 
+  // This state ties one provider instance to one conversation; the engine MUST construct a fresh instance per run.
   private lastThreadId: string | undefined;
 
   async prepare(spec: ProviderPrepareSpec): Promise<ProviderInvocation> {
@@ -38,6 +39,9 @@ export class CodexProvider implements ProviderPlugin {
     };
   }
 
+  // Two distinct failure modes:
+  // - Empty/whitespace OR non-JSON line → [] (silently dropped — stderr noise from merged stream)
+  // - JSON parses but type/shape is unrecognized → [error{...}] (loud — schema gap to investigate)
   parseFrame(line: string): ProviderEvent[] {
     if (line.trim().length === 0) return [];
 
@@ -45,13 +49,16 @@ export class CodexProvider implements ProviderPlugin {
     try {
       json = JSON.parse(line) as Record<string, unknown>;
     } catch {
-      throw new Error(`malformed JSON line: ${line}`);
+      return [];
     }
 
     const type = json["type"];
 
     switch (type) {
       case "thread.started": {
+        if (this.lastThreadId !== undefined) {
+          throw new Error("CodexProvider instance reused across conversations; construct a fresh instance per run");
+        }
         this.lastThreadId = typeof json["thread_id"] === "string" ? json["thread_id"] : undefined;
         return [];
       }

@@ -202,9 +202,23 @@ describe("CodexProvider", () => {
     expect(provider.parseFrame("  ")).toEqual([]);
   });
 
-  it("malformed JSON throws", () => {
+  it("plain-text stderr line returns empty array, does not throw", () => {
     const provider = new CodexProvider();
-    expect(() => provider.parseFrame("{bad}")).toThrow("malformed JSON line");
+    expect(provider.parseFrame("Error: authentication failed")).toEqual([]);
+    expect(provider.parseFrame("Warning: context window at 90%")).toEqual([]);
+  });
+
+  it("partial JSON that fails to parse returns empty array, does not throw", () => {
+    const provider = new CodexProvider();
+    expect(provider.parseFrame("{not valid")).toEqual([]);
+  });
+
+  it("second thread.started on same instance throws reuse assertion", () => {
+    const provider = new CodexProvider();
+    provider.parseFrame(encode({ type: "thread.started", thread_id: "thread-1" }));
+    expect(() =>
+      provider.parseFrame(encode({ type: "thread.started", thread_id: "thread-2" })),
+    ).toThrow("CodexProvider instance reused across conversations");
   });
 
   it("item.started for mcp_tool_call uses arguments as input and tool as name", () => {
