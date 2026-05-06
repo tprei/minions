@@ -13,7 +13,7 @@ import type { Workflow } from "../../../src/domain/types.js";
 
 const execAsync = promisify(exec);
 
-const HOST_SESSIONS_DIR = process.env["MWF_DOCKER_HOST_SESSIONS_DIR"] ?? "/var/lib/minions/sessions";
+const HOST_SESSIONS_DIR = process.env["MWF_DOCKER_HOST_DATA_DIR"] ?? "/var/lib/minions";
 const WORKER_SESSIONS_DIR = process.env["MWF_DOCKER_WORKER_SESSIONS_DIR"] ?? "/sessions";
 const CONTAINER = process.env["MWF_DOCKER_CONTAINER"] ?? "minions-worker";
 

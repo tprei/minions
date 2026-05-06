@@ -112,12 +112,12 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
   async stop(sessionId: string): Promise<void> {
     try {
       await this.client.pipePaneOff(sessionId).catch((err) => {
-        if (err instanceof TmuxNoSuchSessionError) return;
+        if (err instanceof TmuxNoSuchSessionError || isDockerDown(err)) return;
         throw err;
       });
       await this.client.killSession(sessionId);
     } catch (err) {
-      if (err instanceof TmuxNoSuchSessionError) return;
+      if (err instanceof TmuxNoSuchSessionError || isDockerDown(err)) return;
       throw err;
     }
   }
@@ -185,7 +185,7 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
     if (!terminated || opts.signal?.aborted) return;
 
     await this.client.pipePaneOff(sessionId).catch((err) => {
-      if (err instanceof TmuxNoSuchSessionError) return;
+      if (err instanceof TmuxNoSuchSessionError || isDockerDown(err)) return;
       throw err;
     });
 
