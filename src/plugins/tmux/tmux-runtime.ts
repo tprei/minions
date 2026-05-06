@@ -16,14 +16,18 @@ import {
   SENTINEL_TIMEOUT_MS,
 } from "./constants.js";
 import { followLog } from "./log-follow.js";
-import { TmuxClient, TmuxNoSuchSessionError } from "./tmux-client.js";
+import { TmuxClient, TmuxError, TmuxNoSuchSessionError } from "./tmux-client.js";
 
 export interface TmuxRuntimeConfig {
   dataDir: string;
   socketName?: string;
   tmuxBin?: string;
   shortIdLen?: number;
+  commandPrefix?: readonly string[];
+  workerSessionsDir?: string;
 }
+
+const DOCKER_DOWN_RE = /Error response from daemon|is not running|No such container/i;
 
 function makeSessionId(taskId: string, shortIdLen: number): string {
   const slug = taskId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24) || "task";
@@ -44,10 +48,13 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
       socketName: config.socketName ?? "minions",
       tmuxBin: config.tmuxBin ?? "tmux",
       shortIdLen: config.shortIdLen ?? 6,
+      commandPrefix: config.commandPrefix ?? [],
+      workerSessionsDir: config.workerSessionsDir ?? `${config.dataDir}/sessions`,
     };
     this.client = new TmuxClient({
       socketName: this.config.socketName,
       tmuxBin: this.config.tmuxBin,
+      commandPrefix: this.config.commandPrefix,
     });
   }
 
@@ -69,6 +76,7 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
       buildLauncherScript({
         command: spec.command,
         ...(spec.env !== undefined ? { env: spec.env } : {}),
+        // spec.workspacePath is worker-POV: caller must supply the path as seen inside the container
         ...(spec.workspacePath !== undefined ? { cwd: spec.workspacePath } : {}),
         socketName: this.config.socketName,
         releaseToken,
@@ -80,11 +88,14 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
     // Touch the log file so followLog can open it immediately
     await fsp.writeFile(logPath, "", { flag: "a" });
 
-    await this.client.newSession({ name: sessionId, scriptPath });
+    const workerScriptPath = `${this.config.workerSessionsDir}/${sessionId}.sh`;
+    const workerLogPath = `${this.config.workerSessionsDir}/${sessionId}.log`;
+
+    await this.client.newSession({ name: sessionId, scriptPath: workerScriptPath });
 
     try {
       await this.client.setWindowOption(sessionId, "remain-on-exit", "on");
-      await this.client.pipePane(sessionId, logPath);
+      await this.client.pipePane(sessionId, workerLogPath);
       await this.client.waitForSignal(releaseToken);
     } catch (err) {
       await this.client.killSession(sessionId).catch(() => {});
@@ -108,7 +119,19 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
   }
 
   async probe(sessionId: string): Promise<RuntimeProbeState> {
-    const exists = await this.client.sessionExists(sessionId);
+    let exists: boolean;
+    try {
+      exists = await this.client.sessionExists(sessionId);
+    } catch (err) {
+      if (
+        this.config.commandPrefix.length > 0 &&
+        err instanceof TmuxError &&
+        DOCKER_DOWN_RE.test(err.stderr)
+      ) {
+        return "missing";
+      }
+      throw err;
+    }
     if (!exists) return "missing";
     const dead = await this.client.paneDead(sessionId);
     return dead ? "dead" : "live";

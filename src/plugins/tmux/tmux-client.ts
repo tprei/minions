@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 export interface TmuxClientConfig {
   socketName: string;
   tmuxBin?: string;
+  commandPrefix?: readonly string[];
 }
 
 export class TmuxError extends Error {
@@ -35,16 +36,21 @@ function shellQuotePath(p: string): string {
 export class TmuxClient {
   private readonly bin: string;
   private readonly socketName: string;
+  private readonly commandPrefix: readonly string[];
 
   constructor(config: TmuxClientConfig) {
     this.bin = config.tmuxBin ?? "tmux";
     this.socketName = config.socketName;
+    this.commandPrefix = config.commandPrefix ?? [];
   }
 
   private run(args: string[]): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
-      const fullArgs = ["-L", this.socketName, ...args];
-      const proc = spawn(this.bin, fullArgs);
+      const tmuxArgs = ["-L", this.socketName, ...args];
+      const [spawnBin, spawnArgs] = this.commandPrefix.length > 0
+        ? [this.commandPrefix[0]!, [...this.commandPrefix.slice(1), this.bin, ...tmuxArgs]]
+        : [this.bin, tmuxArgs];
+      const proc = spawn(spawnBin, spawnArgs);
       const stdoutChunks: Buffer[] = [];
       const stderrChunks: Buffer[] = [];
 

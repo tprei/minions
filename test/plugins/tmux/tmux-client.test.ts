@@ -151,4 +151,57 @@ describe("TmuxClient", () => {
     spawnMock.mockReturnValue(makeMockProc("", "no such session", 1));
     await expect(client.pipePaneOff("gone-session")).rejects.toThrow(TmuxNoSuchSessionError);
   });
+
+  describe("commandPrefix", () => {
+    it("commandPrefix produces argv [prefix..., tmuxBin, '-L', socket, ...args]", async () => {
+      const prefixed = new TmuxClient({
+        socketName: "minions",
+        commandPrefix: ["docker", "exec", "minions-worker"],
+      });
+      spawnMock.mockReturnValue(makeMockProc("", "", 0));
+      await prefixed.waitForSignal("release-x");
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        "docker",
+        ["exec", "minions-worker", "tmux", "-L", "minions", "wait-for", "-S", "release-x"],
+      );
+    });
+
+    it("empty commandPrefix uses unprefixed argv (regression)", async () => {
+      const noPrefix = new TmuxClient({ socketName: "minions", commandPrefix: [] });
+      spawnMock.mockReturnValue(makeMockProc("", "", 0));
+      await noPrefix.waitForSignal("token");
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        "tmux",
+        ["-L", "minions", "wait-for", "-S", "token"],
+      );
+    });
+
+    it("absent commandPrefix uses unprefixed argv (regression)", async () => {
+      const noPrefix = new TmuxClient({ socketName: "minions" });
+      spawnMock.mockReturnValue(makeMockProc("", "", 0));
+      await noPrefix.waitForSignal("token");
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        "tmux",
+        ["-L", "minions", "wait-for", "-S", "token"],
+      );
+    });
+
+    it("commandPrefix + custom tmuxBin places tmuxBin after prefix, not before", async () => {
+      const prefixed = new TmuxClient({
+        socketName: "minions",
+        tmuxBin: "/usr/local/bin/tmux",
+        commandPrefix: ["docker", "exec", "minions-worker"],
+      });
+      spawnMock.mockReturnValue(makeMockProc("", "", 0));
+      await prefixed.waitForSignal("tok");
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        "docker",
+        ["exec", "minions-worker", "/usr/local/bin/tmux", "-L", "minions", "wait-for", "-S", "tok"],
+      );
+    });
+  });
 });

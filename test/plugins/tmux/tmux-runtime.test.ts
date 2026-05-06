@@ -127,6 +127,15 @@ async function makeBackend(dataDir = "/data") {
   return new TmuxRuntimeBackend({ dataDir });
 }
 
+async function makeDockerBackend(dataDir = "/data", workerSessionsDir = "/sessions") {
+  const { TmuxRuntimeBackend } = await import("../../../src/plugins/tmux/tmux-runtime.js");
+  return new TmuxRuntimeBackend({
+    dataDir,
+    commandPrefix: ["docker", "exec", "minions-worker"],
+    workerSessionsDir,
+  });
+}
+
 beforeEach(async () => {
   const client = await getMockClientInner();
   client.newSession.mockReset().mockResolvedValue(undefined);
@@ -559,5 +568,79 @@ describe("TmuxRuntimeBackend", () => {
     expect(unlinkMock).toHaveBeenCalledWith(
       expect.stringContaining("cleanup-session.log.done"),
     );
+  });
+});
+
+describe("TmuxRuntimeBackend (docker mode)", () => {
+  it("workerSessionsDir translates newSession and pipePane paths to worker-POV", async () => {
+    const backend = await makeDockerBackend("/data", "/sessions");
+    const client = await getMockClientInner();
+
+    await backend.start({ taskId: "t1", workflowId: "wf-1", command: ["echo"] });
+
+    const sessionCall = client.newSession.mock.calls[0] as [{ name: string; scriptPath: string }];
+    expect(sessionCall[0].scriptPath).toMatch(/^\/sessions\/.+\.sh$/);
+
+    const pipeCall = client.pipePane.mock.calls[0] as [string, string];
+    expect(pipeCall[1]).toMatch(/^\/sessions\/.+\.log$/);
+  });
+
+  it("host-POV paths (mkdir, writeFile) use dataDir, not workerSessionsDir", async () => {
+    const backend = await makeDockerBackend("/data", "/sessions");
+    const fs = await getFsMock();
+
+    await backend.start({ taskId: "t1", workflowId: "wf-1", command: ["echo"] });
+
+    expect(fs.mkdir).toHaveBeenCalledWith(expect.stringContaining("/data/sessions"), expect.anything());
+    const writeFileCalls = (fs.writeFile.mock.calls as [string, ...unknown[]][]).map((c) => c[0]);
+    expect(writeFileCalls.some((p) => p.startsWith("/data/sessions"))).toBe(true);
+    expect(writeFileCalls.every((p) => !p.startsWith("/sessions/"))).toBe(true);
+  });
+
+  it("container-down: probe returns 'missing' when commandPrefix is set and stderr matches DOCKER_DOWN_RE", async () => {
+    const backend = await makeDockerBackend();
+    const client = await getMockClientInner();
+    const { TmuxError: TE } = await import("../../../src/plugins/tmux/tmux-client.js");
+
+    client.sessionExists.mockRejectedValue(
+      new TE("tmux exited with code 1", "", "Error response from daemon: No such container: minions-worker", 1),
+    );
+
+    expect(await backend.probe("any-session")).toBe("missing");
+  });
+
+  it("container-down: start rethrows when container is stopped", async () => {
+    const backend = await makeDockerBackend();
+    const client = await getMockClientInner();
+    const { TmuxError: TE } = await import("../../../src/plugins/tmux/tmux-client.js");
+
+    const dockerError = new TE("tmux exited with code 1", "", "Error response from daemon: is not running", 1);
+    client.newSession.mockRejectedValue(dockerError);
+
+    await expect(
+      backend.start({ taskId: "t1", workflowId: "wf-1", command: ["echo"] }),
+    ).rejects.toThrow(dockerError);
+  });
+
+  it("non-docker TmuxError in probe rethrows even when commandPrefix is set", async () => {
+    const backend = await makeDockerBackend();
+    const client = await getMockClientInner();
+    const { TmuxError: TE } = await import("../../../src/plugins/tmux/tmux-client.js");
+
+    const socketError = new TE("tmux exited with code 1", "", "socket error unrelated to docker", 1);
+    client.sessionExists.mockRejectedValue(socketError);
+
+    await expect(backend.probe("any-session")).rejects.toThrow(socketError);
+  });
+
+  it("default workerSessionsDir equals dataDir/sessions (local-mode regression)", async () => {
+    const { TmuxRuntimeBackend } = await import("../../../src/plugins/tmux/tmux-runtime.js");
+    const backend = new TmuxRuntimeBackend({ dataDir: "/mydata" });
+    const client = await getMockClientInner();
+
+    await backend.start({ taskId: "t1", workflowId: "wf-1", command: ["echo"] });
+
+    const sessionCall = client.newSession.mock.calls[0] as [{ name: string; scriptPath: string }];
+    expect(sessionCall[0].scriptPath).toMatch(/^\/mydata\/sessions\/.+\.sh$/);
   });
 });

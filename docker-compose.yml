@@ -1,0 +1,16 @@
+services:
+  minions-worker:
+    image: minions-worker:dev
+    container_name: minions-worker
+    restart: unless-stopped
+    user: "1001:1001"
+    volumes:
+      - minions-worker-home:/home/minions
+      - minions-worker-workspace:/workspace
+      - minions-worker-cache:/cache
+      - /var/lib/minions/sessions:/sessions
+
+volumes:
+  minions-worker-home:
+  minions-worker-workspace:
+  minions-worker-cache:
