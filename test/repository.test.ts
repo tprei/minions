@@ -69,16 +69,18 @@ describe("InMemoryWorkflowRepository", () => {
     expect(events[0]?.cursor).toBe(3);
   });
 
-  it("idempotency roundtrip: lookup returns what was recorded", async () => {
+  it("idempotency roundtrip: lookup returns what was saved via save()", async () => {
     const repo = new InMemoryWorkflowRepository();
-    await repo.recordIdempotency("wf-1", "key-abc", "op-1");
+    const workflow = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(workflow, [], [{ key: "key-abc", resultRef: "op-1" }]);
 
     await expect(repo.lookupIdempotency("wf-1", "key-abc")).resolves.toBe("op-1");
   });
 
   it("idempotency keys are scoped per workflow", async () => {
     const repo = new InMemoryWorkflowRepository();
-    await repo.recordIdempotency("wf-1", "key-abc", "op-1");
+    const workflow = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(workflow, [], [{ key: "key-abc", resultRef: "op-1" }]);
 
     await expect(repo.lookupIdempotency("wf-2", "key-abc")).resolves.toBeUndefined();
   });
@@ -95,5 +97,27 @@ describe("InMemoryWorkflowRepository", () => {
 
     const skipped = { ...workflow, version: 3 };
     await expect(repo.save(skipped, [])).rejects.toBeInstanceOf(DomainError);
+  });
+
+  it("listRecoverable returns workflows with non-completed status", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const wf1 = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    const wf2 = createSingleTaskWorkflow("wf-2", { title: "T2", prompt: "P2" }, () => now);
+    await repo.save(wf1, []);
+    await repo.save(wf2, []);
+
+    const recoverable = await repo.listRecoverable();
+    expect(recoverable.map((w) => w.id).sort()).toEqual(["wf-1", "wf-2"]);
+  });
+
+  it("listRecoverable excludes completed workflows", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(wf, []);
+    const completed = { ...wf, version: 2, status: "completed" as const };
+    await repo.save(completed, []);
+
+    const recoverable = await repo.listRecoverable();
+    expect(recoverable).toHaveLength(0);
   });
 });

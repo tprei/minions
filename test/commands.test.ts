@@ -42,6 +42,20 @@ describe("applyCommand happy paths", () => {
     expect(result.events.some((e) => e.kind === "graph-operation-changed")).toBe(true);
   });
 
+  it("request-restack writes idempotency row atomically with save", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    await seedWorkflow(repo);
+
+    await applyCommand(repo, {
+      kind: "request-restack",
+      workflowId: "wf-1",
+      input: { operationId: "op-1", ancestorId: "wf-1:task", idempotencyKey: "k1", now },
+    });
+
+    const ref = await repo.lookupIdempotency("wf-1", "k1");
+    expect(ref).toBe("op-1");
+  });
+
   it("start-restack transitions operation to running", async () => {
     const repo = new InMemoryWorkflowRepository();
     await seedWorkflow(repo);
@@ -109,6 +123,24 @@ describe("applyCommand happy paths", () => {
     });
 
     expect(result.workflow.operations["op-1"]?.status).toBe("conflict");
+  });
+
+  it("recoveryIdempotency option writes row atomically with save", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    await seedWorkflow(repo);
+
+    await applyCommand(
+      repo,
+      {
+        kind: "transition-task",
+        workflowId: "wf-1",
+        transition: { kind: "mark-ready", taskId: "wf-1:task", now },
+      },
+      { recoveryIdempotency: { key: "recovery-key-1", resultRef: "recovery:recover-task:wf-1:task" } },
+    );
+
+    const ref = await repo.lookupIdempotency("wf-1", "recovery-key-1");
+    expect(ref).toBe("recovery:recover-task:wf-1:task");
   });
 });
 

@@ -9,9 +9,10 @@ import type {
   TaskRecoveryAction,
 } from "./recovery.js";
 import { planRecovery } from "./recovery.js";
-import type { WorkflowRepository } from "./repository.js";
+import type { IdempotencyRecord, WorkflowRepository } from "./repository.js";
 import type { RestackExecutor } from "./restack-executor.js";
 import { planRestack } from "./restack.js";
+import type { RuntimeBackend } from "../plugins/runtime-backend.js";
 import type { TransitionKind } from "./transitions.js";
 
 export interface RecoveryService {
@@ -21,12 +22,13 @@ export interface RecoveryService {
 interface ServiceDeps {
   repo: WorkflowRepository;
   executor: RestackExecutor;
+  runtime: RuntimeBackend;
   now: () => string;
 }
 
 interface DispatchPlan {
   key: string;
-  run: (deps: ServiceDeps) => Promise<{ result: CommandResult; resultRef: string } | null>;
+  run: (deps: ServiceDeps) => Promise<CommandResult | null>;
 }
 
 type ActionRule<A extends RecoveryAction> = (workflow: Workflow, action: A) => DispatchPlan | null;
@@ -43,18 +45,27 @@ const taskActionRule: ActionRule<TaskRecoveryAction> = (workflow, action) => {
   const task = workflow.graph[action.taskId];
   if (!task) return null;
 
+  const planKey = `recovery:${workflow.id}:${action.taskId}:${action.kind}:${task.runs.length}`;
+
   return {
-    key: `recovery:${workflow.id}:${action.taskId}:${action.kind}:${task.runs.length}`,
+    key: planKey,
     run: async (deps) => {
+      if (action.kind === "stop-runtime" && action.sessionId) {
+        await deps.runtime.stop(action.sessionId);
+      }
+
+      const recoveryRecord: IdempotencyRecord = {
+        key: planKey,
+        resultRef: `recovery:${action.kind}:${action.taskId}`,
+      };
+
       const command: Command = {
         kind: "transition-task",
         workflowId: workflow.id,
         transition: { kind: transitionKind, taskId: action.taskId, now: deps.now() },
       };
-      const result = await applyCommand(deps.repo, command);
-      const updated = result.workflow.graph[action.taskId];
-      const resultRef = updated ? `task:${action.taskId}:v${updated.version}` : `task:${action.taskId}`;
-      return { result, resultRef };
+
+      return applyCommand(deps.repo, command, { recoveryIdempotency: recoveryRecord });
     },
   };
 };
@@ -63,12 +74,15 @@ const resumeOperationRule: ActionRule<GraphOperationRecoveryAction> = (workflow,
   const operation = workflow.operations[action.operationId];
   if (!operation) return null;
 
+  const planKey = `recovery:${workflow.id}:${action.operationId}:resume:${operation.attempt}`;
+
   return {
-    key: `recovery:${workflow.id}:${action.operationId}:resume:${operation.attempt}`,
+    key: planKey,
     run: async (deps) => {
       let current = workflow;
 
       if (operation.status === "pending") {
+        // Intermediate start-restack calls don't need recovery idempotency — already idempotent against workflow state.
         const started = await applyCommand(deps.repo, {
           kind: "start-restack",
           workflowId: workflow.id,
@@ -84,9 +98,15 @@ const resumeOperationRule: ActionRule<GraphOperationRecoveryAction> = (workflow,
       const plan = planRestack(current, running.targetNodeId);
       const outcome = await deps.executor.execute(plan, running);
 
-      const result =
-        outcome.kind === "completed"
-          ? await applyCommand(deps.repo, {
+      const recoveryRecord: IdempotencyRecord = {
+        key: planKey,
+        resultRef: `recovery:resume-graph-operation:${action.operationId}`,
+      };
+
+      return outcome.kind === "completed"
+        ? applyCommand(
+            deps.repo,
+            {
               kind: "complete-restack",
               workflowId: workflow.id,
               input: {
@@ -94,18 +114,20 @@ const resumeOperationRule: ActionRule<GraphOperationRecoveryAction> = (workflow,
                 artifactsByTaskId: outcome.artifactsByTaskId,
                 now: deps.now(),
               },
-            })
-          : await applyCommand(deps.repo, {
+            },
+            { recoveryIdempotency: recoveryRecord },
+          )
+        : applyCommand(
+            deps.repo,
+            {
               kind: "mark-restack-conflict",
               workflowId: workflow.id,
               operationId: action.operationId,
               error: outcome.error,
               now: deps.now(),
-            });
-
-      const finalOp = result.workflow.operations[action.operationId];
-      const resultRef = `operation:${action.operationId}:${finalOp?.status ?? "unknown"}`;
-      return { result, resultRef };
+            },
+            { recoveryIdempotency: recoveryRecord },
+          );
     },
   };
 };
@@ -113,9 +135,7 @@ const resumeOperationRule: ActionRule<GraphOperationRecoveryAction> = (workflow,
 const ACTION_RULES: { [K in RecoveryAction["kind"]]: ActionRule<Extract<RecoveryAction, { kind: K }>> } = {
   "recover-task": taskActionRule,
   "stop-runtime": taskActionRule,
-  // slice 4 will wire this to a real probe.
   "probe-gate": () => null,
-  // future slice raises this to a human.
   "operator-review": () => null,
   "resume-graph-operation": resumeOperationRule,
 };
@@ -123,9 +143,10 @@ const ACTION_RULES: { [K in RecoveryAction["kind"]]: ActionRule<Extract<Recovery
 export function createRecoveryService(
   repo: WorkflowRepository,
   executor: RestackExecutor,
+  runtime: RuntimeBackend,
   now: () => string,
 ): RecoveryService {
-  const deps: ServiceDeps = { repo, executor, now };
+  const deps: ServiceDeps = { repo, executor, runtime, now };
 
   return {
     async scan(workflowId, options) {
@@ -158,9 +179,5 @@ async function dispatchAction(
   const existing = await deps.repo.lookupIdempotency(workflow.id, plan.key);
   if (existing !== undefined) return null;
 
-  const outcome = await plan.run(deps);
-  if (!outcome) return null;
-
-  await deps.repo.recordIdempotency(workflow.id, plan.key, outcome.resultRef);
-  return outcome.result;
+  return plan.run(deps);
 }

@@ -9,6 +9,7 @@ import { DomainError } from "../domain/errors.js";
 import { createWorkflow } from "../domain/workflow.js";
 import type { WorkflowSpec } from "../domain/types.js";
 import { domainErrorToHttp } from "./errors.js";
+import { validateCommand, validateWorkflowSpec } from "./validators.js";
 
 export interface ServerDeps {
   repo: WorkflowRepository;
@@ -60,14 +61,26 @@ export function createServer(deps: ServerDeps): Hono {
   });
 
   app.post("/workflows", async (c) => {
-    let spec: WorkflowSpec;
+    let body: unknown;
     try {
-      spec = await c.req.json<WorkflowSpec>();
+      body = await c.req.json();
     } catch {
       return c.json({ code: "invalid_body", message: "request body is not valid JSON" }, 400);
     }
 
-    const workflow = createWorkflow(spec);
+    const validation = validateWorkflowSpec(body);
+    if (!validation.ok) {
+      return c.json(
+        {
+          code: "invalid_request",
+          message: validation.failure.message,
+          details: { field: validation.failure.field, expected: validation.failure.expected },
+        },
+        400,
+      );
+    }
+
+    const workflow = createWorkflow(body as WorkflowSpec);
     await repo.save(workflow, []);
     return c.json(workflow, 201);
   });
@@ -91,6 +104,18 @@ export function createServer(deps: ServerDeps): Hono {
     const kind = body["kind"];
     if (typeof kind !== "string" || !VALID_COMMAND_KINDS.has(kind as CommandKind)) {
       return c.json({ code: "invalid_kind", message: `unknown command kind: ${String(kind)}` }, 400);
+    }
+
+    const validation = validateCommand(body);
+    if (!validation.ok) {
+      return c.json(
+        {
+          code: "invalid_request",
+          message: validation.failure.message,
+          details: { field: validation.failure.field, expected: validation.failure.expected },
+        },
+        400,
+      );
     }
 
     const result = await applyCommand(repo, body as unknown as Command);

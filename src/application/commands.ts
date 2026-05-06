@@ -2,7 +2,7 @@ import { deriveEvents } from "../domain/events.js";
 import type { WorkflowEvent } from "../domain/events.js";
 import { DomainError } from "../domain/errors.js";
 import type { Workflow } from "../domain/types.js";
-import type { WorkflowRepository } from "./repository.js";
+import type { IdempotencyRecord, WorkflowRepository } from "./repository.js";
 import {
   completeRestackOperation,
   markRestackConflict,
@@ -25,6 +25,10 @@ export type CommandKind = Command["kind"];
 export interface CommandResult {
   workflow: Workflow;
   events: WorkflowEvent[];
+}
+
+export interface CommandOptions {
+  recoveryIdempotency?: IdempotencyRecord;
 }
 
 interface CommandRule<C extends Command = Command> {
@@ -60,6 +64,7 @@ const COMMANDS: { [K in Command["kind"]]: CommandRule<Extract<Command, { kind: K
 export async function applyCommand(
   repo: WorkflowRepository,
   command: Command,
+  options: CommandOptions = {},
 ): Promise<CommandResult> {
   if (command.kind === "request-restack") {
     const existing = await repo.lookupIdempotency(command.workflowId, command.input.idempotencyKey);
@@ -81,14 +86,20 @@ export async function applyCommand(
   const next = rule.apply(workflow, command);
   const events = rule.events(workflow, next, command);
 
-  await repo.save(next, events);
+  const idempotency: IdempotencyRecord[] = [];
 
   if (command.kind === "request-restack") {
     const op = next.operations[command.input.operationId];
     if (op) {
-      await repo.recordIdempotency(command.workflowId, command.input.idempotencyKey, op.id);
+      idempotency.push({ key: command.input.idempotencyKey, resultRef: op.id });
     }
   }
+
+  if (options.recoveryIdempotency) {
+    idempotency.push(options.recoveryIdempotency);
+  }
+
+  await repo.save(next, events, idempotency.length > 0 ? idempotency : undefined);
 
   return { workflow: next, events };
 }

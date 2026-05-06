@@ -3,6 +3,7 @@ import { applyCommand } from "../src/application/commands.js";
 import { createRecoveryService } from "../src/application/recovery-service.js";
 import { NoopRestackExecutor } from "../src/application/restack-executor.js";
 import { InMemoryWorkflowRepository } from "../src/application/repository.js";
+import { StubRuntimeBackend } from "../src/plugins/stub-runtime.js";
 import { createSingleTaskWorkflow } from "../src/domain/workflow.js";
 
 const started = "2026-05-04T11:19:00.000Z";
@@ -29,7 +30,7 @@ async function seedReady() {
 describe("RecoveryService.scan", () => {
   it("recovers a stale-ready task back to pending", async () => {
     const repo = await seedReady();
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
 
     const results = await service.scan("wf-1", defaultOptions);
 
@@ -54,7 +55,7 @@ describe("RecoveryService.scan", () => {
       },
     });
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
     const results = await service.scan("wf-1", defaultOptions);
 
     expect(results.length).toBeGreaterThanOrEqual(1);
@@ -64,7 +65,7 @@ describe("RecoveryService.scan", () => {
 
   it("second scan produces zero new events for the same conditions", async () => {
     const repo = await seedReady();
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
 
     await service.scan("wf-1", defaultOptions);
 
@@ -78,28 +79,30 @@ describe("RecoveryService.scan", () => {
 
   it("throws not_found for unknown workflow", async () => {
     const repo = new InMemoryWorkflowRepository();
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
 
     await expect(service.scan("missing", defaultOptions)).rejects.toMatchObject({ code: "not_found" });
   });
 
   it("records an idempotency key after recovering a stale-ready task", async () => {
     const repo = await seedReady();
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
 
     await service.scan("wf-1", defaultOptions);
 
     const key = `recovery:wf-1:wf-1:task:recover-task:0`;
     const ref = await repo.lookupIdempotency("wf-1", key);
-    expect(ref).toMatch(/^task:wf-1:task:v\d+$/);
+    expect(ref).toBe("recovery:recover-task:wf-1:task");
   });
 
   it("skips dispatch when the idempotency key is pre-recorded", async () => {
     const repo = await seedReady();
     const key = `recovery:wf-1:wf-1:task:recover-task:0`;
-    await repo.recordIdempotency("wf-1", key, "task:wf-1:task:v2");
+    // Seed the idempotency row via save() — recordIdempotency is removed from the interface
+    const wf = await repo.get("wf-1");
+    await repo.save({ ...wf!, version: wf!.version + 1 }, [], [{ key, resultRef: "recovery:recover-task:wf-1:task" }]);
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
     const results = await service.scan("wf-1", defaultOptions);
 
     expect(results).toHaveLength(0);
