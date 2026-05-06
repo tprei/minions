@@ -98,6 +98,7 @@ describe.skipIf(process.env["MWF_HAS_TMUX"] !== "1")("TmuxRuntimeBackend integra
     expect(output).toContain("line1");
     expect(output).toContain("line2");
     await backend.stop(sessionId);
+    expect(await backend.probe(sessionId)).toBe("missing");
   });
 
   it("attach with fromOffset skips earlier bytes", async () => {
@@ -119,6 +120,7 @@ describe.skipIf(process.env["MWF_HAS_TMUX"] !== "1")("TmuxRuntimeBackend integra
 
     expect(chunks[0]?.offset).toBe(30);
     await backend.stop(sessionId);
+    expect(await backend.probe(sessionId)).toBe("missing");
   });
 
   it("idempotent stop: second call doesn't throw", async () => {
@@ -128,6 +130,7 @@ describe.skipIf(process.env["MWF_HAS_TMUX"] !== "1")("TmuxRuntimeBackend integra
       command: ["sh", "-c", "sleep 10"],
     });
     await backend.stop(sessionId);
+    expect(await backend.probe(sessionId)).toBe("missing");
     await expect(backend.stop(sessionId)).resolves.toBeUndefined();
   });
 
@@ -157,6 +160,7 @@ describe.skipIf(process.env["MWF_HAS_TMUX"] !== "1")("TmuxRuntimeBackend integra
       expect(output).toContain("spaced");
 
       await altBackend.stop(sessionId);
+      expect(await altBackend.probe(sessionId)).toBe("missing");
       const { exec } = await import("node:child_process");
       const { promisify } = await import("node:util");
       await promisify(exec)(`tmux -L ${altSocket} kill-server`).catch(() => {});
@@ -187,6 +191,7 @@ describe.skipIf(process.env["MWF_HAS_TMUX"] !== "1")("TmuxRuntimeBackend integra
     const output = Buffer.concat(chunks.map((b) => Buffer.from(b))).toString();
     expect(output).not.toContain("should-not-run");
     await backend.stop(sessionId);
+    expect(await backend.probe(sessionId)).toBe("missing");
   });
 
   it("argv quoting end-to-end: special chars reach the process intact", async () => {
@@ -211,6 +216,7 @@ describe.skipIf(process.env["MWF_HAS_TMUX"] !== "1")("TmuxRuntimeBackend integra
     expect(output).toContain("$VAR");
     expect(output).toContain("a;b");
     await backend.stop(sessionId);
+    expect(await backend.probe(sessionId)).toBe("missing");
   });
 
   it("attach receives final output and terminates without abort (PRIMARY invariant)", async () => {
@@ -248,6 +254,7 @@ describe.skipIf(process.env["MWF_HAS_TMUX"] !== "1")("TmuxRuntimeBackend integra
     const output = Buffer.concat(chunks.map((b) => Buffer.from(b))).toString();
     expect(output).toContain("running");
     await backend.stop(sessionId);
+    expect(await backend.probe(sessionId)).toBe("missing");
   });
 
   it("fresh attach after stop returns trailing bytes", async () => {
@@ -259,6 +266,7 @@ describe.skipIf(process.env["MWF_HAS_TMUX"] !== "1")("TmuxRuntimeBackend integra
 
     await new Promise((r) => setTimeout(r, 500));
     await backend.stop(sessionId);
+    expect(await backend.probe(sessionId)).toBe("missing");
 
     const controller = new AbortController();
     const chunks: Uint8Array[] = [];
@@ -312,6 +320,7 @@ describe.skipIf(process.env["MWF_HAS_TMUX"] !== "1")("TmuxRuntimeBackend integra
     await backend.stop(sessionId);
     await attachPromise;
 
+    expect(await backend.probe(sessionId)).toBe("missing");
     const output = Buffer.concat(chunks.map((b) => Buffer.from(b))).toString();
     expect(output).toContain("done");
   }, 10000);

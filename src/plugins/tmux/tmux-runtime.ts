@@ -9,6 +9,12 @@ import type {
   RuntimeStartSpec,
 } from "../runtime-backend.js";
 import { buildLauncherScript } from "./launcher-script.js";
+import {
+  LOG_READ_CHUNK_SIZE,
+  PANE_PROBE_INTERVAL_MS,
+  SENTINEL_POLL_INTERVAL_MS,
+  SENTINEL_TIMEOUT_MS,
+} from "./constants.js";
 import { followLog } from "./log-follow.js";
 import { TmuxClient, TmuxNoSuchSessionError } from "./tmux-client.js";
 
@@ -120,11 +126,6 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
       ? AbortSignal.any([opts.signal, internal.signal])
       : internal.signal;
 
-    const POLL_INTERVAL_MS = 250;
-    const SENTINEL_POLL_MS = 25;
-    const SENTINEL_CAP_MS = 1000;
-    const READ_SIZE = 64 * 1024;
-
     let terminated = false;
     let lastOffset = fromOffset;
 
@@ -144,7 +145,7 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
         terminated = true;
         internal.abort();
       }
-    }, POLL_INTERVAL_MS);
+    }, PANE_PROBE_INTERVAL_MS);
 
     try {
       for await (const chunk of followLog(logPath, fromOffset, signal)) {
@@ -166,7 +167,7 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
     // Poll for the sentinel written by the pipe-pane wrapper (`cat >> log; touch log.done`).
     // The sentinel only appears after cat exits (i.e., after all bytes are flushed to the
     // log). The cap is a safety net; under normal conditions the sentinel appears first.
-    const deadline = Date.now() + SENTINEL_CAP_MS;
+    const deadline = Date.now() + SENTINEL_TIMEOUT_MS;
     while (Date.now() < deadline) {
       try {
         await fsp.access(donePath);
@@ -174,7 +175,7 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
       } catch {
         // sentinel not yet present
       }
-      await new Promise<void>((r) => setTimeout(r, SENTINEL_POLL_MS));
+      await new Promise<void>((r) => setTimeout(r, SENTINEL_POLL_INTERVAL_MS));
     }
 
     const handle = await fsp.open(logPath, "r").catch(() => null);
@@ -184,7 +185,7 @@ export class TmuxRuntimeBackend implements RuntimeBackend {
       const finalSize = stat.size;
       let readOffset = lastOffset;
       while (readOffset < finalSize) {
-        const toRead = Math.min(READ_SIZE, finalSize - readOffset);
+        const toRead = Math.min(LOG_READ_CHUNK_SIZE, finalSize - readOffset);
         const buf = Buffer.allocUnsafe(toRead);
         const { bytesRead } = await handle.read(buf, 0, toRead, readOffset);
         if (bytesRead === 0) break;

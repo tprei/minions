@@ -25,7 +25,6 @@ export interface TransitionCommand {
   expectedVersion?: number;
   expectedSessionId?: string;
   sessionId?: string;
-  // slice 5 plumbs real provider/runtime values; "unknown" is the default for slice 2
   providerType?: string;
   runtimeType?: string;
   artifacts?: Artifact[];

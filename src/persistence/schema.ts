@@ -1,5 +1,5 @@
 // Schema definitions for the SQLite-backed repository. Migrations land in a
-// sibling file when the schema starts evolving (slice 5+).
+// sibling file when the schema starts evolving.
 
 export const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS workflows (

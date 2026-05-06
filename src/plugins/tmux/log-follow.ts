@@ -1,12 +1,11 @@
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
+import { LOG_READ_CHUNK_SIZE } from "./constants.js";
 
 export interface LogChunk {
   offset: number;
   bytes: Uint8Array;
 }
-
-const READ_SIZE = 64 * 1024;
 
 export async function* followLog(
   path: string,
@@ -56,7 +55,7 @@ export async function* followLog(
       if (size < offset) offset = 0;
 
       while (offset < size && !signal.aborted) {
-        const toRead = Math.min(READ_SIZE, size - offset);
+        const toRead = Math.min(LOG_READ_CHUNK_SIZE, size - offset);
         const buf = Buffer.allocUnsafe(toRead);
         const { bytesRead } = await handle.read(buf, 0, toRead, offset);
         if (bytesRead === 0) break;
