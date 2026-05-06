@@ -10,7 +10,7 @@ The Docker worker is an isolated container (`minions-worker`) that runs tmux ses
 
 - Docker 24+
 - `docker compose` v2+
-- The host engine runs as uid 1001 (default recommendation) or the bind-mount directory is group-writable by gid 1001 (alternative — see below)
+- The host engine runs as uid 1001 (matching the container's `minions` user)
 
 ### 1. Build the image
 
@@ -34,22 +34,12 @@ sudo mkdir -p /var/lib/minions/sessions
 
 The worker runs as uid/gid 1001 (`minions` user). The host engine writes session scripts and reads logs from `/var/lib/minions/sessions`. Both sides must have read/write access.
 
-**Option A (recommended) — run the host engine as uid 1001:**
+Run the host engine as uid 1001:
 
 ```sh
 sudo useradd -u 1001 -m minionsd   # if the user doesn't exist yet
 sudo chown 1001:1001 /var/lib/minions/sessions
 # then run minionsd as uid 1001
-```
-
-**Option B — chmod + shared group:**
-
-```sh
-sudo groupadd -g 1001 minions
-sudo usermod -aG minions <your-engine-user>
-sudo chown root:1001 /var/lib/minions/sessions
-sudo chmod 0775 /var/lib/minions/sessions
-# log out and back in so the group membership takes effect
 ```
 
 ### 4. Start the worker

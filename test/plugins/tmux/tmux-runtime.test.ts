@@ -727,4 +727,20 @@ describe("TmuxRuntimeBackend (docker mode)", () => {
     expect(chunks).toHaveLength(0);
     expect(client.pipePaneOff).toHaveBeenCalledWith("docker-down-session");
   });
+
+  it("generic daemon error that is NOT container-down does not match isDockerDown — probe rethrows", async () => {
+    const backend = await makeDockerBackend();
+    const client = await getMockClientInner();
+    const { TmuxError: TE } = await import("../../../src/plugins/tmux/tmux-client.js");
+
+    const daemonError = new TE(
+      "tmux exited with code 1",
+      "",
+      "Error response from daemon: pull access denied for private-image",
+      1,
+    );
+    client.sessionExists.mockRejectedValue(daemonError);
+
+    await expect(backend.probe("any-session")).rejects.toThrow(daemonError);
+  });
 });
