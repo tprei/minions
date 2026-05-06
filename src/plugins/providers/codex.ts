@@ -98,19 +98,27 @@ export class CodexProvider implements ProviderPlugin {
       case "item.started": {
         const item = json["item"] as Record<string, unknown> | undefined;
         const itemType = item?.["type"] as string | undefined;
-        if (
-          item !== undefined &&
-          (itemType === "command_execution" ||
-            itemType === "mcp_tool_call" ||
-            itemType === "web_search" ||
-            itemType === "file_change")
-        ) {
+        if (item !== undefined && itemType !== undefined) {
+          let toolInput: unknown = null;
+          if (itemType === "command_execution") {
+            toolInput = item["command"] ?? null;
+          } else if (itemType === "mcp_tool_call") {
+            toolInput = item["arguments"] ?? null;
+          } else if (itemType === "web_search") {
+            toolInput = { query: item["query"] ?? null };
+          } else if (itemType === "file_change") {
+            toolInput = { changes: item["changes"] ?? null };
+          } else {
+            return [];
+          }
+          const toolName =
+            itemType === "mcp_tool_call" ? String(item["tool"] ?? "mcp_tool_call") : itemType;
           return [
             {
               kind: "tool_call",
               id: String(item["id"] ?? ""),
-              name: String(itemType),
-              input: item["input"] ?? item["command"] ?? null,
+              name: toolName,
+              input: toolInput,
             },
           ];
         }
@@ -133,18 +141,19 @@ export class CodexProvider implements ProviderPlugin {
               kind: "tool_result",
               id: String(item?.["id"] ?? ""),
               output: item?.["aggregated_output"] ?? null,
-              isError: status === "failed",
+              isError: status === "failed" || status === "declined",
             },
           ];
         }
         if (itemType === "mcp_tool_call") {
           const status = item?.["status"] as string | undefined;
+          const isFailed = status === "failed";
           return [
             {
               kind: "tool_result",
               id: String(item?.["id"] ?? ""),
-              output: item?.["result"] ?? null,
-              isError: status === "failed",
+              output: isFailed ? (item?.["error"] ?? item?.["result"] ?? null) : (item?.["result"] ?? null),
+              isError: isFailed,
             },
           ];
         }

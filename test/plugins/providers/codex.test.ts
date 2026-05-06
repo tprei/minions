@@ -202,4 +202,62 @@ describe("CodexProvider", () => {
     const provider = new CodexProvider();
     expect(() => provider.parseFrame("{bad}")).toThrow("malformed JSON line");
   });
+
+  it("item.started for mcp_tool_call uses arguments as input and tool as name", () => {
+    const provider = new CodexProvider();
+    const args = { path: "/tmp/foo.txt" };
+    const events = provider.parseFrame(
+      encode({
+        type: "item.started",
+        item: { type: "mcp_tool_call", id: "mcp-2", server: "fs", tool: "read_file", arguments: args },
+      }),
+    );
+    expect(events).toEqual([{ kind: "tool_call", id: "mcp-2", name: "read_file", input: args }]);
+  });
+
+  it("item.started for web_search wraps query in input object", () => {
+    const provider = new CodexProvider();
+    const events = provider.parseFrame(
+      encode({
+        type: "item.started",
+        item: { type: "web_search", id: "ws-2", query: "typescript types" },
+      }),
+    );
+    expect(events).toEqual([{ kind: "tool_call", id: "ws-2", name: "web_search", input: { query: "typescript types" } }]);
+  });
+
+  it("item.started for file_change wraps changes in input object", () => {
+    const provider = new CodexProvider();
+    const changes = [{ path: "/tmp/bar.ts", kind: "update" }];
+    const events = provider.parseFrame(
+      encode({
+        type: "item.started",
+        item: { type: "file_change", id: "fc-2", changes },
+      }),
+    );
+    expect(events).toEqual([{ kind: "tool_call", id: "fc-2", name: "file_change", input: { changes } }]);
+  });
+
+  it("command_execution with status declined emits isError true", () => {
+    const provider = new CodexProvider();
+    const events = provider.parseFrame(
+      encode({
+        type: "item.completed",
+        item: { type: "command_execution", id: "cmd-2", aggregated_output: "", status: "declined" },
+      }),
+    );
+    expect(events).toEqual([{ kind: "tool_result", id: "cmd-2", output: "", isError: true }]);
+  });
+
+  it("mcp_tool_call with status failed emits error field in output with isError true", () => {
+    const provider = new CodexProvider();
+    const error = { message: "tool not found" };
+    const events = provider.parseFrame(
+      encode({
+        type: "item.completed",
+        item: { type: "mcp_tool_call", id: "mcp-3", server: "fs", tool: "read_file", arguments: {}, error, status: "failed" },
+      }),
+    );
+    expect(events).toEqual([{ kind: "tool_result", id: "mcp-3", output: error, isError: true }]);
+  });
 });
