@@ -67,8 +67,11 @@ export class CodexProvider implements ProviderPlugin {
             kind: "usage",
             inputTokens: typeof usage?.["input_tokens"] === "number" ? usage["input_tokens"] : 0,
             outputTokens: typeof usage?.["output_tokens"] === "number" ? usage["output_tokens"] : 0,
-            ...(typeof usage?.["reasoning_tokens"] === "number"
-              ? { reasoningTokens: usage["reasoning_tokens"] }
+            ...(typeof usage?.["cached_input_tokens"] === "number"
+              ? { cachedInputTokens: usage["cached_input_tokens"] }
+              : {}),
+            ...(typeof usage?.["reasoning_output_tokens"] === "number"
+              ? { reasoningTokens: usage["reasoning_output_tokens"] }
               : {}),
           },
           {
@@ -118,44 +121,51 @@ export class CodexProvider implements ProviderPlugin {
         const item = json["item"] as Record<string, unknown> | undefined;
         const itemType = item?.["type"] as string | undefined;
         if (itemType === "agent_message") {
-          const output = item?.["output"];
-          const text =
-            typeof output === "string"
-              ? output
-              : Array.isArray(output)
-                ? (output as unknown[])
-                    .map((o) => {
-                      const ob = o as Record<string, unknown>;
-                      return ob["type"] === "output_text" ? String(ob["text"] ?? "") : "";
-                    })
-                    .join("")
-                : "";
-          return [{ kind: "assistant_text", text }];
+          return [{ kind: "assistant_text", text: String(item?.["text"] ?? "") }];
         }
         if (itemType === "reasoning") {
-          const summaries = item?.["summary"];
-          const text = Array.isArray(summaries)
-            ? (summaries as unknown[])
-                .map((s) => {
-                  const sb = s as Record<string, unknown>;
-                  return sb["type"] === "summary_text" ? String(sb["text"] ?? "") : "";
-                })
-                .join("")
-            : String(summaries ?? "");
-          return [{ kind: "thinking", text }];
+          return [{ kind: "thinking", text: String(item?.["text"] ?? "") }];
         }
-        if (
-          itemType === "command_execution" ||
-          itemType === "mcp_tool_call" ||
-          itemType === "web_search" ||
-          itemType === "file_change"
-        ) {
+        if (itemType === "command_execution") {
           const status = item?.["status"] as string | undefined;
           return [
             {
               kind: "tool_result",
               id: String(item?.["id"] ?? ""),
-              output: item?.["output"] ?? item?.["result"] ?? null,
+              output: item?.["aggregated_output"] ?? null,
+              isError: status === "failed",
+            },
+          ];
+        }
+        if (itemType === "mcp_tool_call") {
+          const status = item?.["status"] as string | undefined;
+          return [
+            {
+              kind: "tool_result",
+              id: String(item?.["id"] ?? ""),
+              output: item?.["result"] ?? null,
+              isError: status === "failed",
+            },
+          ];
+        }
+        if (itemType === "file_change") {
+          const status = item?.["status"] as string | undefined;
+          return [
+            {
+              kind: "tool_result",
+              id: String(item?.["id"] ?? ""),
+              output: item?.["changes"] ?? null,
+              isError: status === "failed",
+            },
+          ];
+        }
+        if (itemType === "web_search") {
+          const status = item?.["status"] as string | undefined;
+          return [
+            {
+              kind: "tool_result",
+              id: String(item?.["id"] ?? ""),
+              output: item?.["query"] ?? null,
               isError: status === "failed",
             },
           ];

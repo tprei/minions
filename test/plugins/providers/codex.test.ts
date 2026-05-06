@@ -36,7 +36,7 @@ describe("CodexProvider", () => {
         item: {
           type: "agent_message",
           id: "msg-1",
-          output: [{ type: "output_text", text: "Hi there!" }],
+          text: "Hi there!",
         },
       }),
     );
@@ -54,7 +54,7 @@ describe("CodexProvider", () => {
     const completedCmd = provider.parseFrame(
       encode({
         type: "item.completed",
-        item: { type: "command_execution", id: "cmd-1", output: "file1\nfile2\n", status: "completed" },
+        item: { type: "command_execution", id: "cmd-1", aggregated_output: "file1\nfile2\n", status: "completed" },
       }),
     );
     expect(completedCmd).toEqual([
@@ -112,7 +112,7 @@ describe("CodexProvider", () => {
         item: {
           type: "reasoning",
           id: "r-1",
-          summary: [{ type: "summary_text", text: "I reasoned about it" }],
+          text: "I reasoned about it",
         },
       }),
     );
@@ -122,6 +122,59 @@ describe("CodexProvider", () => {
   it("item.updated returns empty array", () => {
     const provider = new CodexProvider();
     expect(provider.parseFrame(encode({ type: "item.updated", item: { id: "x" } }))).toEqual([]);
+  });
+
+  it("turn.completed maps cached_input_tokens and reasoning_output_tokens", () => {
+    const provider = new CodexProvider();
+    const events = provider.parseFrame(
+      encode({
+        type: "turn.completed",
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+          cached_input_tokens: 40,
+          reasoning_output_tokens: 10,
+        },
+      }),
+    );
+    const usageEvent = events.find((e) => e.kind === "usage") as ProviderEvent & { kind: "usage" };
+    expect(usageEvent?.cachedInputTokens).toBe(40);
+    expect(usageEvent?.reasoningTokens).toBe(10);
+  });
+
+  it("mcp_tool_call completed uses result field", () => {
+    const provider = new CodexProvider();
+    const result = { content: [{ type: "text", text: "tool output" }], structured_content: null };
+    const events = provider.parseFrame(
+      encode({
+        type: "item.completed",
+        item: { type: "mcp_tool_call", id: "mcp-1", server: "fs", tool: "read", arguments: {}, result, status: "completed" },
+      }),
+    );
+    expect(events).toEqual([{ kind: "tool_result", id: "mcp-1", output: result, isError: false }]);
+  });
+
+  it("file_change completed uses changes field", () => {
+    const provider = new CodexProvider();
+    const changes = [{ path: "/tmp/foo.ts", kind: "add" }];
+    const events = provider.parseFrame(
+      encode({
+        type: "item.completed",
+        item: { type: "file_change", id: "fc-1", changes, status: "completed" },
+      }),
+    );
+    expect(events).toEqual([{ kind: "tool_result", id: "fc-1", output: changes, isError: false }]);
+  });
+
+  it("web_search completed uses query field", () => {
+    const provider = new CodexProvider();
+    const events = provider.parseFrame(
+      encode({
+        type: "item.completed",
+        item: { type: "web_search", id: "ws-1", query: "openai codex" },
+      }),
+    );
+    expect(events).toEqual([{ kind: "tool_result", id: "ws-1", output: "openai codex", isError: false }]);
   });
 
   it("top-level error event emits non-recoverable error", () => {

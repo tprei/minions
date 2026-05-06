@@ -38,13 +38,17 @@ describe("ClaudeCodeProvider", () => {
     });
     const userToolResult = encode({
       type: "user",
-      content: [{ type: "tool_result", tool_use_id: "tu1", content: "file contents", is_error: false }],
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "tu1", content: "file contents", is_error: false }],
+      },
     });
     const resultSuccess = encode({
       type: "result",
       subtype: "success",
       session_id: "abc-uuid",
       usage: { input_tokens: 10, output_tokens: 5 },
+      total_cost_usd: 0.0042,
       duration_ms: 1000,
       turns: 2,
     });
@@ -60,7 +64,7 @@ describe("ClaudeCodeProvider", () => {
 
     const resultEvents = provider.parseFrame(resultSuccess);
     expect(resultEvents).toHaveLength(2);
-    expect(resultEvents[0]).toEqual({ kind: "usage", inputTokens: 10, outputTokens: 5 });
+    expect(resultEvents[0]).toEqual({ kind: "usage", inputTokens: 10, outputTokens: 5, costUsd: 0.0042 });
     expect(resultEvents[1]).toMatchObject({ kind: "final", sessionRef: "abc-uuid" });
   });
 
@@ -139,6 +143,48 @@ describe("ClaudeCodeProvider", () => {
   it("stream_event returns empty array", () => {
     const line = encode({ type: "stream_event", data: {} });
     expect(provider.parseFrame(line)).toEqual([]);
+  });
+
+  it("rate_limit_event returns empty array (not an error)", () => {
+    const line = encode({ type: "rate_limit_event", limit: 1000, remaining: 0 });
+    expect(provider.parseFrame(line)).toEqual([]);
+  });
+
+  it("result with total_cost_usd propagates costUsd", () => {
+    const line = encode({
+      type: "result",
+      subtype: "success",
+      session_id: "s",
+      usage: { input_tokens: 1, output_tokens: 1 },
+      total_cost_usd: 0.001,
+    });
+    const events = provider.parseFrame(line);
+    const usageEvent = events.find((e) => e.kind === "usage") as ProviderEvent & { kind: "usage" };
+    expect(usageEvent?.costUsd).toBe(0.001);
+  });
+
+  it("result without total_cost_usd leaves costUsd undefined", () => {
+    const line = encode({
+      type: "result",
+      subtype: "success",
+      session_id: "s",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    const events = provider.parseFrame(line);
+    const usageEvent = events.find((e) => e.kind === "usage") as ProviderEvent & { kind: "usage" };
+    expect(usageEvent?.costUsd).toBeUndefined();
+  });
+
+  it("user message tool_result reads from message.content nesting", () => {
+    const line = encode({
+      type: "user",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "tr1", content: "ok", is_error: false }],
+      },
+    });
+    const events = provider.parseFrame(line);
+    expect(events).toEqual([{ kind: "tool_result", id: "tr1", output: "ok", isError: false }]);
   });
 
   describe("loginStatus", () => {

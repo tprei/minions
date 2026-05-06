@@ -84,7 +84,8 @@ export class ClaudeCodeProvider implements ProviderPlugin {
       }
 
       case "user": {
-        const content = Array.isArray(json["content"]) ? (json["content"] as unknown[]) : [];
+        const userMsg = json["message"] as Record<string, unknown> | undefined;
+        const content = Array.isArray(userMsg?.["content"]) ? (userMsg["content"] as unknown[]) : [];
         const events: ProviderEvent[] = [];
         for (const block of content) {
           const b = block as Record<string, unknown>;
@@ -122,7 +123,7 @@ export class ClaudeCodeProvider implements ProviderPlugin {
           ...(typeof usage?.["cache_read_input_tokens"] === "number"
             ? { cachedInputTokens: usage["cache_read_input_tokens"] }
             : {}),
-          ...(typeof usage?.["cost_usd"] === "number" ? { costUsd: usage["cost_usd"] } : {}),
+          ...(typeof json["total_cost_usd"] === "number" ? { costUsd: json["total_cost_usd"] } : {}),
         });
 
         events.push({
@@ -139,6 +140,10 @@ export class ClaudeCodeProvider implements ProviderPlugin {
       }
 
       case "stream_event": {
+        return [];
+      }
+
+      case "rate_limit_event": {
         return [];
       }
 
