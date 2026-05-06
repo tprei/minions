@@ -1,4 +1,4 @@
-import type { TaskNode, Workflow } from "../domain/types.js";
+import type { GraphOperation, TaskNode, Workflow } from "../domain/types.js";
 
 export type RuntimeProbeState = "live" | "dead" | "missing";
 
@@ -32,67 +32,95 @@ export interface RecoveryOptions {
   workflowCancelled?: boolean;
 }
 
+interface TaskRecoveryRule {
+  name: string;
+  matches: (task: TaskNode, options: RecoveryOptions) => boolean;
+  emit: (task: TaskNode, options: RecoveryOptions) => TaskRecoveryAction;
+}
+
+interface GraphOperationRecoveryRule {
+  name: string;
+  matches: (operation: GraphOperation) => boolean;
+  emit: (operation: GraphOperation) => GraphOperationRecoveryAction;
+}
+
+const TASK_RULES: TaskRecoveryRule[] = [
+  {
+    name: "workflow-cancelled-with-runtime",
+    matches: (task, options) => Boolean(options.workflowCancelled && task.sessionId),
+    emit: (task) => withSession(
+      { kind: "stop-runtime", taskId: task.id, reason: "workflow cancelled with live runtime" },
+      task.sessionId,
+    ),
+  },
+  {
+    name: "stale-ready-no-session",
+    matches: (task, options) =>
+      task.executionStatus === "ready" &&
+      !task.sessionId &&
+      ageMs(task, options.nowMs) >= options.staleReadyMs,
+    emit: (task) => ({ kind: "recover-task", taskId: task.id, reason: "stale ready task" }),
+  },
+  {
+    name: "running-without-session",
+    matches: (task) => task.executionStatus === "running" && !task.sessionId,
+    emit: (task) => ({
+      kind: "recover-task",
+      taskId: task.id,
+      reason: "running task has no session",
+    }),
+  },
+  {
+    name: "running-with-dead-probe",
+    matches: (task, options) => {
+      if (task.executionStatus !== "running" || !task.sessionId) return false;
+      const probe = options.runtimeProbes?.[task.sessionId];
+      return probe === "dead" || probe === "missing";
+    },
+    emit: (task, options) => {
+      const probe = options.runtimeProbes?.[task.sessionId ?? ""];
+      return withSession(
+        { kind: "recover-task", taskId: task.id, reason: `runtime probe is ${probe}` },
+        task.sessionId,
+      );
+    },
+  },
+  {
+    name: "stale-gate",
+    matches: (task, options) =>
+      (task.executionStatus === "quality-pending" || task.executionStatus === "ci-pending") &&
+      ageMs(task, options.nowMs) >= options.staleGateMs,
+    emit: (task) => ({
+      kind: "probe-gate",
+      taskId: task.id,
+      reason: `${task.executionStatus} timed out`,
+    }),
+  },
+];
+
+const OPERATION_RULES: GraphOperationRecoveryRule[] = [
+  {
+    name: "in-flight-graph-operation",
+    matches: (operation) => operation.status === "pending" || operation.status === "running",
+    emit: (operation) => ({
+      kind: "resume-graph-operation",
+      operationId: operation.id,
+      reason: `${operation.kind} operation is ${operation.status}`,
+    }),
+  },
+];
+
 export function planRecovery(workflow: Workflow, options: RecoveryOptions): RecoveryAction[] {
   const actions: RecoveryAction[] = [];
 
   for (const task of Object.values(workflow.graph)) {
-    if (options.workflowCancelled && task.sessionId) {
-      actions.push({
-        kind: "stop-runtime",
-        taskId: task.id,
-        sessionId: task.sessionId,
-        reason: "workflow cancelled with live runtime",
-      });
-      continue;
-    }
-
-    if (
-      task.executionStatus === "ready" &&
-      !task.sessionId &&
-      ageMs(task, options.nowMs) >= options.staleReadyMs
-    ) {
-      actions.push({ kind: "recover-task", taskId: task.id, reason: "stale ready task" });
-      continue;
-    }
-
-    if (task.executionStatus === "running" && !task.sessionId) {
-      actions.push({ kind: "recover-task", taskId: task.id, reason: "running task has no session" });
-      continue;
-    }
-
-    if (task.executionStatus === "running" && task.sessionId) {
-      const probe = options.runtimeProbes?.[task.sessionId];
-      if (probe === "dead" || probe === "missing") {
-        actions.push({
-          kind: "recover-task",
-          taskId: task.id,
-          sessionId: task.sessionId,
-          reason: `runtime probe is ${probe}`,
-        });
-        continue;
-      }
-    }
-
-    if (
-      (task.executionStatus === "quality-pending" || task.executionStatus === "ci-pending") &&
-      ageMs(task, options.nowMs) >= options.staleGateMs
-    ) {
-      actions.push({
-        kind: "probe-gate",
-        taskId: task.id,
-        reason: `${task.executionStatus} timed out`,
-      });
-    }
+    const rule = TASK_RULES.find((candidate) => candidate.matches(task, options));
+    if (rule) actions.push(rule.emit(task, options));
   }
 
   for (const operation of Object.values(workflow.operations)) {
-    if (operation.status === "pending" || operation.status === "running") {
-      actions.push({
-        kind: "resume-graph-operation",
-        operationId: operation.id,
-        reason: `${operation.kind} operation is ${operation.status}`,
-      });
-    }
+    const rule = OPERATION_RULES.find((candidate) => candidate.matches(operation));
+    if (rule) actions.push(rule.emit(operation));
   }
 
   return actions;
@@ -100,4 +128,9 @@ export function planRecovery(workflow: Workflow, options: RecoveryOptions): Reco
 
 function ageMs(task: TaskNode, nowMs: number): number {
   return nowMs - new Date(task.updatedAt).getTime();
+}
+
+function withSession(action: TaskRecoveryAction, sessionId: string | undefined): TaskRecoveryAction {
+  if (sessionId === undefined) return action;
+  return { ...action, sessionId };
 }
