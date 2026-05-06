@@ -29,8 +29,19 @@ describe("StubRuntimeBackend", () => {
     const backend = new StubRuntimeBackend();
     const { sessionId } = await backend.start({ taskId: "t1", workflowId: "wf-1", command: [] });
 
-    const chunks: Uint8Array[] = [];
+    const chunks: import("../../src/plugins/runtime-backend.js").RuntimeOutputChunk[] = [];
     for await (const chunk of backend.attach(sessionId)) {
+      chunks.push(chunk);
+    }
+    expect(chunks).toHaveLength(0);
+  });
+
+  it("attach with opts yields nothing", async () => {
+    const backend = new StubRuntimeBackend();
+    const { sessionId } = await backend.start({ taskId: "t1", workflowId: "wf-1", command: [] });
+
+    const chunks: import("../../src/plugins/runtime-backend.js").RuntimeOutputChunk[] = [];
+    for await (const chunk of backend.attach(sessionId, { fromOffset: 100 })) {
       chunks.push(chunk);
     }
     expect(chunks).toHaveLength(0);

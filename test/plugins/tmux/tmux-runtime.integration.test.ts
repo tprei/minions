@@ -1,0 +1,157 @@
+// Run with MWF_HAS_TMUX=1 npm test to exercise these. They're skipped by default.
+
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { TmuxRuntimeBackend } from "../../../src/plugins/tmux/tmux-runtime.js";
+
+function randomHex(n: number): string {
+  return randomBytes(n).toString("hex");
+}
+
+describe.skipIf(process.env["MWF_HAS_TMUX"] !== "1")("TmuxRuntimeBackend integration", () => {
+  let socketName: string;
+  let dataDir: string;
+  let backend: TmuxRuntimeBackend;
+
+  beforeEach(() => {
+    socketName = `minions-test-${process.pid}-${randomHex(4)}`;
+    dataDir = mkdtempSync(join(tmpdir(), "mwf-"));
+    backend = new TmuxRuntimeBackend({ dataDir, socketName });
+  });
+
+  afterEach(async () => {
+    try {
+      const { exec } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execAsync = promisify(exec);
+      await execAsync(`tmux -L ${socketName} kill-server`).catch(() => {});
+    } catch {
+      // best-effort
+    }
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it("full lifecycle: start → live → attach → stop → missing", async () => {
+    const { sessionId } = await backend.start({
+      taskId: "t1",
+      workflowId: "wf-1",
+      command: ["sh", "-c", "echo hello; sleep 5"],
+    });
+
+    expect(await backend.probe(sessionId)).toBe("live");
+
+    const controller = new AbortController();
+    const chunks: Uint8Array[] = [];
+    setTimeout(() => controller.abort(), 500);
+
+    for await (const chunk of backend.attach(sessionId, { fromOffset: 0, signal: controller.signal })) {
+      chunks.push(chunk.bytes);
+    }
+
+    const output = Buffer.concat(chunks.map((b) => Buffer.from(b))).toString();
+    expect(output).toContain("hello");
+
+    await backend.stop(sessionId);
+    expect(await backend.probe(sessionId)).toBe("missing");
+  });
+
+  it("live → dead → missing: process exits fast with remain-on-exit", async () => {
+    const { sessionId } = await backend.start({
+      taskId: "t2",
+      workflowId: "wf-1",
+      command: ["sh", "-c", "echo bye"],
+    });
+
+    let dead = false;
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      const state = await backend.probe(sessionId);
+      if (state === "dead") { dead = true; break; }
+    }
+    expect(dead).toBe(true);
+
+    await backend.stop(sessionId);
+    expect(await backend.probe(sessionId)).toBe("missing");
+  });
+
+  it("attach replay from offset 0 includes all early bytes", async () => {
+    const { sessionId } = await backend.start({
+      taskId: "t3",
+      workflowId: "wf-1",
+      command: ["sh", "-c", "printf 'line1\\nline2\\n'; sleep 5"],
+    });
+
+    await new Promise((r) => setTimeout(r, 500));
+
+    const controller = new AbortController();
+    const chunks: Uint8Array[] = [];
+    setTimeout(() => controller.abort(), 300);
+
+    for await (const chunk of backend.attach(sessionId, { fromOffset: 0, signal: controller.signal })) {
+      chunks.push(chunk.bytes);
+    }
+
+    const output = Buffer.concat(chunks.map((b) => Buffer.from(b))).toString();
+    expect(output).toContain("line1");
+    expect(output).toContain("line2");
+    await backend.stop(sessionId);
+  });
+
+  it("attach with fromOffset skips earlier bytes", async () => {
+    const { sessionId } = await backend.start({
+      taskId: "t4",
+      workflowId: "wf-1",
+      command: ["sh", "-c", "printf '%050d\\n' 0; sleep 5"],
+    });
+
+    await new Promise((r) => setTimeout(r, 500));
+
+    const controller = new AbortController();
+    const chunks: { offset: number; bytes: Uint8Array }[] = [];
+    setTimeout(() => controller.abort(), 300);
+
+    for await (const chunk of backend.attach(sessionId, { fromOffset: 30, signal: controller.signal })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks[0]?.offset).toBe(30);
+    await backend.stop(sessionId);
+  });
+
+  it("idempotent stop: second call doesn't throw", async () => {
+    const { sessionId } = await backend.start({
+      taskId: "t5",
+      workflowId: "wf-1",
+      command: ["sh", "-c", "sleep 10"],
+    });
+    await backend.stop(sessionId);
+    await expect(backend.stop(sessionId)).resolves.toBeUndefined();
+  });
+
+  it("argv quoting end-to-end: special chars reach the process intact", async () => {
+    const { sessionId } = await backend.start({
+      taskId: "t6",
+      workflowId: "wf-1",
+      command: ["sh", "-c", "printf '%s\\n' 'hello world' '$VAR' 'a;b'; sleep 5"],
+    });
+
+    await new Promise((r) => setTimeout(r, 500));
+
+    const controller = new AbortController();
+    const chunks: Uint8Array[] = [];
+    setTimeout(() => controller.abort(), 300);
+
+    for await (const chunk of backend.attach(sessionId, { fromOffset: 0, signal: controller.signal })) {
+      chunks.push(chunk.bytes);
+    }
+
+    const output = Buffer.concat(chunks.map((b) => Buffer.from(b))).toString();
+    expect(output).toContain("hello world");
+    expect(output).toContain("$VAR");
+    expect(output).toContain("a;b");
+    await backend.stop(sessionId);
+  });
+});

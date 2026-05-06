@@ -13,9 +13,20 @@ export interface RuntimeStartResult {
   runtimeType: string;
 }
 
+export interface RuntimeOutputChunk {
+  sessionId: string;
+  offset: number;
+  bytes: Uint8Array;
+}
+
+export interface RuntimeAttachOptions {
+  fromOffset?: number;
+  signal?: AbortSignal;
+}
+
 export interface RuntimeBackend {
   start(spec: RuntimeStartSpec): Promise<RuntimeStartResult>;
   stop(sessionId: string): Promise<void>;
   probe(sessionId: string): Promise<RuntimeProbeState>;
-  attach(sessionId: string): AsyncIterable<Uint8Array>;
+  attach(sessionId: string, opts?: RuntimeAttachOptions): AsyncIterable<RuntimeOutputChunk>;
 }

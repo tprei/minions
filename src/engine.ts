@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { dirname } from "node:path";
 import { runBootRecovery } from "./application/boot.js";
 import type { BootRecoveryReport } from "./application/boot.js";
 import { createRecoveryService } from "./application/recovery-service.js";
@@ -11,6 +12,7 @@ import { createServer } from "./transport/server.js";
 
 export interface EngineConfig {
   dbPath: string;
+  dataDir?: string;
   runtime?: RuntimeBackend;
   executor?: RestackExecutor;
   staleReadyMs?: number;
@@ -21,10 +23,12 @@ export interface EngineConfig {
 export interface Engine {
   server: Hono;
   bootReport: BootRecoveryReport;
+  dataDir: string;
   close(): Promise<void>;
 }
 
 export async function createEngine(config: EngineConfig): Promise<Engine> {
+  const dataDir = config.dataDir ?? `${dirname(config.dbPath)}/sessions`;
   const runtime = config.runtime ?? new StubRuntimeBackend();
   const executor = config.executor ?? new NoopRestackExecutor();
   const now = config.now ?? (() => new Date().toISOString());
@@ -45,6 +49,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   return {
     server,
     bootReport,
+    dataDir,
     async close() {
       repo.close();
     },

@@ -1,5 +1,11 @@
 import type { RuntimeProbeState } from "../application/recovery.js";
-import type { RuntimeBackend, RuntimeStartResult, RuntimeStartSpec } from "./runtime-backend.js";
+import type {
+  RuntimeAttachOptions,
+  RuntimeBackend,
+  RuntimeOutputChunk,
+  RuntimeStartResult,
+  RuntimeStartSpec,
+} from "./runtime-backend.js";
 
 export class StubRuntimeBackend implements RuntimeBackend {
   private counter = 0;
@@ -21,7 +27,7 @@ export class StubRuntimeBackend implements RuntimeBackend {
     return this.sessions.has(sessionId) ? "live" : "missing";
   }
 
-  attach(_sessionId: string): AsyncIterable<Uint8Array> {
+  attach(_sessionId: string, _opts?: RuntimeAttachOptions): AsyncIterable<RuntimeOutputChunk> {
     return {
       [Symbol.asyncIterator]: async function* () {},
     };
