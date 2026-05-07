@@ -387,7 +387,7 @@ describe("RunOrchestrator", () => {
     ]);
   });
 
-  it("publish throws sync: orchestrator completes anyway", async () => {
+  it("publish throws sync: error propagates to outer catch, orchestrator dispatches mark-interrupted", async () => {
     const calls: string[] = [];
     const applyCommand = vi.fn(async (cmd: Command): Promise<CommandResult> => {
       if (cmd.kind === "transition-task") calls.push(cmd.transition.kind);
@@ -405,7 +405,8 @@ describe("RunOrchestrator", () => {
       () => { throw new Error("publish exploded"); },
     );
     await expect(orchestrator.run()).resolves.toBeUndefined();
-    expect(calls).toContain("complete-runtime");
+    expect(calls).toContain("mark-interrupted");
+    expect(calls).not.toContain("complete-runtime");
   });
 
   it("error{recoverable:false} then final: both published, then mark-interrupted fires", async () => {

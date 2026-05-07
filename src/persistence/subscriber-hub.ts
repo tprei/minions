@@ -121,7 +121,7 @@ export class SubscriberHub {
     }
   }
 
-  notifyTransient(workflowId: string, event: WorkflowEvent): void {
+  notifyTransient(workflowId: string, event: Extract<WorkflowEvent, { kind: "provider-event" }>): void {
     const subs = this.subscribers.get(workflowId);
     if (!subs) return;
     for (const sub of Array.from(subs)) {

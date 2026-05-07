@@ -91,8 +91,7 @@ export class ContinueTaskService {
       throw err;
     }
 
-    const post = await repo.get(workflowId);
-    const postTask = post?.graph[taskId];
+    const postTask = runningResult.workflow.graph[taskId];
     const openRun = postTask ? getOpenRun(postTask.runs) : undefined;
     if (!openRun) throw new DomainError("invalid_transition", "no open run after mark-running", { taskId });
     const runId = openRun.id;

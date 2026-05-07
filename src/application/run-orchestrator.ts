@@ -86,11 +86,7 @@ export class RunOrchestrator {
 
         const event = item.event;
 
-        try {
-          this.deps.publish(event);
-        } catch (err) {
-          console.error("run-orchestrator transient publish failed:", err);
-        }
+        this.deps.publish(event);
 
         if (event.kind === "error" && !event.recoverable) {
           lastNonRecoverableError = event;

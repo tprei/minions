@@ -174,7 +174,7 @@ export class SQLiteWorkflowRepository implements WorkflowRepository {
     );
   }
 
-  publishTransient(workflowId: string, event: WorkflowEvent): void {
+  publishTransient(workflowId: string, event: Extract<WorkflowEvent, { kind: "provider-event" }>): void {
     this.hub.notifyTransient(workflowId, event);
   }
 

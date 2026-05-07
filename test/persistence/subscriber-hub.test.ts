@@ -21,7 +21,7 @@ function makeEvent(workflowId: string, cursor: number): WorkflowEvent {
   };
 }
 
-function makeTransientEvent(workflowId: string): WorkflowEvent {
+function makeTransientEvent(workflowId: string): Extract<WorkflowEvent, { kind: "provider-event" }> {
   return {
     cursor: 0,
     workflowId,
