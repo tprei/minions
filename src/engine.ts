@@ -4,6 +4,7 @@ import { runBootRecovery } from "./application/boot.js";
 import type { BootRecoveryReport, BootRespawnContext } from "./application/boot.js";
 import { applyCommand } from "./application/commands.js";
 import { ContinueTaskService } from "./application/continue-task-service.js";
+import { RetryTaskService } from "./application/retry-task-service.js";
 import { createRecoveryService } from "./application/recovery-service.js";
 import { NoopRestackExecutor } from "./application/restack-executor.js";
 import type { RestackExecutor } from "./application/restack-executor.js";
@@ -99,6 +100,13 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
 
   if (config.providerFactory) {
     serverDeps.continueTaskService = new ContinueTaskService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      providerFactory: config.providerFactory,
+      runtime,
+      now,
+    });
+    serverDeps.retryTaskService = new RetryTaskService({
       repo,
       applyCommand: (cmd) => applyCommand(repo, cmd),
       providerFactory: config.providerFactory,

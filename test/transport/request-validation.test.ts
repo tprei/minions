@@ -136,6 +136,39 @@ describe("request shape validation", () => {
     expect(body.code).toBe("invalid_workflow");
   });
 
+  it("retry-task with missing prompt returns 400 invalid_request", async () => {
+    const { app } = makeApp();
+
+    const res = await postCommand(app, {
+      kind: "retry-task",
+      workflowId: "wf-1",
+      taskId: "task-1",
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { code: string; details: { field: string; expected: string } };
+    expect(body.code).toBe("invalid_request");
+    expect(body.details.field).toBe("prompt");
+    expect(body.details.expected).toBe("non-empty string");
+  });
+
+  it("retry-task with empty prompt returns 400 invalid_request", async () => {
+    const { app } = makeApp();
+
+    const res = await postCommand(app, {
+      kind: "retry-task",
+      workflowId: "wf-1",
+      taskId: "task-1",
+      prompt: "   ",
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { code: string; details: { field: string; expected: string } };
+    expect(body.code).toBe("invalid_request");
+    expect(body.details.field).toBe("prompt");
+    expect(body.details.expected).toBe("non-empty string");
+  });
+
   it("continue-task with missing taskId returns 400 invalid_request", async () => {
     const { app } = makeApp();
 

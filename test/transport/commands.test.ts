@@ -5,20 +5,18 @@ import { createRecoveryService } from "../../src/application/recovery-service.js
 import { StubRuntimeBackend } from "../../src/plugins/stub-runtime.js";
 import { createServer } from "../../src/transport/server.js";
 import type { ContinueTaskService } from "../../src/application/continue-task-service.js";
+import type { RetryTaskService } from "../../src/application/retry-task-service.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
 import type { WorkflowEvent } from "../../src/domain/events.js";
 
 const now = "2026-05-04T11:19:00.000Z";
 
-function makeApp(continueTaskService?: ContinueTaskService) {
+function makeApp(opts: { continueTaskService?: ContinueTaskService; retryTaskService?: RetryTaskService } = {}) {
   const repo = new InMemoryWorkflowRepository();
   const executor = new NoopRestackExecutor();
   const runtime = new StubRuntimeBackend();
   const recoveryService = createRecoveryService(repo, executor, runtime, () => now);
-  const deps = continueTaskService
-    ? { repo, recoveryService, executor, continueTaskService }
-    : { repo, recoveryService, executor };
-  const app = createServer(deps);
+  const app = createServer({ repo, recoveryService, executor, ...opts });
   return { app, repo };
 }
 
@@ -179,7 +177,7 @@ describe("POST /commands", () => {
       run: vi.fn().mockResolvedValue({ workflow, events: [] }),
     } as unknown as ContinueTaskService;
 
-    const { app, repo } = makeApp(serviceStub);
+    const { app, repo } = makeApp({ continueTaskService: serviceStub });
     await repo.save(workflow, []);
 
     const res = await app.request("/commands", {
@@ -216,6 +214,58 @@ describe("POST /commands", () => {
         workflowId: "wf-1",
         taskId: "wf-1:task",
         prompt: "please continue",
+        now,
+      }),
+    });
+
+    expect(res.status).toBe(500);
+    const body = await res.json() as { code: string };
+    expect(body.code).toBe("internal_error");
+  });
+
+  it("retry-task routes to retryTaskService stub", async () => {
+    const workflow = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    const serviceStub = {
+      run: vi.fn().mockResolvedValue({ workflow, events: [] }),
+    } as unknown as RetryTaskService;
+
+    const { app, repo } = makeApp({ retryTaskService: serviceStub });
+    await repo.save(workflow, []);
+
+    const res = await app.request("/commands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "retry-task",
+        workflowId: "wf-1",
+        taskId: "wf-1:task",
+        prompt: "start fresh",
+        now,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(serviceStub.run).toHaveBeenCalledOnce();
+    expect(serviceStub.run).toHaveBeenCalledWith({
+      workflowId: "wf-1",
+      taskId: "wf-1:task",
+      prompt: "start fresh",
+    });
+  });
+
+  it("retry-task without service returns 500", async () => {
+    const { app, repo } = makeApp();
+    const workflow = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(workflow, []);
+
+    const res = await app.request("/commands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "retry-task",
+        workflowId: "wf-1",
+        taskId: "wf-1:task",
+        prompt: "start fresh",
         now,
       }),
     });
