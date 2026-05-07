@@ -349,4 +349,31 @@ describe("RunOrchestrator", () => {
     expect(updateRunTransitions).toHaveLength(1);
     expect(typeof updateRunTransitions[0]!["outputOffset"]).toBe("number");
   });
+
+  it("version_conflict on complete-runtime: retries and succeeds, mark-interrupted not dispatched", async () => {
+    const calls: string[] = [];
+    let completeRuntimeAttempts = 0;
+    const applyCommand = vi.fn(async (cmd: Command): Promise<CommandResult> => {
+      if (cmd.kind === "transition-task") {
+        calls.push(cmd.transition.kind);
+        if (cmd.transition.kind === "complete-runtime") {
+          completeRuntimeAttempts++;
+          if (completeRuntimeAttempts === 1) {
+            throw new DomainError("version_conflict", "concurrent write", { taskId: "task-1" });
+          }
+        }
+      }
+      return makeCommandResult();
+    });
+
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "ref-retry" };
+    const chunks = makeChunks(["line-1"], 0);
+
+    const orchestrator = makeOrchestrator([[finalEvent]], chunks, applyCommand);
+    await orchestrator.run();
+
+    expect(completeRuntimeAttempts).toBe(2);
+    expect(calls.filter((k) => k === "complete-runtime")).toHaveLength(2);
+    expect(calls).not.toContain("mark-interrupted");
+  });
 });

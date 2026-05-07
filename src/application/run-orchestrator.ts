@@ -25,6 +25,29 @@ export class RunOrchestrator {
     this.deps = deps;
   }
 
+  private async dispatchWithRetry(
+    transition: Omit<TransitionCommand, "expectedSessionId">,
+    attempts = 3,
+  ): Promise<void> {
+    const { workflowId, runtimeSessionId, applyCommand } = this.deps;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        await applyCommand({
+          kind: "transition-task",
+          workflowId,
+          transition: { ...transition, expectedSessionId: runtimeSessionId },
+        });
+        return;
+      } catch (err) {
+        if (err instanceof DomainError && err.code === "version_conflict" && i < attempts - 1) {
+          await new Promise((r) => setTimeout(r, 10));
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
   async run(): Promise<void> {
     const { workflowId, taskId, runtimeSessionId, provider, runtime, applyCommand, now } = this.deps;
 
@@ -92,7 +115,7 @@ export class RunOrchestrator {
 
         if (lastNonRecoverableError !== undefined) {
           try {
-            await dispatch({ kind: "mark-interrupted", taskId, now: now() });
+            await this.dispatchWithRetry({ kind: "mark-interrupted", taskId, now: now() });
           } catch (err) {
             if (isStale(err)) {
               console.error("run-orchestrator stale session on mark-interrupted, exiting:", (err as DomainError).message);
@@ -102,7 +125,7 @@ export class RunOrchestrator {
           }
         } else {
           try {
-            await dispatch({ kind: "complete-runtime", taskId, now: now() });
+            await this.dispatchWithRetry({ kind: "complete-runtime", taskId, now: now() });
           } catch (err) {
             if (isStale(err)) {
               console.error("run-orchestrator stale session on complete-runtime, exiting:", (err as DomainError).message);
@@ -135,7 +158,7 @@ export class RunOrchestrator {
       }
 
       try {
-        await dispatch({ kind: "mark-interrupted", taskId, now: now() });
+        await this.dispatchWithRetry({ kind: "mark-interrupted", taskId, now: now() });
       } catch (interruptErr) {
         if (isStale(interruptErr)) {
           console.error("run-orchestrator stale session on mark-interrupted, exiting:", (interruptErr as DomainError).message);
@@ -167,7 +190,7 @@ export class RunOrchestrator {
     }
 
     try {
-      await dispatch({ kind: "mark-interrupted", taskId, now: now() });
+      await this.dispatchWithRetry({ kind: "mark-interrupted", taskId, now: now() });
     } catch (interruptErr) {
       if (isStale(interruptErr)) {
         console.error("run-orchestrator stale session on mark-interrupted, exiting:", (interruptErr as DomainError).message);
