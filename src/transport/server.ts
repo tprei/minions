@@ -3,6 +3,7 @@ import { streamSSE } from "hono/streaming";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { applyCommand } from "../application/commands.js";
 import type { Command, CommandKind } from "../application/commands.js";
+import type { CIBabysitterService } from "../application/ci-babysitter-service.js";
 import type { ContinueTaskService } from "../application/continue-task-service.js";
 import type { MergeService } from "../application/merge-service.js";
 import { MergeServiceError } from "../application/merge-service.js";
@@ -25,6 +26,7 @@ export interface ServerDeps {
   continueTaskService?: ContinueTaskService;
   retryTaskService?: RetryTaskService;
   mergeService?: MergeService;
+  ciBabysitter?: CIBabysitterService;
   pushService?: PushService;
   subscriptions?: SubscriptionRepository;
   vapidPublicKey?: string;
@@ -97,6 +99,7 @@ export function createServer(deps: ServerDeps): Hono {
     const workflow = createWorkflow(body as WorkflowSpec);
     await repo.save(workflow, []);
     deps.pushService?.attach(workflow.id);
+    deps.ciBabysitter?.attach(workflow.id);
     return c.json(workflow, 201);
   });
 

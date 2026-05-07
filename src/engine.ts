@@ -28,6 +28,7 @@ import { TokenBucket } from "./plugins/github/rate-limiter.js";
 import { GitHubClient } from "./plugins/github/github-client.js";
 import { GitHubScmPlugin } from "./plugins/github/github-scm-plugin.js";
 import { MergeService } from "./application/merge-service.js";
+import { CIBabysitterService } from "./application/ci-babysitter-service.js";
 import type { WorkflowEvent } from "./domain/events.js";
 
 export interface EngineConfig {
@@ -204,26 +205,6 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     serverDeps.pwaRoot = pwaRoot;
   }
 
-  const githubToken = config.githubToken ?? process.env["MWF_GITHUB_TOKEN"];
-  if (githubToken && config.githubRepo) {
-    if (workspace instanceof StubWorkspaceBackend) {
-      throw new Error("githubToken + githubRepo requires a real workspace backend (set repoPath)");
-    }
-    const gitClient = sharedGitClient ?? new GitClient();
-    const bucket = new TokenBucket({ capacity: 20, refillPerSec: 10 });
-    const ghClient = new GitHubClient({ token: githubToken, bucket });
-    const scm = new GitHubScmPlugin({ github: ghClient, git: gitClient, token: githubToken });
-    serverDeps.mergeService = new MergeService({
-      repo,
-      applyCommand: (cmd) => applyCommand(repo, cmd),
-      scm,
-      workspace,
-      repoCoords: config.githubRepo,
-      baseBranch: config.githubBaseBranch ?? "main",
-      now,
-    });
-  }
-
   if (config.providerFactory) {
     serverDeps.continueTaskService = new ContinueTaskService({
       repo,
@@ -245,6 +226,44 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     });
   }
 
+  let ciBabysitterAbort: AbortController | undefined;
+
+  const githubToken = config.githubToken ?? process.env["MWF_GITHUB_TOKEN"];
+  if (githubToken && config.githubRepo) {
+    if (workspace instanceof StubWorkspaceBackend) {
+      throw new Error("githubToken + githubRepo requires a real workspace backend (set repoPath)");
+    }
+    const gitClient = sharedGitClient ?? new GitClient();
+    const bucket = new TokenBucket({ capacity: 20, refillPerSec: 10 });
+    const ghClient = new GitHubClient({ token: githubToken, bucket });
+    const scm = new GitHubScmPlugin({ github: ghClient, git: gitClient, token: githubToken });
+    serverDeps.mergeService = new MergeService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      scm,
+      workspace,
+      repoCoords: config.githubRepo,
+      baseBranch: config.githubBaseBranch ?? "main",
+      now,
+    });
+
+    if (config.providerFactory && serverDeps.continueTaskService) {
+      ciBabysitterAbort = new AbortController();
+      const babysitter = new CIBabysitterService({
+        workflowRepo: repo,
+        github: ghClient,
+        repoCoords: config.githubRepo,
+        applyCommand: (cmd) => applyCommand(repo, cmd),
+        continueTaskService: serverDeps.continueTaskService,
+        signal: ciBabysitterAbort.signal,
+        now,
+      });
+      serverDeps.ciBabysitter = babysitter;
+      const recoverableWorkflows = await repo.listRecoverable();
+      for (const w of recoverableWorkflows) babysitter.attach(w.id);
+    }
+  }
+
   const server = createServer(serverDeps);
 
   return {
@@ -253,6 +272,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     dataDir,
     async close() {
       pushAbort?.abort();
+      ciBabysitterAbort?.abort();
       for (const entry of activeOrchestrators) {
         entry.controller.abort();
       }

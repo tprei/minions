@@ -67,6 +67,20 @@ export interface MergePROpts {
   commitMessage?: string;
 }
 
+export interface GhCheckRun {
+  name: string;
+  status: "queued" | "in_progress" | "completed";
+  conclusion?: "success" | "failure" | "neutral" | "cancelled" | "skipped" | "timed_out" | "action_required" | "stale" | "pending";
+  htmlUrl?: string;
+  startedAt?: string;
+  completedAt?: string;
+  output?: { title?: string; summary?: string; text?: string };
+}
+
+const KNOWN_CONCLUSIONS = new Set([
+  "success", "failure", "neutral", "cancelled", "skipped", "timed_out", "action_required", "stale", "pending",
+]);
+
 export interface GitHubClientDeps {
   token: string;
   bucket: TokenBucket;
@@ -173,6 +187,44 @@ export class GitHubClient {
       mergeableState: pr.mergeable_state,
       state: pr.state,
     };
+  }
+
+  async listCheckRuns(owner: string, repo: string, headSha: string): Promise<GhCheckRun[]> {
+    await this.bucket.acquire();
+    const url = `${GITHUB_API}/repos/${owner}/${repo}/commits/${headSha}/check-runs?per_page=100`;
+    let data: unknown;
+    try {
+      data = await this.request(url);
+    } catch (err) {
+      if (err instanceof GitHubApiError && err.status === 404) return [];
+      throw err;
+    }
+    const body = data as { total_count: number; check_runs: Array<{
+      name: string;
+      status: string;
+      conclusion: string | null;
+      html_url?: string;
+      started_at?: string;
+      completed_at?: string;
+      output?: { title?: string; summary?: string; text?: string };
+    }> };
+    if (body.total_count > 100) {
+      console.warn(`listCheckRuns: total_count=${body.total_count} exceeds per_page=100 for ${owner}/${repo}@${headSha}; pagination deferred`);
+    }
+    return body.check_runs.map((r) => {
+      const run: GhCheckRun = {
+        name: r.name,
+        status: r.status as GhCheckRun["status"],
+      };
+      if (r.conclusion !== null && KNOWN_CONCLUSIONS.has(r.conclusion)) {
+        run.conclusion = r.conclusion as Exclude<GhCheckRun["conclusion"], undefined>;
+      }
+      if (r.html_url !== undefined) run.htmlUrl = r.html_url;
+      if (r.started_at !== undefined) run.startedAt = r.started_at;
+      if (r.completed_at !== undefined) run.completedAt = r.completed_at;
+      if (r.output !== undefined) run.output = r.output;
+      return run;
+    });
   }
 
   async mergePR(

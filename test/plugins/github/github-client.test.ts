@@ -82,4 +82,72 @@ describe("GitHubClient", () => {
     await expect(client.mergePR("owner", "repo", 1))
       .rejects.toMatchObject({ status: 409 });
   });
+
+  describe("listCheckRuns", () => {
+    it("returns parsed array on 200", async () => {
+      const body = {
+        total_count: 1,
+        check_runs: [{
+          name: "ci/test",
+          status: "completed",
+          conclusion: "success",
+          html_url: "https://github.com/checks/1",
+          started_at: "2026-05-06T10:00:00Z",
+          completed_at: "2026-05-06T10:05:00Z",
+          output: { title: "Tests passed", summary: "All green", text: "details" },
+        }],
+      };
+      const client = makeClient(mockFetch(200, body));
+      const runs = await client.listCheckRuns("owner", "repo", "abc123");
+      expect(runs).toHaveLength(1);
+      expect(runs[0]).toMatchObject({
+        name: "ci/test",
+        status: "completed",
+        conclusion: "success",
+        htmlUrl: "https://github.com/checks/1",
+        startedAt: "2026-05-06T10:00:00Z",
+        completedAt: "2026-05-06T10:05:00Z",
+        output: { title: "Tests passed", summary: "All green", text: "details" },
+      });
+    });
+
+    it("returns [] on 404", async () => {
+      const client = makeClient(mockFetch(404, "Not Found"));
+      const runs = await client.listCheckRuns("owner", "repo", "abc123");
+      expect(runs).toEqual([]);
+    });
+
+    it("throws on 5xx", async () => {
+      const client = makeClient(mockFetch(500, "Internal Server Error"));
+      await expect(client.listCheckRuns("owner", "repo", "abc123"))
+        .rejects.toBeInstanceOf(GitHubApiError);
+    });
+
+    it("logs warn when total_count > 100", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const body = {
+        total_count: 150,
+        check_runs: Array.from({ length: 1 }, (_, i) => ({
+          name: `check-${i}`,
+          status: "completed",
+          conclusion: "success",
+        })),
+      };
+      const client = makeClient(mockFetch(200, body));
+      await client.listCheckRuns("owner", "repo", "abc123");
+      expect(warnSpy).toHaveBeenCalledOnce();
+      expect(warnSpy.mock.calls[0]![0]).toMatch(/total_count=150/);
+      warnSpy.mockRestore();
+    });
+
+    it("maps unknown conclusion to undefined", async () => {
+      const body = {
+        total_count: 1,
+        check_runs: [{ name: "ci", status: "completed", conclusion: "some_future_conclusion" }],
+      };
+      const client = makeClient(mockFetch(200, body));
+      const runs = await client.listCheckRuns("owner", "repo", "abc123");
+      expect(runs[0]?.conclusion).toBeUndefined();
+    });
+  });
 });
