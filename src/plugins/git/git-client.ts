@@ -68,10 +68,18 @@ export class GitClient {
 
   async worktreeAdd(
     repoPath: string,
-    opts: { path: string; branch: string; baseRef?: string },
+    opts: { path: string; branch: string; baseRef?: string; resetBranch?: boolean },
   ): Promise<void> {
-    const args = ["worktree", "add", "-B", opts.branch, opts.path, opts.baseRef ?? "HEAD"];
-    await this.run(repoPath, args);
+    if (opts.resetBranch === true) {
+      await this.run(repoPath, ["worktree", "add", "-B", opts.branch, opts.path, opts.baseRef ?? "HEAD"]);
+    } else {
+      const exists = await this.branchExists(repoPath, opts.branch);
+      if (exists) {
+        await this.run(repoPath, ["worktree", "add", opts.path, opts.branch]);
+      } else {
+        await this.run(repoPath, ["worktree", "add", "-b", opts.branch, opts.path, opts.baseRef ?? "HEAD"]);
+      }
+    }
   }
 
   async worktreeRemove(

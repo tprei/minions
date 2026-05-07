@@ -64,6 +64,105 @@ describe.skipIf(!HAS_GIT)("GitWorktreeWorkspaceBackend integration", () => {
     }
   });
 
+  it("continue-task (resetBranch: false) preserves prior commits on existing branch", async () => {
+    const base = await mkdtemp(join(tmpdir(), "mwf-it-"));
+    const repoPath = join(base, "repo");
+    const workspaceRoot = join(base, "workspaces");
+
+    try {
+      await execFileAsync("mkdir", ["-p", repoPath, workspaceRoot]);
+      await initGitRepo(repoPath);
+
+      const gitClient = new GitClient();
+      const backend = await GitWorktreeWorkspaceBackend.create({
+        gitClient,
+        repoPath,
+        workspaceRoot,
+      });
+
+      // First create: simulates initial run (branch created fresh)
+      const h1 = await backend.create({
+        workflowId: "wf-1",
+        taskId: "task-1",
+        branch: "minions/wf1_task1",
+        mode: "worktree",
+        resetBranch: false,
+      });
+
+      // Commit something on that branch inside the worktree
+      await execFileAsync("git", ["-C", h1.path, "commit", "--allow-empty", "-m", "agent work"]);
+      const { stdout } = await execFileAsync("git", ["-C", h1.path, "rev-parse", "HEAD"]);
+      const agentCommit = stdout.trim();
+
+      await backend.cleanup(h1.workspaceId);
+
+      // Second create: continue-task — resetBranch: false must check out the existing branch
+      const h2 = await backend.create({
+        workflowId: "wf-1",
+        taskId: "task-1",
+        branch: "minions/wf1_task1",
+        mode: "worktree",
+        resetBranch: false,
+      });
+
+      // The agent commit must still be HEAD in the new worktree
+      const { stdout: head2 } = await execFileAsync("git", ["-C", h2.path, "rev-parse", "HEAD"]);
+      expect(head2.trim()).toBe(agentCommit);
+
+      await backend.cleanup(h2.workspaceId);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it("retry-task (resetBranch: true) resets existing branch to HEAD, discarding prior commits", async () => {
+    const base = await mkdtemp(join(tmpdir(), "mwf-it-"));
+    const repoPath = join(base, "repo");
+    const workspaceRoot = join(base, "workspaces");
+
+    try {
+      await execFileAsync("mkdir", ["-p", repoPath, workspaceRoot]);
+      await initGitRepo(repoPath);
+
+      const gitClient = new GitClient();
+      const backend = await GitWorktreeWorkspaceBackend.create({
+        gitClient,
+        repoPath,
+        workspaceRoot,
+      });
+
+      const { stdout: headBefore } = await execFileAsync("git", ["-C", repoPath, "rev-parse", "HEAD"]);
+      const mainHead = headBefore.trim();
+
+      const h1 = await backend.create({
+        workflowId: "wf-1",
+        taskId: "task-1",
+        branch: "minions/wf1_task1",
+        mode: "worktree",
+        resetBranch: false,
+      });
+
+      await execFileAsync("git", ["-C", h1.path, "commit", "--allow-empty", "-m", "old agent work"]);
+      await backend.cleanup(h1.workspaceId);
+
+      // Retry: resetBranch: true resets the branch back to HEAD
+      const h2 = await backend.create({
+        workflowId: "wf-1",
+        taskId: "task-1",
+        branch: "minions/wf1_task1",
+        mode: "worktree",
+        resetBranch: true,
+      });
+
+      const { stdout: head2 } = await execFileAsync("git", ["-C", h2.path, "rev-parse", "HEAD"]);
+      expect(head2.trim()).toBe(mainHead);
+
+      await backend.cleanup(h2.workspaceId);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
   it("two concurrent creates produce distinct paths and branches", async () => {
     const base = await mkdtemp(join(tmpdir(), "mwf-it-"));
     const repoPath = join(base, "repo");

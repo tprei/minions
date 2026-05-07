@@ -504,7 +504,7 @@ describe("RunOrchestrator", () => {
     expect(calls).not.toContain("mark-interrupted");
   });
 
-  it("post complete-runtime: workspace.cleanup called with the correct workspaceId", async () => {
+  it("post complete-runtime: workspace.cleanup NOT called (workspace preserved until slice 17)", async () => {
     const applyCommand = vi.fn(async (_cmd: Command): Promise<CommandResult> => makeCommandResult());
     const workspace = new StubWorkspaceBackend();
     const cleanupSpy = vi.spyOn(workspace, "cleanup");
@@ -529,8 +529,7 @@ describe("RunOrchestrator", () => {
     });
     await orch.run();
 
-    expect(cleanupSpy).toHaveBeenCalledOnce();
-    expect(cleanupSpy).toHaveBeenCalledWith("ws-wf1_task1");
+    expect(cleanupSpy).not.toHaveBeenCalled();
   });
 
   it("post mark-interrupted: workspace.cleanup called", async () => {
@@ -561,15 +560,14 @@ describe("RunOrchestrator", () => {
     expect(cleanupSpy).toHaveBeenCalledWith("ws-wf1_task1");
   });
 
-  it("workspace.cleanup throw is swallowed; orchestrator exits cleanly", async () => {
+  it("workspace.cleanup throw on mark-interrupted path is swallowed; orchestrator exits cleanly", async () => {
     const applyCommand = vi.fn(async (_cmd: Command): Promise<CommandResult> => makeCommandResult());
     const workspace = new StubWorkspaceBackend();
     vi.spyOn(workspace, "cleanup").mockRejectedValue(new Error("cleanup failed hard"));
 
-    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "ref-x" };
     const chunks = makeChunks(["line-1"], 0);
-    const provider = new StubProviderPlugin({ frames: [[finalEvent]] });
-    const runtime = makeRuntime(chunks);
+    const provider = new StubProviderPlugin({ frames: [] });
+    const runtime = makeRuntime(chunks, new Error("stream exploded"));
 
     const orch = new RunOrchestrator({
       workflowId: "wf-1",

@@ -70,6 +70,7 @@ export class RetryTaskService {
       taskId,
       branch: deriveBranch(workflowId, taskId),
       mode: "worktree",
+      resetBranch: true,
     });
 
     try {

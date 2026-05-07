@@ -136,9 +136,6 @@ export class RunOrchestrator {
         } else {
           try {
             await this.dispatchWithRetry({ kind: "complete-runtime", taskId, now: now() });
-            await workspace.cleanup(workspaceId).catch((err) => {
-              console.error("workspace cleanup failed:", err);
-            });
           } catch (err) {
             if (isStale(err)) {
               console.error("run-orchestrator stale session on complete-runtime, exiting:", (err as DomainError).message);

@@ -10,7 +10,7 @@ describe("StubWorkspaceBackend", () => {
       branch: "minions/wf1_task1",
     });
 
-    expect(handle.workspaceId).toBe("stub-wf-1_task-1");
+    expect(handle.workspaceId).toBe("stub-wf-1-b3dcb3_task-1-7afaa3");
     expect(handle.path).toBe("/stub-workspace");
     expect(handle.containerPath).toBe("/stub-workspace");
     expect(handle.mode).toBe("existing");

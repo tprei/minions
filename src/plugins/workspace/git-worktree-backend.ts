@@ -133,11 +133,12 @@ export class GitWorktreeWorkspaceBackend implements WorkspaceBackend {
     const workspaceId = `ws-${wfSlug}_${taskSlug}`;
 
     return this.withLock(this.repoPath, async () => {
-      const addOpts: { path: string; branch: string; baseRef?: string } = {
+      const addOpts: { path: string; branch: string; baseRef?: string; resetBranch?: boolean } = {
         path: worktreePath,
         branch: spec.branch,
       };
       if (spec.baseRef !== undefined) addOpts.baseRef = spec.baseRef;
+      if (spec.resetBranch !== undefined) addOpts.resetBranch = spec.resetBranch;
       await this.gitClient.worktreeAdd(this.repoPath, addOpts);
 
       const handle: WorkspaceHandle = {
@@ -153,17 +154,21 @@ export class GitWorktreeWorkspaceBackend implements WorkspaceBackend {
   }
 
   async cleanup(workspaceId: string): Promise<void> {
-    const handle = this.handles.get(workspaceId);
-    if (!handle) return;
-
-    if (handle.mode === "existing") {
+    if (workspaceId.startsWith("existing-")) {
       this.handles.delete(workspaceId);
       return;
     }
 
+    if (!workspaceId.startsWith("ws-")) {
+      return;
+    }
+
+    const slug = workspaceId.slice(3);
+    const worktreePath = join(this.workspaceRoot, slug);
+
     await this.withLock(this.repoPath, async () => {
       try {
-        await this.gitClient.worktreeRemove(this.repoPath, handle.path, { force: true });
+        await this.gitClient.worktreeRemove(this.repoPath, worktreePath, { force: true });
       } catch (err) {
         if (!isNotFoundError(err)) throw err;
       }
@@ -175,7 +180,7 @@ export class GitWorktreeWorkspaceBackend implements WorkspaceBackend {
       }
 
       try {
-        await fsp.rm(handle.path, { recursive: true, force: true });
+        await fsp.rm(worktreePath, { recursive: true, force: true });
       } catch {
         // non-fatal; directory may already be gone
       }

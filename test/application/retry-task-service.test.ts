@@ -540,6 +540,33 @@ describe("RetryTaskService", () => {
     expect(cleanupSpy).toHaveBeenCalledOnce();
   });
 
+  it("workspace.create called with resetBranch: true to discard prior agent commits", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "new-session" };
+    const provider = new StubProviderPlugin({ frames: [[finalEvent]] });
+
+    await makeNeedsReviewTask(repo);
+
+    const workspace = new StubWorkspaceBackend();
+    const createSpy = vi.spyOn(workspace, "create");
+
+    const service = new RetryTaskService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      providerFactory: () => provider,
+      runtime,
+      now: () => now,
+      workspace,
+      spawnOrchestrator: vi.fn(),
+    });
+
+    await service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "retry" });
+
+    expect(createSpy).toHaveBeenCalledOnce();
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ resetBranch: true }));
+  });
+
   it("mark-running failure triggers runtime.stop AND workspace.cleanup", async () => {
     const repo = new InMemoryWorkflowRepository();
     const runtime = new StubRuntimeBackend();

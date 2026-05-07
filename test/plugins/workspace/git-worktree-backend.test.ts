@@ -1,6 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { GitWorktreeWorkspaceBackend } from "../../../src/plugins/workspace/git-worktree-backend.js";
-import { WorkspaceError } from "../../../src/plugins/workspace-backend.js";
 import type { GitClient } from "../../../src/plugins/git/git-client.js";
 
 vi.mock("node:fs/promises", () => ({
@@ -63,10 +62,10 @@ describe("GitWorktreeWorkspaceBackend", () => {
       expect(gitClient.worktreeAdd).toHaveBeenCalledOnce();
       expect(gitClient.worktreeAdd).toHaveBeenCalledWith(
         FAKE_REPO,
-        expect.objectContaining({ path: "/fake/workspaces/wf1_task1", branch: "minions/wf1_task1" }),
+        expect.objectContaining({ path: "/fake/workspaces/wf1-a16d54_task1-943be8", branch: "minions/wf1_task1" }),
       );
-      expect(handle.workspaceId).toBe("ws-wf1_task1");
-      expect(handle.path).toBe("/fake/workspaces/wf1_task1");
+      expect(handle.workspaceId).toBe("ws-wf1-a16d54_task1-943be8");
+      expect(handle.path).toBe("/fake/workspaces/wf1-a16d54_task1-943be8");
       expect(handle.mode).toBe("worktree");
     });
   });
@@ -86,7 +85,7 @@ describe("GitWorktreeWorkspaceBackend", () => {
       expect(gitClient.worktreeAdd).not.toHaveBeenCalled();
       expect(handle.mode).toBe("existing");
       expect(handle.path).toBe(FAKE_REPO);
-      expect(handle.workspaceId).toBe("existing-wf1_task1");
+      expect(handle.workspaceId).toBe("existing-wf1-a16d54_task1-943be8");
     });
   });
 
@@ -164,24 +163,6 @@ describe("GitWorktreeWorkspaceBackend", () => {
   });
 
   describe("path validation", () => {
-    it("rejects workflowId that produces empty slug (e.g. '..')", async () => {
-      const gitClient = makeGitClient();
-      const backend = await makeBackend(gitClient);
-
-      await expect(
-        backend.create({ workflowId: "..", taskId: "task1", branch: "b", mode: "worktree" }),
-      ).rejects.toThrow(WorkspaceError);
-    });
-
-    it("rejects taskId that produces empty slug (e.g. special chars only)", async () => {
-      const gitClient = makeGitClient();
-      const backend = await makeBackend(gitClient);
-
-      await expect(
-        backend.create({ workflowId: "wf1", taskId: "..", branch: "b", mode: "worktree" }),
-      ).rejects.toThrow(WorkspaceError);
-    });
-
     it("accepts valid alphanumeric ids", async () => {
       const gitClient = makeGitClient();
       const backend = await makeBackend(gitClient);
@@ -189,6 +170,16 @@ describe("GitWorktreeWorkspaceBackend", () => {
       await expect(
         backend.create({ workflowId: "wf-1", taskId: "task_1", branch: "b", mode: "worktree" }),
       ).resolves.toBeDefined();
+    });
+
+    it("special-char-only id (..) maps to hash-only slug and is accepted", async () => {
+      const gitClient = makeGitClient();
+      const backend = await makeBackend(gitClient);
+
+      const handle = await backend.create({ workflowId: "..", taskId: "task1", branch: "b", mode: "worktree" });
+      // ".." sanitizes to "" but hash "5ec1f7" is used; workspaceId must not contain ".."
+      expect(handle.workspaceId).not.toContain("..");
+      expect(handle.workspaceId).toContain("5ec1f7");
     });
   });
 
@@ -214,15 +205,13 @@ describe("GitWorktreeWorkspaceBackend", () => {
       await expect(backend.cleanup(handle.workspaceId)).resolves.toBeUndefined();
     });
 
-    it("second cleanup of same worktree id is a no-op", async () => {
+    it("second cleanup of same worktree id is idempotent (git ops run again, swallowing not-found)", async () => {
       const gitClient = makeGitClient();
       const backend = await makeBackend(gitClient);
 
       const handle = await backend.create({ workflowId: "wf1", taskId: "task1", branch: "b", mode: "worktree" });
       await backend.cleanup(handle.workspaceId);
-      await backend.cleanup(handle.workspaceId);
-
-      expect(gitClient.worktreeRemove).toHaveBeenCalledOnce();
+      await expect(backend.cleanup(handle.workspaceId)).resolves.toBeUndefined();
     });
 
     it("swallows not_found error from worktreeRemove", async () => {
@@ -236,6 +225,58 @@ describe("GitWorktreeWorkspaceBackend", () => {
       const handle = await backend.create({ workflowId: "wf1", taskId: "task1", branch: "b", mode: "worktree" });
 
       await expect(backend.cleanup(handle.workspaceId)).resolves.toBeUndefined();
+    });
+
+    it("cleanup by workspaceId not in handles map (post-restart) executes git ops via computed path", async () => {
+      const gitClient = makeGitClient();
+      const backend = await makeBackend(gitClient);
+
+      // Simulate a workspaceId from a persisted TaskNode — backend has no in-memory handle for it
+      await expect(backend.cleanup("ws-wf1-a16d54_task1-943be8")).resolves.toBeUndefined();
+      expect(gitClient.worktreeRemove).toHaveBeenCalledOnce();
+      expect(gitClient.worktreeRemove).toHaveBeenCalledWith(
+        FAKE_REPO,
+        "/fake/workspaces/wf1-a16d54_task1-943be8",
+        { force: true },
+      );
+    });
+  });
+
+  describe("resetBranch", () => {
+    it("resetBranch: true passes resetBranch to worktreeAdd", async () => {
+      const gitClient = makeGitClient();
+      const backend = await makeBackend(gitClient);
+
+      await backend.create({
+        workflowId: "wf1",
+        taskId: "task1",
+        branch: "minions/wf1_task1",
+        mode: "worktree",
+        resetBranch: true,
+      });
+
+      expect(gitClient.worktreeAdd).toHaveBeenCalledWith(
+        FAKE_REPO,
+        expect.objectContaining({ resetBranch: true }),
+      );
+    });
+
+    it("resetBranch: false passes resetBranch: false to worktreeAdd", async () => {
+      const gitClient = makeGitClient();
+      const backend = await makeBackend(gitClient);
+
+      await backend.create({
+        workflowId: "wf1",
+        taskId: "task1",
+        branch: "minions/wf1_task1",
+        mode: "worktree",
+        resetBranch: false,
+      });
+
+      expect(gitClient.worktreeAdd).toHaveBeenCalledWith(
+        FAKE_REPO,
+        expect.objectContaining({ resetBranch: false }),
+      );
     });
   });
 
@@ -255,10 +296,10 @@ describe("GitWorktreeWorkspaceBackend", () => {
 
       const handle = await backend.create({ workflowId: "wf1", taskId: "task1", branch: "b", mode: "worktree" });
 
-      // host path: /fake/workspaces/wf1_task1
-      // container: /container/workspaces/wf1_task1
-      expect(handle.containerPath).toBe("/container/workspaces/wf1_task1");
-      expect(handle.path).toBe("/fake/workspaces/wf1_task1");
+      // host path: /fake/workspaces/wf1-a16d54_task1-943be8
+      // container: /container/workspaces/wf1-a16d54_task1-943be8
+      expect(handle.containerPath).toBe("/container/workspaces/wf1-a16d54_task1-943be8");
+      expect(handle.path).toBe("/fake/workspaces/wf1-a16d54_task1-943be8");
     });
   });
 });

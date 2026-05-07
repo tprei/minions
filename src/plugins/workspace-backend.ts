@@ -6,6 +6,7 @@ export interface WorkspaceCreateSpec {
   branch: string;
   baseRef?: string;
   mode?: WorkspaceMode;
+  resetBranch?: boolean;
 }
 
 export interface WorkspaceHandle {
@@ -32,6 +33,10 @@ export class WorkspaceError extends Error {
   }
 }
 
+import { createHash } from "node:crypto";
+
 export function slugify(s: string): string {
-  return s.replace(/[^a-zA-Z0-9_-]/g, "");
+  const sanitized = s.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
+  const hash = createHash("sha256").update(s).digest("hex").slice(0, 6);
+  return sanitized.length > 0 ? `${sanitized}-${hash}` : hash;
 }

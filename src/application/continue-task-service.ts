@@ -80,6 +80,7 @@ export class ContinueTaskService {
       taskId,
       branch: deriveBranch(workflowId, taskId),
       mode: "worktree",
+      resetBranch: false,
     });
 
     let runtimeSessionId: string | undefined;

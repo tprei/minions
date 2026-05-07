@@ -37,11 +37,15 @@ afterEach(() => {
 
 describe("GitClient", () => {
   describe("worktreeAdd", () => {
-    it("builds correct argv without baseRef", async () => {
+    it("resetBranch: true uses -B flag with HEAD", async () => {
       const client = new GitClient();
       spawnMock.mockReturnValue(makeMockProc("", "", 0));
 
-      await client.worktreeAdd("/repo", { path: "/workspace/wf_task", branch: "minions/wf_task" });
+      await client.worktreeAdd("/repo", {
+        path: "/workspace/wf_task",
+        branch: "minions/wf_task",
+        resetBranch: true,
+      });
 
       expect(spawnMock).toHaveBeenCalledWith(
         "git",
@@ -50,7 +54,7 @@ describe("GitClient", () => {
       );
     });
 
-    it("builds correct argv with baseRef", async () => {
+    it("resetBranch: true with baseRef uses -B flag with baseRef", async () => {
       const client = new GitClient();
       spawnMock.mockReturnValue(makeMockProc("", "", 0));
 
@@ -58,6 +62,7 @@ describe("GitClient", () => {
         path: "/workspace/wf_task",
         branch: "minions/wf_task",
         baseRef: "main",
+        resetBranch: true,
       });
 
       expect(spawnMock).toHaveBeenCalledWith(
@@ -65,6 +70,52 @@ describe("GitClient", () => {
         ["worktree", "add", "-B", "minions/wf_task", "/workspace/wf_task", "main"],
         { cwd: "/repo" },
       );
+    });
+
+    it("resetBranch: false, branch not yet existing — uses -b flag", async () => {
+      const client = new GitClient();
+      // first call: branchExists (rev-parse) → exits non-zero = branch doesn't exist
+      // second call: worktree add -b
+      spawnMock
+        .mockReturnValueOnce(makeMockProc("", "unknown revision", 128))
+        .mockReturnValueOnce(makeMockProc("", "", 0));
+
+      await client.worktreeAdd("/repo", {
+        path: "/workspace/wf_task",
+        branch: "minions/wf_task",
+        resetBranch: false,
+      });
+
+      const calls = spawnMock.mock.calls;
+      expect(calls).toHaveLength(2);
+      expect(calls[1]).toEqual([
+        "git",
+        ["worktree", "add", "-b", "minions/wf_task", "/workspace/wf_task", "HEAD"],
+        { cwd: "/repo" },
+      ]);
+    });
+
+    it("resetBranch: false, branch existing — checks out existing branch without -b/-B", async () => {
+      const client = new GitClient();
+      // first call: branchExists (rev-parse) → exits zero = branch exists
+      // second call: worktree add (no -b)
+      spawnMock
+        .mockReturnValueOnce(makeMockProc("abc123\n", "", 0))
+        .mockReturnValueOnce(makeMockProc("", "", 0));
+
+      await client.worktreeAdd("/repo", {
+        path: "/workspace/wf_task",
+        branch: "minions/wf_task",
+        resetBranch: false,
+      });
+
+      const calls = spawnMock.mock.calls;
+      expect(calls).toHaveLength(2);
+      expect(calls[1]).toEqual([
+        "git",
+        ["worktree", "add", "/workspace/wf_task", "minions/wf_task"],
+        { cwd: "/repo" },
+      ]);
     });
   });
 
