@@ -362,6 +362,7 @@ describe("runBootRecovery — spawnOrchestrator", () => {
         runtimeType: "tmux",
         runtimeSessionId: sessionId,
         outputOffset: 55,
+        providerSessionRef: "ref-123",
         startedAt: started,
       }],
     };
@@ -416,6 +417,75 @@ describe("runBootRecovery — spawnOrchestrator", () => {
     expect(report.failures).toHaveLength(1);
     expect(report.failures[0]?.phase).toBe("spawn");
     expect(report.failures[0]?.error).toBe("spawn failed");
+  });
+
+  it("boot does not pass fromOffset when providerSessionRef is undefined on open run", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const { sessionId } = await runtime.start({ taskId: "wf-1:task", workflowId: "wf-1", command: ["echo"] });
+
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => started);
+    const taskRunning = {
+      ...wf.graph["wf-1:task"]!,
+      executionStatus: "running" as const,
+      sessionId,
+      runs: [{
+        id: "run-wf-1:task-1",
+        taskId: "wf-1:task",
+        attempt: 1,
+        providerType: "stub",
+        runtimeType: "stub",
+        runtimeSessionId: sessionId,
+        outputOffset: 50,
+        startedAt: started,
+      }],
+    };
+    await repo.save({ ...wf, graph: { "wf-1:task": taskRunning } }, []);
+
+    const spawned: BootRespawnContext[] = [];
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    await runBootRecovery(repo, service, runtime, {
+      ...bootOptions,
+      spawnOrchestrator: (ctx) => spawned.push(ctx),
+    });
+
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]?.fromOffset).toBeUndefined();
+  });
+
+  it("boot passes fromOffset when both outputOffset and providerSessionRef are set", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const { sessionId } = await runtime.start({ taskId: "wf-1:task", workflowId: "wf-1", command: ["echo"] });
+
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => started);
+    const taskRunning = {
+      ...wf.graph["wf-1:task"]!,
+      executionStatus: "running" as const,
+      sessionId,
+      runs: [{
+        id: "run-wf-1:task-1",
+        taskId: "wf-1:task",
+        attempt: 1,
+        providerType: "stub",
+        runtimeType: "stub",
+        runtimeSessionId: sessionId,
+        outputOffset: 50,
+        providerSessionRef: "uuid-session",
+        startedAt: started,
+      }],
+    };
+    await repo.save({ ...wf, graph: { "wf-1:task": taskRunning } }, []);
+
+    const spawned: BootRespawnContext[] = [];
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    await runBootRecovery(repo, service, runtime, {
+      ...bootOptions,
+      spawnOrchestrator: (ctx) => spawned.push(ctx),
+    });
+
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]?.fromOffset).toBe(50);
   });
 
   it("acceptance: boot spawns orchestrator for live task; orchestrator settles to completed", async () => {

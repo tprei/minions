@@ -123,7 +123,10 @@ export async function runBootRecovery(
           providerType: openRun.providerType,
           runtimeType: openRun.runtimeType,
         };
-        if (openRun.outputOffset !== undefined) ctx.fromOffset = openRun.outputOffset;
+        // skip stored offset when sessionRef hasn't been captured — preserves provider-state-init events at offset 0
+        if (openRun.outputOffset !== undefined && openRun.providerSessionRef !== undefined) {
+          ctx.fromOffset = openRun.outputOffset;
+        }
 
         try {
           options.spawnOrchestrator(ctx);

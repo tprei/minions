@@ -31,6 +31,7 @@ export class RunOrchestrator {
     let latestOffset: number | undefined;
     let latestSessionRef: string | undefined;
     let lastNonRecoverableError: ProviderEvent | undefined;
+    let finalReceived = false;
 
     const dispatch = async (transition: Omit<TransitionCommand, "expectedSessionId">): Promise<void> => {
       await applyCommand({
@@ -69,6 +70,7 @@ export class RunOrchestrator {
           continue;
         }
 
+        finalReceived = true;
         const effectiveSessionRef = event.sessionRef || latestSessionRef;
 
         // Only persist providerSessionRef on the success path — never outputOffset.
@@ -118,7 +120,7 @@ export class RunOrchestrator {
         return;
       }
 
-      if (latestOffset !== undefined) {
+      if (!finalReceived && latestOffset !== undefined) {
         try {
           await dispatch({ kind: "update-run", taskId, outputOffset: latestOffset, now: now() });
         } catch (updateErr) {

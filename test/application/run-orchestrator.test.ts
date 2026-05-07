@@ -296,6 +296,38 @@ describe("RunOrchestrator", () => {
     expect(applyCommand).not.toHaveBeenCalled();
   });
 
+  it("complete-runtime crash after final does not advance outputOffset", async () => {
+    const updateRunTransitions: Array<Record<string, unknown>> = [];
+    const calls: string[] = [];
+    const applyCommand = vi.fn(async (cmd: Command): Promise<CommandResult> => {
+      if (cmd.kind === "transition-task") {
+        calls.push(cmd.transition.kind);
+        if (cmd.transition.kind === "update-run") {
+          const t = cmd.transition as unknown as Record<string, unknown>;
+          updateRunTransitions.push(t);
+          if (t["outputOffset"] !== undefined) {
+            throw new Error("unexpected catch-path offset write");
+          }
+          return makeCommandResult();
+        }
+        if (cmd.transition.kind === "complete-runtime") {
+          throw new Error("simulated complete-runtime failure");
+        }
+      }
+      return makeCommandResult();
+    });
+
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "abc" };
+    const chunks = makeChunks(["line-1", "line-2"], 50);
+
+    const orchestrator = makeOrchestrator([[finalEvent]], chunks, applyCommand);
+    await orchestrator.run();
+
+    const offsetWrite = updateRunTransitions.find((t) => t["outputOffset"] !== undefined);
+    expect(offsetWrite).toBeUndefined();
+    expect(calls).toContain("mark-interrupted");
+  });
+
   it("failure path (stream throws): update-run writes outputOffset for resume, then mark-interrupted", async () => {
     const updateRunTransitions: Array<Record<string, unknown>> = [];
     const calls: string[] = [];
