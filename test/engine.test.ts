@@ -127,5 +127,12 @@ describe("createEngine — close() aborts boot-spawned orchestrators", () => {
     await eng.close();
 
     expect(capturedSignal?.aborted).toBe(true);
+
+    // Task must remain `running` — not transitioned to `needs-review` — so next boot can re-spawn.
+    const postCloseRepo = new SQLiteWorkflowRepository(dbPath);
+    const postCloseWf = await postCloseRepo.get("wf-close-1");
+    postCloseRepo.close();
+    const task = postCloseWf?.graph["wf-close-1:task"];
+    expect(task?.executionStatus).toBe("running");
   });
 });

@@ -112,6 +112,12 @@ export class RunOrchestrator {
         return;
       }
     } catch (err) {
+      // Graceful shutdown: signal was aborted, leave the task running so boot can re-spawn it.
+      if (this.deps.signal?.aborted === true) {
+        console.error("run-orchestrator exiting due to signal abort, leaving task running");
+        return;
+      }
+
       if (latestOffset !== undefined) {
         try {
           await dispatch({ kind: "update-run", taskId, outputOffset: latestOffset, now: now() });
@@ -135,6 +141,12 @@ export class RunOrchestrator {
         }
         throw interruptErr;
       }
+      return;
+    }
+
+    // Graceful shutdown: signal was aborted, leave the task running so boot can re-spawn it.
+    if (this.deps.signal?.aborted === true) {
+      console.error("run-orchestrator exiting due to signal abort, leaving task running");
       return;
     }
 

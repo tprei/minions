@@ -264,6 +264,38 @@ describe("RunOrchestrator", () => {
     expect(successPathPatch!["outputOffset"]).toBeUndefined();
   });
 
+  it("aborted signal: orchestrator exits without dispatching mark-interrupted, leaving task running", async () => {
+    const applyCommand = vi.fn(async (_cmd: Command): Promise<CommandResult> => makeCommandResult());
+
+    const controller = new AbortController();
+    controller.abort();
+
+    const runtime: RuntimeBackend = {
+      start: vi.fn(),
+      stop: vi.fn(),
+      probe: vi.fn().mockResolvedValue("live" as RuntimeProbeState),
+      attach(_sessionId: string, _opts?: RuntimeAttachOptions): AsyncIterable<RuntimeOutputChunk> {
+        return { [Symbol.asyncIterator]: async function* () {} };
+      },
+    };
+
+    const provider = new StubProviderPlugin({ frames: [] });
+    const orch = new RunOrchestrator({
+      workflowId: "wf-1",
+      taskId: "task-1",
+      runtimeSessionId: "session-1",
+      provider,
+      runtime,
+      applyCommand,
+      now: () => now,
+      signal: controller.signal,
+    });
+
+    await orch.run();
+
+    expect(applyCommand).not.toHaveBeenCalled();
+  });
+
   it("failure path (stream throws): update-run writes outputOffset for resume, then mark-interrupted", async () => {
     const updateRunTransitions: Array<Record<string, unknown>> = [];
     const calls: string[] = [];
