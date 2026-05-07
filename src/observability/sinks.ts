@@ -52,7 +52,7 @@ export class HttpSink implements Sink {
   private readonly fallback: Sink | undefined;
   private readonly queue: LogRecord[] = [];
   private timer: NodeJS.Timeout | undefined;
-  private inFlight: Promise<void> | undefined;
+  private flushPromise: Promise<void> = Promise.resolve();
   private closed = false;
   private droppedSinceLastWarn = 0;
 
@@ -80,10 +80,9 @@ export class HttpSink implements Sink {
     }
   }
 
-  private async flush(): Promise<void> {
+  private flush(): Promise<void> {
     if (this.timer) { clearTimeout(this.timer); this.timer = undefined; }
-    if (this.queue.length === 0) return;
-    if (this.inFlight) await this.inFlight;
+    if (this.queue.length === 0) return Promise.resolve();
     const batch = this.queue.splice(0, this.queue.length);
     if (this.droppedSinceLastWarn > 0 && this.fallback) {
       const dropped = this.droppedSinceLastWarn;
@@ -94,7 +93,9 @@ export class HttpSink implements Sink {
         kind: "sink-degraded", sink: "http", dropped,
       });
     }
-    this.inFlight = (async () => {
+    const prior = this.flushPromise;
+    this.flushPromise = (async () => {
+      await prior;
       try {
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
@@ -119,18 +120,16 @@ export class HttpSink implements Sink {
             error: (err as Error).message, droppedRecords: batch.length,
           });
         }
-      } finally {
-        this.inFlight = undefined;
       }
     })();
-    await this.inFlight;
+    return this.flushPromise;
   }
 
   async close(): Promise<void> {
     this.closed = true;
     if (this.timer) { clearTimeout(this.timer); this.timer = undefined; }
-    await this.flush();
-    if (this.inFlight) await this.inFlight;
+    this.flush();
+    await this.flushPromise;
   }
 }
 

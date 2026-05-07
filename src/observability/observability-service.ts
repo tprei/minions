@@ -29,7 +29,7 @@ export class ObservabilityService {
       service: "observability",
       workflowId,
     });
-    void this.consume(workflowId);
+    void this.attachAsync(workflowId);
   }
 
   detach(workflowId: string): void {
@@ -38,9 +38,13 @@ export class ObservabilityService {
     this.activeIterators.delete(workflowId);
   }
 
-  private async consume(workflowId: string): Promise<void> {
+  private async attachAsync(workflowId: string): Promise<void> {
     const cursor = await this.deps.workflowRepo.latestCursor(workflowId);
-    const iterable = this.deps.workflowRepo.subscribe(workflowId, cursor);
+    void this.consume(workflowId, cursor);
+  }
+
+  private async consume(workflowId: string, fromCursor: number): Promise<void> {
+    const iterable = this.deps.workflowRepo.subscribe(workflowId, fromCursor);
     const iter = iterable[Symbol.asyncIterator]();
     this.activeIterators.set(workflowId, iter);
     const wfLog = this.deps.log.child({ workflowId });

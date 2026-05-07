@@ -261,6 +261,71 @@ describe("HttpSink", () => {
     await expect(sink.close()).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("close() strictly drains: two size-triggered flushes both complete before close() resolves", async () => {
+    const fetchOrder: number[] = [];
+    let resolveFetch1!: () => void;
+    let resolveFetch2!: () => void;
+    const fetch1Done = new Promise<void>((r) => { resolveFetch1 = r; });
+    const fetch2Done = new Promise<void>((r) => { resolveFetch2 = r; });
+
+    let callCount = 0;
+    const fetchMock = vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return new Promise<Response>((resolve) => {
+          fetch1Done.then(() => {
+            fetchOrder.push(1);
+            resolve({ ok: true, status: 200 } as Response);
+          });
+        });
+      }
+      return new Promise<Response>((resolve) => {
+        fetch2Done.then(() => {
+          fetchOrder.push(2);
+          resolve({ ok: true, status: 200 } as Response);
+        });
+      });
+    });
+
+    const sink = new HttpSink({
+      url: "https://logs.example.com/ingest",
+      batchSize: 3,
+      flushMs: 999999,
+      fetchImpl: fetchMock,
+    });
+
+    sink.write(makeRecord({ msg: "b1-r1" }));
+    sink.write(makeRecord({ msg: "b1-r2" }));
+    sink.write(makeRecord({ msg: "b1-r3" }));
+
+    sink.write(makeRecord({ msg: "b2-r1" }));
+    sink.write(makeRecord({ msg: "b2-r2" }));
+    sink.write(makeRecord({ msg: "b2-r3" }));
+
+    let closeDone = false;
+    const closePromise = sink.close().then(() => { closeDone = true; });
+
+    await new Promise((r) => setImmediate(r));
+    expect(closeDone).toBe(false);
+
+    resolveFetch1();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    expect(closeDone).toBe(false);
+
+    resolveFetch2();
+    await closePromise;
+    expect(closeDone).toBe(true);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchOrder).toEqual([1, 2]);
+
+    const body1 = JSON.parse(fetchMock.mock.calls[0]![1].body as string) as { records: LogRecord[] };
+    const body2 = JSON.parse(fetchMock.mock.calls[1]![1].body as string) as { records: LogRecord[] };
+    expect(body1.records.map((r) => r.msg)).toEqual(["b1-r1", "b1-r2", "b1-r3"]);
+    expect(body2.records.map((r) => r.msg)).toEqual(["b2-r1", "b2-r2", "b2-r3"]);
+  });
 });
 
 describe("buildSinksFromEnv", () => {
