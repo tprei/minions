@@ -24,6 +24,7 @@ export interface WorkflowRepository {
   publishTransient(workflowId: string, event: Extract<WorkflowEvent, { kind: "provider-event" }>): void;
   lookupIdempotency(workflowId: string, key: string): Promise<string | undefined>;
   listRecoverable(): Promise<Workflow[]>;
+  list(opts?: { includeCompleted?: boolean }): Promise<Workflow[]>;
 }
 
 export class InMemoryWorkflowRepository implements WorkflowRepository {
@@ -109,5 +110,11 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     return Array.from(this.workflows.values()).filter(
       (w) => w.status !== "completed" || hasNonTerminalOperation(w),
     );
+  }
+
+  async list(opts?: { includeCompleted?: boolean }): Promise<Workflow[]> {
+    return [...this.workflows.values()]
+      .filter((w) => opts?.includeCompleted === true || w.status !== "completed")
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 }

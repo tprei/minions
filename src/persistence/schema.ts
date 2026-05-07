@@ -46,6 +46,10 @@ export const SQL_LOOKUP_IDEMPOTENCY =
   "SELECT result_ref FROM idempotency WHERE workflow_id = ? AND key = ?";
 export const SQL_LIST_NON_COMPLETED = "SELECT blob FROM workflows WHERE status != 'completed'";
 export const SQL_LIST_COMPLETED = "SELECT blob FROM workflows WHERE status = 'completed'";
+export const SQL_LIST_NON_COMPLETED_ORDERED =
+  "SELECT blob FROM workflows WHERE status != 'completed' ORDER BY json_extract(blob, '$.updatedAt') DESC";
+export const SQL_LIST_ALL_ORDERED =
+  "SELECT blob FROM workflows ORDER BY json_extract(blob, '$.updatedAt') DESC";
 
 export const PUSH_SUBSCRIPTIONS_DDL = `
 CREATE TABLE IF NOT EXISTS push_subscriptions (

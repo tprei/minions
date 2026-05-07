@@ -257,4 +257,37 @@ describe("SQLiteWorkflowRepository", () => {
     expect(events).toHaveLength(1);
     expect(events[0]?.cursor).toBe(3);
   });
+
+  it("list returns active workflows ordered newest-first", async () => {
+    const wf1 = createSingleTaskWorkflow("wf-1", { title: "T1", prompt: "P1" }, () => "2026-01-01T00:00:00.000Z");
+    const wf2 = createSingleTaskWorkflow("wf-2", { title: "T2", prompt: "P2" }, () => "2026-01-03T00:00:00.000Z");
+    const wf3 = createSingleTaskWorkflow("wf-3", { title: "T3", prompt: "P3" }, () => "2026-01-02T00:00:00.000Z");
+    await repo.save(wf1, []);
+    await repo.save(wf2, []);
+    await repo.save(wf3, []);
+
+    const result = await repo.list();
+    expect(result.map((w) => w.id)).toEqual(["wf-2", "wf-3", "wf-1"]);
+  });
+
+  it("list excludes completed workflows by default", async () => {
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(wf, []);
+    const completed = { ...wf, version: 2, status: "completed" as const };
+    await repo.save(completed, []);
+
+    const result = await repo.list();
+    expect(result).toHaveLength(0);
+  });
+
+  it("list includes completed workflows with includeCompleted: true", async () => {
+    const wf1 = createSingleTaskWorkflow("wf-1", { title: "T1", prompt: "P1" }, () => "2026-01-01T00:00:00.000Z");
+    const wf2 = createSingleTaskWorkflow("wf-2", { title: "T2", prompt: "P2" }, () => "2026-01-02T00:00:00.000Z");
+    await repo.save(wf1, []);
+    const completed = { ...wf2, version: 1, status: "completed" as const };
+    await repo.save(completed, []);
+
+    const result = await repo.list({ includeCompleted: true });
+    expect(result.map((w) => w.id).sort()).toEqual(["wf-1", "wf-2"]);
+  });
 });

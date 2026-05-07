@@ -218,6 +218,7 @@ describe("RecoveryService.scan", () => {
       publishTransient: (id, event) => inner.publishTransient(id, event),
       lookupIdempotency: (id, key) => inner.lookupIdempotency(id, key),
       listRecoverable: () => inner.listRecoverable(),
+      list: (opts) => inner.list(opts),
     };
 
     const service = createRecoveryService(
@@ -314,6 +315,7 @@ describe("RecoveryService.scan", () => {
       publishTransient: (id, event) => inner.publishTransient(id, event),
       lookupIdempotency: (id, key) => inner.lookupIdempotency(id, key),
       listRecoverable: () => inner.listRecoverable(),
+      list: (opts) => inner.list(opts),
     };
 
     const service = createRecoveryService(

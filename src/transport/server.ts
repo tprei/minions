@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { applyCommand } from "../application/commands.js";
 import type { Command, CommandKind } from "../application/commands.js";
 import type { ContinueTaskService } from "../application/continue-task-service.js";
@@ -24,6 +25,7 @@ export interface ServerDeps {
   pushService?: PushService;
   subscriptions?: SubscriptionRepository;
   vapidPublicKey?: string;
+  pwaRoot?: string;
 }
 
 type AcceptedCommandKind = CommandKind | "continue-task" | "retry-task";
@@ -93,6 +95,12 @@ export function createServer(deps: ServerDeps): Hono {
     await repo.save(workflow, []);
     deps.pushService?.attach(workflow.id);
     return c.json(workflow, 201);
+  });
+
+  app.get("/workflows", async (c) => {
+    const includeCompleted = c.req.query("include") === "completed";
+    const workflows = await deps.repo.list({ includeCompleted });
+    return c.json(workflows);
   });
 
   app.get("/workflows/:id", async (c) => {
@@ -279,6 +287,16 @@ export function createServer(deps: ServerDeps): Hono {
       }
     });
   });
+
+  if (deps.pwaRoot !== undefined) {
+    app.use("/", async (c, next) => { await next(); c.header("Cache-Control", "no-cache"); });
+    app.use("/sw.js", async (c, next) => { await next(); c.header("Cache-Control", "no-cache"); });
+    app.get("/", serveStatic({ root: deps.pwaRoot, path: "index.html" }));
+    app.get("/manifest.json", serveStatic({ root: deps.pwaRoot, path: "manifest.json" }));
+    app.get("/sw.js", serveStatic({ root: deps.pwaRoot, path: "sw.js" }));
+    app.get("/icons/*", serveStatic({ root: deps.pwaRoot }));
+    app.get("/assets/*", serveStatic({ root: deps.pwaRoot }));
+  }
 
   return app;
 }

@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { dirname, basename, join } from "node:path";
+import { dirname, basename, join, isAbsolute, resolve, relative } from "node:path";
 import { runBootRecovery } from "./application/boot.js";
 import type { BootRecoveryReport, BootRespawnContext } from "./application/boot.js";
 import { applyCommand } from "./application/commands.js";
@@ -41,6 +41,8 @@ export interface EngineConfig {
   gitCommandPrefix?: readonly string[];
   vapid?: VapidConfig;
   pushSender?: PushSender;
+  /** Relative paths resolve against process.cwd() at engine startup. */
+  pwaDir?: string;
 }
 
 function resolveVapid(config: EngineConfig): VapidConfig | undefined {
@@ -168,12 +170,24 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     }
   }
 
+  let pwaRoot: string | undefined;
+  if (config.pwaDir !== undefined) {
+    const abs = isAbsolute(config.pwaDir)
+      ? config.pwaDir
+      : resolve(process.cwd(), config.pwaDir);
+    pwaRoot = relative(process.cwd(), abs);
+  }
+
   const serverDeps: Parameters<typeof createServer>[0] = { repo, recoveryService, executor };
 
   if (vapid && pushService && subscriptions) {
     serverDeps.pushService = pushService;
     serverDeps.subscriptions = subscriptions;
     serverDeps.vapidPublicKey = vapid.publicKey;
+  }
+
+  if (pwaRoot !== undefined) {
+    serverDeps.pwaRoot = pwaRoot;
   }
 
   if (config.providerFactory) {

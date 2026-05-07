@@ -12,8 +12,10 @@ import {
   SQL_GET_WORKFLOW,
   SQL_INSERT_EVENT,
   SQL_INSERT_IDEMPOTENCY,
+  SQL_LIST_ALL_ORDERED,
   SQL_LIST_COMPLETED,
   SQL_LIST_NON_COMPLETED,
+  SQL_LIST_NON_COMPLETED_ORDERED,
   SQL_LOOKUP_IDEMPOTENCY,
   SQL_MAX_CURSOR,
   SQL_UPSERT_WORKFLOW,
@@ -58,6 +60,8 @@ export class SQLiteWorkflowRepository implements WorkflowRepository {
   private readonly stmtLookupIdempotency: Statement<[string, string], IdempotencyRow>;
   private readonly stmtListNonCompleted: Statement<[], WorkflowRow>;
   private readonly stmtListCompleted: Statement<[], WorkflowRow>;
+  private readonly stmtListNonCompletedOrdered: Statement<[], WorkflowRow>;
+  private readonly stmtListAllOrdered: Statement<[], WorkflowRow>;
   private readonly txSave: (
     workflow: Workflow,
     events: WorkflowEvent[],
@@ -80,6 +84,8 @@ export class SQLiteWorkflowRepository implements WorkflowRepository {
       this.db.prepare<[string, string], IdempotencyRow>(SQL_LOOKUP_IDEMPOTENCY);
     this.stmtListNonCompleted = this.db.prepare<[], WorkflowRow>(SQL_LIST_NON_COMPLETED);
     this.stmtListCompleted = this.db.prepare<[], WorkflowRow>(SQL_LIST_COMPLETED);
+    this.stmtListNonCompletedOrdered = this.db.prepare<[], WorkflowRow>(SQL_LIST_NON_COMPLETED_ORDERED);
+    this.stmtListAllOrdered = this.db.prepare<[], WorkflowRow>(SQL_LIST_ALL_ORDERED);
 
     this.txSave = this.db.transaction(
       (workflow: Workflow, events: WorkflowEvent[], idempotency: IdempotencyRecord[]) => {
@@ -197,6 +203,13 @@ export class SQLiteWorkflowRepository implements WorkflowRepository {
       .map((row) => JSON.parse(row.blob) as Workflow)
       .filter(hasNonTerminalOperation);
     return [...nonCompleted, ...completedWithOps];
+  }
+
+  async list(opts?: { includeCompleted?: boolean }): Promise<Workflow[]> {
+    const stmt = opts?.includeCompleted === true
+      ? this.stmtListAllOrdered
+      : this.stmtListNonCompletedOrdered;
+    return stmt.all().map((row) => JSON.parse(row.blob) as Workflow);
   }
 
   subscriberCount(workflowId: string): number {

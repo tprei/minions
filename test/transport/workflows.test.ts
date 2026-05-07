@@ -66,6 +66,61 @@ describe("POST /workflows", () => {
   });
 });
 
+describe("GET /workflows", () => {
+  it("returns empty array when no workflows exist", async () => {
+    const { app } = makeApp();
+    const res = await app.request("/workflows");
+    expect(res.status).toBe(200);
+    const body = await res.json() as unknown[];
+    expect(body).toEqual([]);
+  });
+
+  it("returns only active workflows by default", async () => {
+    const { app, repo } = makeApp();
+    const wf1 = createSingleTaskWorkflow("wf-1", { title: "T1", prompt: "P1" }, () => now);
+    const wf2 = createSingleTaskWorkflow("wf-2", { title: "T2", prompt: "P2" }, () => now);
+    await repo.save(wf1, []);
+    await repo.save(wf2, []);
+    const completed = { ...wf2, version: 2, status: "completed" as const };
+    await repo.save(completed, []);
+
+    const res = await app.request("/workflows");
+    expect(res.status).toBe(200);
+    const body = await res.json() as { id: string }[];
+    expect(body.map((w) => w.id)).toEqual(["wf-1"]);
+  });
+
+  it("returns all workflows with ?include=completed", async () => {
+    const { app, repo } = makeApp();
+    const wf1 = createSingleTaskWorkflow("wf-1", { title: "T1", prompt: "P1" }, () => now);
+    const wf2 = createSingleTaskWorkflow("wf-2", { title: "T2", prompt: "P2" }, () => now);
+    await repo.save(wf1, []);
+    await repo.save(wf2, []);
+    const completed = { ...wf2, version: 2, status: "completed" as const };
+    await repo.save(completed, []);
+
+    const res = await app.request("/workflows?include=completed");
+    expect(res.status).toBe(200);
+    const body = await res.json() as { id: string }[];
+    expect(body.map((w) => w.id).sort()).toEqual(["wf-1", "wf-2"]);
+  });
+
+  it("returns workflows ordered by updatedAt DESC", async () => {
+    const { app, repo } = makeApp();
+    const wf1 = createSingleTaskWorkflow("wf-1", { title: "T1", prompt: "P1" }, () => "2026-01-01T00:00:00.000Z");
+    const wf2 = createSingleTaskWorkflow("wf-2", { title: "T2", prompt: "P2" }, () => "2026-01-03T00:00:00.000Z");
+    const wf3 = createSingleTaskWorkflow("wf-3", { title: "T3", prompt: "P3" }, () => "2026-01-02T00:00:00.000Z");
+    await repo.save(wf1, []);
+    await repo.save(wf2, []);
+    await repo.save(wf3, []);
+
+    const res = await app.request("/workflows");
+    expect(res.status).toBe(200);
+    const body = await res.json() as { id: string }[];
+    expect(body.map((w) => w.id)).toEqual(["wf-2", "wf-3", "wf-1"]);
+  });
+});
+
 describe("GET /workflows/:id", () => {
   it("returns the workflow snapshot", async () => {
     const { app, repo } = makeApp();
