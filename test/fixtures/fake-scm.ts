@@ -1,6 +1,8 @@
 // FakeSCM: in-process SCMPlugin that does real git ops against real worktrees but keeps PR state in memory.
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { join } from "node:path";
+import { writeFile } from "node:fs/promises";
 import type {
   SCMPlugin,
   MergeResult,
@@ -33,13 +35,12 @@ export interface FakeSCMOptions {
   mergeBehaviour?: "success" | "head_sha_changed" | "not_mergeable" | "blocked";
 }
 
-let nextPrNumber = 1;
-
 export class FakeSCM implements SCMPlugin {
   readonly prsByBranch = new Map<string, FakePR>();
   readonly prsByNumber = new Map<number, FakePR>();
   rebaseBehaviour: NonNullable<FakeSCMOptions["rebaseBehaviour"]> = "clean";
   mergeBehaviour: NonNullable<FakeSCMOptions["mergeBehaviour"]> = "success";
+  private nextPrNumber = 1;
 
   constructor(opts: FakeSCMOptions = {}) {
     this.rebaseBehaviour = opts.rebaseBehaviour ?? "clean";
@@ -80,8 +81,14 @@ export class FakeSCM implements SCMPlugin {
     // no-op: no remote in integration tests
   }
 
+  async seedTaskCommit(workspacePath: string, fileName: string, content: string): Promise<string> {
+    const filePath = join(workspacePath, fileName);
+    await writeFile(filePath, content);
+    return await this.commit(workspacePath, `seed: ${fileName}`);
+  }
+
   async openPullRequest(input: OpenPullRequestInput): Promise<PullRequestRef> {
-    const number = nextPrNumber++;
+    const number = this.nextPrNumber++;
     const url = `https://fake.local/${input.owner}/${input.repo}/pull/${number}`;
     const headSha = `fakesha-${input.head}-${Date.now()}`;
     const pr: FakePR = {

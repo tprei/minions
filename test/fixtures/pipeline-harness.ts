@@ -35,7 +35,8 @@ export interface HarnessOptions {
 export class CountingWorkspaceBackend implements WorkspaceBackend {
   readonly counts = {
     create: new Map<string, number>(),
-    cleanup: new Map<string, number>(),
+    cleanupAttempts: new Map<string, number>(),
+    cleanupSuccesses: new Map<string, number>(),
   };
 
   constructor(private readonly inner: WorkspaceBackend) {}
@@ -52,8 +53,9 @@ export class CountingWorkspaceBackend implements WorkspaceBackend {
   }
 
   async cleanup(id: string): Promise<void> {
-    this.counts.cleanup.set(id, (this.counts.cleanup.get(id) ?? 0) + 1);
-    return this.inner.cleanup(id);
+    this.counts.cleanupAttempts.set(id, (this.counts.cleanupAttempts.get(id) ?? 0) + 1);
+    await this.inner.cleanup(id);
+    this.counts.cleanupSuccesses.set(id, (this.counts.cleanupSuccesses.get(id) ?? 0) + 1);
   }
 }
 

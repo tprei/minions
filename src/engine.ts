@@ -16,6 +16,7 @@ import { PushService } from "./application/push-service.js";
 import type { SubscriptionRepository } from "./application/subscription-repository.js";
 import { SQLiteWorkflowRepository } from "./persistence/sqlite-repo.js";
 import { SQLiteSubscriptionRepository, listDistinctWorkflowIds } from "./persistence/sqlite-subscription-repo.js";
+import type { WorkflowRepository } from "./application/repository.js";
 import type { ProviderPlugin } from "./plugins/provider-plugin.js";
 import type { RuntimeBackend } from "./plugins/runtime-backend.js";
 import { StubRuntimeBackend } from "./plugins/stub-runtime.js";
@@ -93,6 +94,7 @@ export interface Engine {
   server: Hono;
   bootReport: BootRecoveryReport;
   dataDir: string;
+  repo: WorkflowRepository;
   close(): Promise<void>;
 }
 
@@ -378,6 +380,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     server,
     bootReport,
     dataDir,
+    repo,
     async close() {
       log.info("engine shutdown", { kind: "engine-lifecycle", phase: "shutdown" });
       pushAbort?.abort();

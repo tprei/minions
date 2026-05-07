@@ -6,6 +6,7 @@ import { slugify } from "../../src/plugins/workspace-backend.js";
 import { StubProviderPlugin } from "../../src/plugins/providers/stub.js";
 import { SQLiteWorkflowRepository } from "../../src/persistence/sqlite-repo.js";
 import type { Workflow } from "../../src/domain/types.js";
+import type { MergePhasePayload, TaskTransitionedPayload } from "../../src/domain/events.js";
 
 const FAST_CADENCE = {
   intervals: [{ afterMs: 0, everyMs: 10 }],
@@ -66,6 +67,23 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
       const taskId = "t1";
       const now = new Date().toISOString();
 
+      const transitions: Array<[string, string]> = [];
+      const mergePhases: Array<{ phase: string; status: string }> = [];
+
+      const collector = (async () => {
+        for await (const ev of harness.engine.repo.subscribe(wfId, 0)) {
+          if (ev.kind === "task-transitioned") {
+            const p = ev.payload as TaskTransitionedPayload;
+            transitions.push([p.fromExecutionStatus, p.toExecutionStatus]);
+          }
+          if (ev.kind === "merge-phase") {
+            const p = ev.payload as MergePhasePayload;
+            mergePhases.push({ phase: p.phase, status: p.status });
+            if (p.phase === "finalize" && p.status === "completed") break;
+          }
+        }
+      })();
+
       const createRes = await harness.fetch("/workflows", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -99,6 +117,8 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
         transition: { kind: "mark-running", taskId, sessionId, workspaceId: handle.workspaceId, now },
       });
 
+      await scm.seedTaskCommit(handle.path, "task-output.txt", "task work\n");
+
       await postCommand(harness.fetch, {
         kind: "transition-task",
         workflowId: wfId,
@@ -125,10 +145,41 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
       expect(pr).toBeDefined();
       expect(pr?.merged).toBe(true);
 
-      // Test 5: workspace lifecycle — cleanup count matches create count
+      await collector;
+
+      // Full ordered transition sequence
+      const expectedTransitions: Array<[string, string]> = [
+        ["pending", "ready"],
+        ["ready", "running"],
+        ["running", "completed"],
+        ["completed", "quality-pending"],
+        ["quality-pending", "finalizing"],
+        ["finalizing", "pr-open"],
+        ["pr-open", "merged"],
+      ];
+      expect(transitions).toEqual(expectedTransitions);
+
+      // All 12 merge-phase events (6 phases × {started, completed})
+      const expectedMergePhases: Array<{ phase: string; status: string }> = [
+        { phase: "prepareMerge", status: "started" },
+        { phase: "prepareMerge", status: "completed" },
+        { phase: "commit", status: "started" },
+        { phase: "commit", status: "completed" },
+        { phase: "squash", status: "started" },
+        { phase: "squash", status: "completed" },
+        { phase: "rebase", status: "started" },
+        { phase: "rebase", status: "completed" },
+        { phase: "applyMerge", status: "started" },
+        { phase: "applyMerge", status: "completed" },
+        { phase: "finalize", status: "started" },
+        { phase: "finalize", status: "completed" },
+      ];
+      expect(mergePhases).toEqual(expectedMergePhases);
+
+      // Workspace lifecycle: cleanup successes == create count
       for (const [id, createCount] of harness.workspace.counts.create) {
-        const cleanupCount = harness.workspace.counts.cleanup.get(id) ?? 0;
-        expect(cleanupCount).toBe(createCount);
+        const successCount = harness.workspace.counts.cleanupSuccesses.get(id) ?? 0;
+        expect(successCount).toBe(createCount);
       }
 
       await assertNoStrandedWorktrees(harness.repoPath);
@@ -187,6 +238,8 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
         transition: { kind: "mark-running", taskId, sessionId, workspaceId: handle.workspaceId, now },
       });
 
+      await scm.seedTaskCommit(handle.path, "task-output.txt", "task work\n");
+
       await postCommand(harness.fetch, {
         kind: "transition-task",
         workflowId: wfId,
@@ -202,6 +255,19 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
       // Set CI checks to green so CIBabysitter auto-merges
       const pr = scm.getPRForBranch(branch);
       expect(pr).toBeDefined();
+
+      // Start collecting merge-phase events before CI is set green (catches the full merge phases)
+      const mergePhases2: Array<{ phase: string; status: string }> = [];
+      const phaseCollector2 = (async () => {
+        for await (const ev of harness.engine.repo.subscribe(wfId, 0)) {
+          if (ev.kind === "merge-phase") {
+            const p = ev.payload as MergePhasePayload;
+            mergePhases2.push({ phase: p.phase, status: p.status });
+            if (p.phase === "finalize" && p.status === "completed") break;
+          }
+        }
+      })();
+
       scm.setCheckRuns(pr!.headSha, [{ name: "ci", status: "completed", conclusion: "success" }]);
 
       // Wait for CIBabysitter to poll and merge
@@ -210,13 +276,40 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
         return wf.graph[taskId]?.executionStatus === "merged";
       }, 10_000);
 
+      await phaseCollector2;
+      // CIBabysitter's merge() emits all 12 phases (6 phases × {started, completed})
+      const expectedMergePhases2: Array<{ phase: string; status: string }> = [
+        { phase: "prepareMerge", status: "started" },
+        { phase: "prepareMerge", status: "completed" },
+        { phase: "commit", status: "started" },
+        { phase: "commit", status: "completed" },
+        { phase: "squash", status: "started" },
+        { phase: "squash", status: "completed" },
+        { phase: "rebase", status: "started" },
+        { phase: "rebase", status: "completed" },
+        { phase: "applyMerge", status: "started" },
+        { phase: "applyMerge", status: "completed" },
+        { phase: "finalize", status: "started" },
+        { phase: "finalize", status: "completed" },
+      ];
+      expect(mergePhases2).toEqual(expectedMergePhases2);
+
       expect(scm.getPRForBranch(branch)?.merged).toBe(true);
 
-      // Test 5: workspace lifecycle
+      // Workspace lifecycle: wait for async cleanup to finish, then assert successes == creates
+      await waitFor(async () => {
+        for (const [id, createCount] of harness.workspace.counts.create) {
+          const successCount = harness.workspace.counts.cleanupSuccesses.get(id) ?? 0;
+          if (successCount < createCount) return false;
+        }
+        return true;
+      });
       for (const [id, createCount] of harness.workspace.counts.create) {
-        const cleanupCount = harness.workspace.counts.cleanup.get(id) ?? 0;
-        expect(cleanupCount).toBe(createCount);
+        const successCount = harness.workspace.counts.cleanupSuccesses.get(id) ?? 0;
+        expect(successCount).toBe(createCount);
       }
+
+      await assertNoStrandedWorktrees(harness.repoPath);
     } finally {
       await harness.cleanup();
     }
@@ -322,12 +415,19 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
 
       const postRestackWf = await getWorkflow(harness.fetch, wfId);
 
-      // Verify graph-operation-changed event was persisted in the event log
+      // Verify graph-operation-changed events in the event log — strengthened assertion
       const eventsRepo = new SQLiteWorkflowRepository(harness.dbPath);
       const allEvents = await eventsRepo.eventsSince(wfId, 0);
       eventsRepo.close();
       const opChangedEvents = allEvents.filter((e) => e.kind === "graph-operation-changed");
-      expect(opChangedEvents.length).toBeGreaterThan(0);
+      expect(opChangedEvents.length).toBeGreaterThanOrEqual(1);
+
+      const lastOpEvent = opChangedEvents[opChangedEvents.length - 1];
+      expect(lastOpEvent).toBeDefined();
+      const opPayload = lastOpEvent!.payload as { operationId: string; kind: string; fromStatus: string | null; toStatus: string };
+      expect(opPayload.operationId).toBe("op-restack-1");
+      expect(opPayload.kind).toBe("restack");
+      expect(opPayload.toStatus).toBe("pending");
 
       // tests task: restack-pending + pending
       expect(postRestackWf.graph["tests"]?.stackStatus).toBe("restack-pending");
@@ -339,7 +439,7 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
       // backend unchanged at completed
       expect(postRestackWf.graph["backend"]?.executionStatus).toBe("completed");
 
-      // Test 5: no orphan workspace for tests task (it was never started)
+      // No orphan workspace for tests task (it was never started)
       const testsWorkspaceId = `ws-${slugify(wfId)}_${slugify("tests")}`;
       expect(harness.workspace.counts.create.has(testsWorkspaceId)).toBe(false);
     } finally {
@@ -392,6 +492,10 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
         transition: { kind: "mark-running", taskId, sessionId: "sess-4", workspaceId, now },
       });
 
+      // Seed a real commit on the task branch before completing runtime
+      const scmA = new FakeSCM();
+      await scmA.seedTaskCommit(handle.path, "task-output.txt", "recovery task work\n");
+
       await postCommand(harness.fetch, {
         kind: "transition-task",
         workflowId: wfId,
@@ -423,11 +527,31 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
     });
 
     try {
+      // Collect merge-phase events from openOnly (CompletionDispatcher boot recovery)
+      // Break on pr-open transition (which follows rebase in runUntilOpen)
+      const mergePhases4: Array<{ phase: string; status: string }> = [];
+      const phaseCollector4 = (async () => {
+        for await (const ev of harnessB.engine.repo.subscribe(wfId, 0)) {
+          if (ev.kind === "merge-phase") {
+            const p = ev.payload as MergePhasePayload;
+            mergePhases4.push({ phase: p.phase, status: p.status });
+          }
+          if (ev.kind === "task-transitioned") {
+            const p = ev.payload as TaskTransitionedPayload;
+            if (p.toExecutionStatus === "pr-open") break;
+          }
+        }
+      })();
+
       // CompletionDispatcher fires openOnly on the recovered finalizing task
       await waitFor(async () => {
         const wf = await getWorkflow(harnessB.fetch, wfId);
         return wf.graph[taskId]?.executionStatus === "pr-open";
       }, 10_000);
+
+      await phaseCollector4;
+      expect(mergePhases4).toContainEqual({ phase: "rebase", status: "started" });
+      expect(mergePhases4).toContainEqual({ phase: "rebase", status: "completed" });
 
       const postRecoveryWf = await getWorkflow(harnessB.fetch, wfId);
       expect(postRecoveryWf.graph[taskId]?.executionStatus).toBe("pr-open");
@@ -437,9 +561,15 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
       expect(pr).toBeDefined();
       expect(pr?.merged).toBe(false);
 
-      // Test 5: engine-B cleaned up the workspace created by engine-A during openOnly
-      const cleanupCount = harnessB.workspace.counts.cleanup.get(workspaceId) ?? 0;
-      expect(cleanupCount).toBeGreaterThanOrEqual(1);
+      // Engine B cleaned up the workspace created by engine-A during openOnly
+      // Wait for async cleanup to complete (cleanup runs in finally after pr-open transition)
+      await waitFor(async () => {
+        const successCount = harnessB.workspace.counts.cleanupSuccesses.get(workspaceId) ?? 0;
+        return successCount >= 1;
+      });
+      expect(harnessB.workspace.counts.cleanupSuccesses.get(workspaceId) ?? 0).toBeGreaterThanOrEqual(1);
+
+      await assertNoStrandedWorktrees(harness.repoPath);
     } finally {
       await harnessB.engine.close();
       const { rm } = await import("node:fs/promises");
