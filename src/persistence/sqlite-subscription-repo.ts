@@ -21,13 +21,13 @@ interface WorkflowIdRow {
 
 export class SQLiteSubscriptionRepository implements SubscriptionRepository {
   private readonly stmtUpsert: Statement<[string, string, string, string, string]>;
-  private readonly stmtDelete: Statement<[string]>;
+  private readonly stmtDelete: Statement<[string, string]>;
   private readonly stmtListByWorkflow: Statement<[string], SubRow>;
 
   constructor(db: Database.Database) {
     db.exec(PUSH_SUBSCRIPTIONS_DDL);
     this.stmtUpsert = db.prepare<[string, string, string, string, string]>(SQL_UPSERT_SUBSCRIPTION);
-    this.stmtDelete = db.prepare<[string]>(SQL_DELETE_SUBSCRIPTION);
+    this.stmtDelete = db.prepare<[string, string]>(SQL_DELETE_SUBSCRIPTION);
     this.stmtListByWorkflow = db.prepare<[string], SubRow>(SQL_LIST_SUBS_BY_WORKFLOW);
   }
 
@@ -41,8 +41,8 @@ export class SQLiteSubscriptionRepository implements SubscriptionRepository {
     );
   }
 
-  async remove(endpoint: string): Promise<void> {
-    this.stmtDelete.run(endpoint);
+  async remove(endpoint: string, workflowId: string): Promise<void> {
+    this.stmtDelete.run(endpoint, workflowId);
   }
 
   async listByWorkflow(workflowId: string): Promise<PushSubscriptionRecord[]> {

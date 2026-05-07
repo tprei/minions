@@ -168,6 +168,11 @@ export class SQLiteWorkflowRepository implements WorkflowRepository {
     })) as WorkflowEvent[];
   }
 
+  async latestCursor(workflowId: string): Promise<number> {
+    const row = this.stmtMaxCursor.get(workflowId)!;
+    return row.max_cursor ?? 0;
+  }
+
   subscribe(workflowId: string, fromCursor: number): AsyncIterable<WorkflowEvent> {
     return this.hub.subscribe(workflowId, fromCursor, () =>
       this.eventsSince(workflowId, fromCursor),

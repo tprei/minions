@@ -29,6 +29,37 @@ function terminalEvent(workflowId = "wf-1"): WorkflowEvent {
 }
 
 describe("PushService.attach", () => {
+  it("does not replay historical terminal events — only notifies for events after attach", async () => {
+    const workflowRepo = new InMemoryWorkflowRepository();
+    const subscriptions = new InMemorySubscriptionRepository();
+    const sender = new StubPushSender();
+    const controller = new AbortController();
+
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, now);
+    await workflowRepo.save(wf, []);
+    await subscriptions.upsert({ endpoint: "https://push.example.com/s1", workflowId: "wf-1", keys: { p256dh: "k", auth: "a" } });
+
+    // Save 3 terminal events before attaching
+    const wf2 = { ...wf, version: wf.version + 1, updatedAt: nowStr };
+    await workflowRepo.save(wf2, [terminalEvent(), terminalEvent(), terminalEvent()]);
+
+    const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal });
+    service.attach("wf-1");
+
+    await new Promise((r) => setImmediate(r));
+
+    // Save 1 new terminal event after attach
+    const wf3 = { ...wf2, version: wf2.version + 1, updatedAt: nowStr };
+    await workflowRepo.save(wf3, [terminalEvent("wf-1")]);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Must receive exactly 1 notification for the post-attach event only
+    expect(sender.calls).toHaveLength(1);
+
+    controller.abort();
+  });
+
   it("sends notification when a terminal event fires after attach", async () => {
     const workflowRepo = new InMemoryWorkflowRepository();
     const subscriptions = new InMemorySubscriptionRepository();

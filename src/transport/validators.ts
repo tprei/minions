@@ -150,6 +150,7 @@ const PUSH_SUBSCRIBE_CHECKS: FieldCheck[] = [
 
 const PUSH_UNSUBSCRIBE_CHECKS: FieldCheck[] = [
   { path: "endpoint", check: isNonEmptyString, expected: "non-empty string" },
+  { path: "workflowId", check: isNonEmptyString, expected: "non-empty string" },
 ];
 
 export function validatePushSubscribe(body: unknown): ValidationResult {

@@ -29,15 +29,36 @@ function sharedTests(makeRepo: () => SubscriptionRepository) {
 
   it("remove deletes subscription", async () => {
     const repo = makeRepo();
-    await repo.upsert(makeSub("https://push.example.com/s1"));
-    await repo.remove("https://push.example.com/s1");
+    await repo.upsert(makeSub("https://push.example.com/s1", "wf-1"));
+    await repo.remove("https://push.example.com/s1", "wf-1");
     const subs = await repo.listByWorkflow("wf-1");
     expect(subs).toHaveLength(0);
   });
 
-  it("remove is idempotent — no error on unknown endpoint", async () => {
+  it("remove is scoped — only removes the matching endpoint+workflow pair", async () => {
     const repo = makeRepo();
-    await expect(repo.remove("https://push.example.com/nonexistent")).resolves.toBeUndefined();
+    await repo.upsert(makeSub("https://push.example.com/s1", "wf-1"));
+    await repo.upsert(makeSub("https://push.example.com/s1", "wf-2"));
+    await repo.remove("https://push.example.com/s1", "wf-1");
+    const wf1 = await repo.listByWorkflow("wf-1");
+    const wf2 = await repo.listByWorkflow("wf-2");
+    expect(wf1).toHaveLength(0);
+    expect(wf2).toHaveLength(1);
+  });
+
+  it("remove is idempotent — no error on unknown endpoint+workflow pair", async () => {
+    const repo = makeRepo();
+    await expect(repo.remove("https://push.example.com/nonexistent", "wf-1")).resolves.toBeUndefined();
+  });
+
+  it("same endpoint subscribes to two workflows as two distinct rows", async () => {
+    const repo = makeRepo();
+    await repo.upsert(makeSub("https://push.example.com/s1", "wf-1"));
+    await repo.upsert(makeSub("https://push.example.com/s1", "wf-2"));
+    const wf1 = await repo.listByWorkflow("wf-1");
+    const wf2 = await repo.listByWorkflow("wf-2");
+    expect(wf1).toHaveLength(1);
+    expect(wf2).toHaveLength(1);
   });
 
   it("listByWorkflow returns empty for unknown workflow", async () => {
@@ -46,17 +67,14 @@ function sharedTests(makeRepo: () => SubscriptionRepository) {
     expect(subs).toHaveLength(0);
   });
 
-  it("upsert rebinds endpoint to a different workflow", async () => {
+  it("upsert updates keys for existing endpoint+workflow pair", async () => {
     const repo = makeRepo();
     await repo.upsert(makeSub("https://push.example.com/s1", "wf-1"));
-    await repo.upsert({ endpoint: "https://push.example.com/s1", workflowId: "wf-2", keys: { p256dh: "new-p256", auth: "new-auth" } });
+    await repo.upsert({ endpoint: "https://push.example.com/s1", workflowId: "wf-1", keys: { p256dh: "new-p256", auth: "new-auth" } });
 
     const wf1 = await repo.listByWorkflow("wf-1");
-    const wf2 = await repo.listByWorkflow("wf-2");
-
-    expect(wf1).toHaveLength(0);
-    expect(wf2).toHaveLength(1);
-    expect(wf2[0]!.keys.p256dh).toBe("new-p256");
+    expect(wf1).toHaveLength(1);
+    expect(wf1[0]!.keys.p256dh).toBe("new-p256");
   });
 }
 

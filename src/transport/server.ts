@@ -46,13 +46,13 @@ export function createServer(deps: ServerDeps): Hono {
     if (c.req.method === "OPTIONS") {
       return c.newResponse(null, 204, {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Last-Event-ID",
       });
     }
     await next();
     c.header("Access-Control-Allow-Origin", "*");
-    c.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    c.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
     c.header("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID");
   });
 
@@ -229,8 +229,10 @@ export function createServer(deps: ServerDeps): Hono {
       );
     }
 
-    const endpoint = (body as Record<string, unknown>)["endpoint"] as string;
-    await deps.subscriptions.remove(endpoint);
+    const b = body as Record<string, unknown>;
+    const endpoint = b["endpoint"] as string;
+    const workflowId = b["workflowId"] as string;
+    await deps.subscriptions.remove(endpoint, workflowId);
     return c.json({ ok: true });
   });
 

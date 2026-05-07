@@ -138,7 +138,7 @@ export class PushService {
     };
   }
 
-  private async trySend(sub: PushSubscriptionRecord, payload: string): Promise<void> {
+  private async trySend(sub: PushSubscriptionRecord, payload: string, workflowId: string): Promise<void> {
     const result: PushSendResult = await this.deps.sender.send(
       { endpoint: sub.endpoint, keys: sub.keys },
       payload,
@@ -146,7 +146,7 @@ export class PushService {
     if (!result.ok) {
       if (result.statusCode === 404 || result.statusCode === 410) {
         console.info(`push: removing stale subscription ${sub.endpoint} (${result.statusCode})`);
-        await this.deps.subscriptions.remove(sub.endpoint);
+        await this.deps.subscriptions.remove(sub.endpoint, workflowId);
       } else {
         console.error("push: send failed", { endpoint: sub.endpoint, statusCode: result.statusCode, error: result.error });
       }
@@ -154,7 +154,10 @@ export class PushService {
   }
 
   private async consume(workflowId: string): Promise<void> {
-    const iterable = this.deps.workflowRepo.subscribe(workflowId, 0);
+    // Live tail only — subscribe from current cursor so historic terminal events
+    // do not re-notify on engine restart.
+    const currentCursor = await this.deps.workflowRepo.latestCursor(workflowId);
+    const iterable = this.deps.workflowRepo.subscribe(workflowId, currentCursor);
     const iter = iterable[Symbol.asyncIterator]();
     this.activeIterators.set(workflowId, iter);
     try {
@@ -171,7 +174,7 @@ export class PushService {
         const payload = this.buildPayload(workflowId, event, decision);
         const payloadStr = JSON.stringify(payload);
         const subs = await this.deps.subscriptions.listByWorkflow(workflowId);
-        await Promise.allSettled(subs.map((sub) => this.trySend(sub, payloadStr)));
+        await Promise.allSettled(subs.map((sub) => this.trySend(sub, payloadStr, workflowId)));
       }
     } catch (err) {
       console.error("push-service consumer error:", err);

@@ -19,6 +19,7 @@ export interface WorkflowRepository {
     idempotency?: IdempotencyRecord[],
   ): Promise<void>;
   eventsSince(workflowId: string, cursor: number): Promise<WorkflowEvent[]>;
+  latestCursor(workflowId: string): Promise<number>;
   subscribe(workflowId: string, fromCursor: number): AsyncIterable<WorkflowEvent>;
   publishTransient(workflowId: string, event: Extract<WorkflowEvent, { kind: "provider-event" }>): void;
   lookupIdempotency(workflowId: string, key: string): Promise<string | undefined>;
@@ -79,6 +80,11 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
   async eventsSince(workflowId: string, cursor: number): Promise<WorkflowEvent[]> {
     const workflowEvents = this.events.get(workflowId) ?? [];
     return workflowEvents.filter((e) => e.cursor > cursor);
+  }
+
+  async latestCursor(workflowId: string): Promise<number> {
+    const workflowEvents = this.events.get(workflowId) ?? [];
+    return workflowEvents.length > 0 ? (workflowEvents[workflowEvents.length - 1]?.cursor ?? 0) : 0;
   }
 
   subscribe(workflowId: string, fromCursor: number): AsyncIterable<WorkflowEvent> {

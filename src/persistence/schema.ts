@@ -49,20 +49,21 @@ export const SQL_LIST_COMPLETED = "SELECT blob FROM workflows WHERE status = 'co
 
 export const PUSH_SUBSCRIPTIONS_DDL = `
 CREATE TABLE IF NOT EXISTS push_subscriptions (
-  endpoint TEXT PRIMARY KEY,
+  endpoint TEXT NOT NULL,
   workflow_id TEXT NOT NULL,
   p256dh TEXT NOT NULL,
   auth TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (endpoint, workflow_id)
 );
 CREATE INDEX IF NOT EXISTS idx_push_subs_workflow ON push_subscriptions(workflow_id);
 `;
 
 export const SQL_UPSERT_SUBSCRIPTION =
   "INSERT INTO push_subscriptions (endpoint, workflow_id, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?) " +
-  "ON CONFLICT(endpoint) DO UPDATE SET workflow_id = excluded.workflow_id, p256dh = excluded.p256dh, auth = excluded.auth";
+  "ON CONFLICT(endpoint, workflow_id) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth";
 
-export const SQL_DELETE_SUBSCRIPTION = "DELETE FROM push_subscriptions WHERE endpoint = ?";
+export const SQL_DELETE_SUBSCRIPTION = "DELETE FROM push_subscriptions WHERE endpoint = ? AND workflow_id = ?";
 
 export const SQL_LIST_SUBS_BY_WORKFLOW =
   "SELECT endpoint, workflow_id, p256dh, auth FROM push_subscriptions WHERE workflow_id = ?";

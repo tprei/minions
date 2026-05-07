@@ -23,13 +23,12 @@ export interface PushSender {
   send(target: PushSendTarget, payload: string): Promise<PushSendResult>;
 }
 
-const SEND_TIMEOUT_MS = 10_000;
-
 export class WebPushSender implements PushSender {
+  private readonly vapid: VapidConfig;
   private readonly agent: https.Agent | undefined;
 
   constructor(vapid: VapidConfig, agent?: https.Agent) {
-    webpush.setVapidDetails(vapid.subject, vapid.publicKey, vapid.privateKey);
+    this.vapid = vapid;
     this.agent = agent;
   }
 
@@ -38,10 +37,17 @@ export class WebPushSender implements PushSender {
       endpoint: target.endpoint,
       keys: { p256dh: target.keys.p256dh, auth: target.keys.auth },
     };
-    const options: { agent?: https.Agent } = {};
+    const options: Parameters<typeof webpush.sendNotification>[2] = {
+      timeout: 10_000,
+      vapidDetails: {
+        subject: this.vapid.subject,
+        publicKey: this.vapid.publicKey,
+        privateKey: this.vapid.privateKey,
+      },
+    };
     if (this.agent) options.agent = this.agent;
 
-    const sendPromise = webpush
+    return webpush
       .sendNotification(subscription, payload, options)
       .then(() => ({ ok: true } as PushSendResult))
       .catch((err: unknown) => {
@@ -51,13 +57,5 @@ export class WebPushSender implements PushSender {
         }
         return { ok: false, error: err instanceof Error ? err : new Error(String(err)) } as PushSendResult;
       });
-
-    const timeoutPromise = new Promise<PushSendResult>((resolve) => {
-      setTimeout(() => {
-        resolve({ ok: false, error: new Error("push send timeout") });
-      }, SEND_TIMEOUT_MS);
-    });
-
-    return Promise.race([sendPromise, timeoutPromise]);
   }
 }

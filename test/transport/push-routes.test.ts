@@ -210,7 +210,7 @@ describe("DELETE /push/subscribe", () => {
     const res = await app.request("/push/subscribe", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ endpoint: "https://push.example.com/sub1" }),
+      body: JSON.stringify({ endpoint: "https://push.example.com/sub1", workflowId: "wf-1" }),
     });
 
     expect(res.status).toBe(200);
@@ -227,7 +227,7 @@ describe("DELETE /push/subscribe", () => {
     const res = await app.request("/push/subscribe", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ endpoint: "https://push.example.com/nonexistent" }),
+      body: JSON.stringify({ endpoint: "https://push.example.com/nonexistent", workflowId: "wf-1" }),
     });
 
     expect(res.status).toBe(200);
@@ -245,8 +245,8 @@ describe("DELETE /push/subscribe", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns 503 when push not configured", async () => {
-    const { app } = makeApp(false);
+  it("returns 400 when workflowId is missing", async () => {
+    const { app } = makeApp();
 
     const res = await app.request("/push/subscribe", {
       method: "DELETE",
@@ -254,6 +254,28 @@ describe("DELETE /push/subscribe", () => {
       body: JSON.stringify({ endpoint: "https://push.example.com/sub1" }),
     });
 
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 503 when push not configured", async () => {
+    const { app } = makeApp(false);
+
+    const res = await app.request("/push/subscribe", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint: "https://push.example.com/sub1", workflowId: "wf-1" }),
+    });
+
     expect(res.status).toBe(503);
+  });
+});
+
+describe("CORS preflight", () => {
+  it("OPTIONS includes DELETE in allowed methods", async () => {
+    const { app } = makeApp();
+    const res = await app.request("/push/subscribe", { method: "OPTIONS" });
+    expect(res.status).toBe(204);
+    const allow = res.headers.get("Access-Control-Allow-Methods") ?? "";
+    expect(allow).toContain("DELETE");
   });
 });
