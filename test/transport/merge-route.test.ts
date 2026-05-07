@@ -77,4 +77,18 @@ describe("POST /workflows/:id/tasks/:taskId/merge", () => {
     const body = await res.json() as { code: string };
     expect(body.code).toBe("merge_state_inconsistent");
   });
+
+  it("GitHub 500 error propagates as 500 with original error message, not merge_state_inconsistent", async () => {
+    const githubError = Object.assign(new Error("GitHub API 500: Internal Server Error"), { status: 500 });
+    const mockMergeService = {
+      merge: vi.fn().mockRejectedValue(githubError),
+    } as unknown as MergeService;
+
+    const { app } = makeApp(mockMergeService);
+
+    const res = await app.request("/workflows/wf-1/tasks/wf-1:task/merge", { method: "POST" });
+    expect(res.status).toBe(500);
+    const body = await res.json() as { code: string };
+    expect(body.code).toBe("internal_error");
+  });
 });

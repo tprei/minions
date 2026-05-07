@@ -19,6 +19,18 @@ export class MergeServiceError extends Error {
   }
 }
 
+export class MergeConflictError extends Error {
+  readonly conflictCode: string;
+  readonly conflictPaths: string[] | undefined;
+
+  constructor(conflictCode: string, message: string, conflictPaths?: string[]) {
+    super(message);
+    this.name = "MergeConflictError";
+    this.conflictCode = conflictCode;
+    this.conflictPaths = conflictPaths;
+  }
+}
+
 export interface MergeServiceDeps {
   repo: WorkflowRepository;
   applyCommand: (cmd: Command) => Promise<CommandResult>;
@@ -36,6 +48,20 @@ export interface MergeInput {
 
 function deriveBranch(workflowId: string, taskId: string): string {
   return `minions/${slugify(workflowId)}_${slugify(taskId)}`;
+}
+
+async function getPRWithMergeable(
+  scm: SCMPlugin,
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<Awaited<ReturnType<SCMPlugin["getPullRequest"]>>> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const pr = await scm.getPullRequest({ owner, repo, number });
+    if (pr.mergeable !== null) return pr;
+    await new Promise<void>((r) => setTimeout(r, 1000));
+  }
+  throw new MergeConflictError("mergeable_unknown", "GitHub did not compute mergeability after 5 attempts");
 }
 
 export class MergeService {
@@ -68,10 +94,13 @@ export class MergeService {
     });
 
     let workspaceHandle: Awaited<ReturnType<WorkspaceBackend["create"]>> | undefined;
+    let currentPhase: MergePhase = "prepareMerge";
     let branch: string | undefined;
+    let mergedSha: string | undefined;
 
     try {
       // Phase 1: prepareMerge
+      currentPhase = "prepareMerge";
       emitPhase("prepareMerge", "started");
       const workflow = await repo.get(workflowId);
       if (!workflow) {
@@ -99,27 +128,33 @@ export class MergeService {
       emitPhase("prepareMerge", "completed");
 
       // Phase 2: commit (push branch)
+      currentPhase = "commit";
       emitPhase("commit", "started");
       await scm.pushBranch(workspaceHandle.path, branch);
       emitPhase("commit", "completed");
 
       // Phase 3: squash (no-op for v1)
+      currentPhase = "squash";
       emitPhase("squash", "started");
       emitPhase("squash", "completed");
 
       // Phase 4: rebase
+      currentPhase = "rebase";
       emitPhase("rebase", "started");
       const rebaseResult = await scm.rebase(workspaceHandle.path, baseBranch);
       if (rebaseResult.kind === "conflict") {
-        const err = new Error(`rebase conflict in ${rebaseResult.conflictPaths.join(", ")}`);
-        (err as Error & { conflictPaths: string[] }).conflictPaths = rebaseResult.conflictPaths;
-        throw err;
+        throw new MergeConflictError(
+          "rebase_conflict",
+          `rebase conflict in ${rebaseResult.conflictPaths.join(", ")}`,
+          rebaseResult.conflictPaths,
+        );
       }
       // Push after rebase so the remote head matches the rebased SHA before GitHub merges.
       await scm.pushBranch(workspaceHandle.path, branch);
       emitPhase("rebase", "completed");
 
       // Phase 5: applyMerge
+      currentPhase = "applyMerge";
       emitPhase("applyMerge", "started");
       let prRef = await scm.findPullRequest({ owner: repoCoords.owner, repo: repoCoords.repo, head: branch, base: baseBranch });
 
@@ -147,12 +182,12 @@ export class MergeService {
         });
       }
 
-      const prDetail = await scm.getPullRequest({ owner: repoCoords.owner, repo: repoCoords.repo, number: prRef.number });
+      const prDetail = await getPRWithMergeable(scm, repoCoords.owner, repoCoords.repo, prRef.number);
 
       if (prDetail.mergeableState !== null && prDetail.mergeableState !== "clean" && prDetail.mergeableState !== "unstable") {
-        throw Object.assign(
-          new Error(`PR not mergeable: mergeable_state=${prDetail.mergeableState}`),
-          { blockedState: prDetail.mergeableState },
+        throw new MergeConflictError(
+          "not_mergeable",
+          `PR not mergeable: mergeable_state=${prDetail.mergeableState}`,
         );
       }
 
@@ -165,14 +200,16 @@ export class MergeService {
       });
 
       if (!outcome.merged) {
-        throw Object.assign(
-          new Error(`PR merge failed: reason=${outcome.reason}`),
-          { mergeReason: outcome.reason },
+        throw new MergeConflictError(
+          outcome.reason,
+          `PR merge failed: reason=${outcome.reason}`,
         );
       }
+      mergedSha = outcome.sha;
       emitPhase("applyMerge", "completed");
 
       // Phase 6: finalize
+      currentPhase = "finalize";
       emitPhase("finalize", "started");
       const maxAttempts = 3;
       let finalResult: CommandResult | undefined;
@@ -188,11 +225,11 @@ export class MergeService {
           if (attempt + 1 >= maxAttempts) {
             // GitHub is already merged but internal state won't transition — operator must reconcile.
             console.error(
-              `MERGE INCONSISTENCY: github merged sha=${outcome.sha} but internal merge-task transition failed after ${maxAttempts} attempts. Operator must reconcile. Workflow=${workflowId} Task=${taskId}`,
+              `MERGE INCONSISTENCY: github merged sha=${mergedSha} but internal merge-task transition failed after ${maxAttempts} attempts. Operator must reconcile. Workflow=${workflowId} Task=${taskId}`,
               err,
             );
             throw new MergeServiceError("merge_state_inconsistent", {
-              sha: outcome.sha,
+              sha: mergedSha,
               workflowId,
               taskId,
               cause: err,
@@ -201,7 +238,6 @@ export class MergeService {
           await new Promise<void>((r) => setTimeout(r, 100 * Math.pow(2, attempt)));
         }
       }
-      await workspace.cleanup(workspaceHandle.workspaceId).catch(() => {});
       emitPhase("finalize", "completed");
 
       return finalResult!;
@@ -211,41 +247,35 @@ export class MergeService {
         throw err;
       }
 
-      const phase = resolveFailedPhase(err, workspaceHandle);
-      const reason = err instanceof Error ? err.message : String(err);
-      const conflictPaths = (err as { conflictPaths?: string[] }).conflictPaths;
-      const artifact = buildConflictArtifact(phase, reason, conflictPaths);
+      if (err instanceof MergeConflictError) {
+        const artifact = buildConflictArtifact(currentPhase, err.message, err.conflictPaths);
 
-      const currentWf = await repo.get(workflowId).catch(() => undefined);
-      const currentTask = currentWf?.graph[taskId];
-      const fromStatus = currentTask?.executionStatus;
-      if (fromStatus === "finalizing" || fromStatus === "pr-open") {
-        const conflictResult = await applyCommand({
-          kind: "transition-task",
-          workflowId,
-          transition: {
-            kind: "merge-conflict",
-            taskId,
-            artifacts: [artifact],
-            reason,
-            now: now(),
-          },
-        });
-        return conflictResult;
+        const currentWf = await repo.get(workflowId).catch(() => undefined);
+        const currentTask = currentWf?.graph[taskId];
+        const fromStatus = currentTask?.executionStatus;
+        if (fromStatus === "finalizing" || fromStatus === "pr-open") {
+          const conflictResult = await applyCommand({
+            kind: "transition-task",
+            workflowId,
+            transition: {
+              kind: "merge-conflict",
+              taskId,
+              artifacts: [artifact],
+              reason: err.message,
+              now: now(),
+            },
+          });
+          return conflictResult;
+        }
       }
 
       throw err;
+    } finally {
+      if (workspaceHandle !== undefined) {
+        await workspace.cleanup(workspaceHandle.workspaceId).catch((err) => {
+          console.error(`workspace cleanup failed for ${workspaceHandle!.workspaceId}:`, err);
+        });
+      }
     }
   }
-}
-
-function resolveFailedPhase(
-  _err: unknown,
-  handle: Awaited<ReturnType<WorkspaceBackend["create"]>> | undefined,
-): MergePhase {
-  if (handle === undefined) return "prepareMerge";
-  const err = _err as { conflictPaths?: string[]; blockedState?: string; mergeReason?: string };
-  if (err.conflictPaths !== undefined) return "rebase";
-  if (err.blockedState !== undefined || err.mergeReason !== undefined) return "applyMerge";
-  return "finalize";
 }
