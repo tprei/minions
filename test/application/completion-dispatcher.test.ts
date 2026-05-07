@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { CompletionDispatcher } from "../../src/application/completion-dispatcher.js";
-import { MergeConflictError, MergeServiceError } from "../../src/application/merge-service.js";
+import { MergeAbortedError, MergeConflictError, MergeServiceError } from "../../src/application/merge-service.js";
 import { applyCommand } from "../../src/application/commands.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
 import { createWorkflow } from "../../src/domain/workflow.js";
@@ -118,7 +118,7 @@ describe("CompletionDispatcher", () => {
     await new Promise((r) => setTimeout(r, 50));
     ctrl.abort();
 
-    expect(mergeService.openOnly).toHaveBeenCalledWith({ workflowId: WORKFLOW_ID, taskId: TASK_ID });
+    expect(mergeService.openOnly).toHaveBeenCalledWith(expect.objectContaining({ workflowId: WORKFLOW_ID, taskId: TASK_ID }));
   });
 
   it("task in finalizing + autoLand:true + MergeConflictError → no-op (handled by MergeService)", async () => {
@@ -189,7 +189,7 @@ describe("CompletionDispatcher", () => {
     await new Promise((r) => setTimeout(r, 50));
     ctrl.abort();
 
-    expect(mergeService.openOnly).toHaveBeenCalledWith({ workflowId: WORKFLOW_ID, taskId: TASK_ID });
+    expect(mergeService.openOnly).toHaveBeenCalledWith(expect.objectContaining({ workflowId: WORKFLOW_ID, taskId: TASK_ID }));
   });
 
   it("transition into finalizing via event triggers dispatch", async () => {
@@ -234,7 +234,7 @@ describe("CompletionDispatcher", () => {
     await new Promise((r) => setTimeout(r, 50));
     ctrl.abort();
 
-    expect(mergeService.openOnly).toHaveBeenCalledWith({ workflowId: WORKFLOW_ID, taskId: TASK_ID });
+    expect(mergeService.openOnly).toHaveBeenCalledWith(expect.objectContaining({ workflowId: WORKFLOW_ID, taskId: TASK_ID }));
   });
 
   it("engine signal cascade aborts all", async () => {
@@ -280,5 +280,41 @@ describe("CompletionDispatcher", () => {
     ctrl.abort();
 
     await new Promise((r) => setImmediate(r));
+  });
+
+  it("MED3: CompletionDispatcher abort propagates to in-flight openOnly → MergeAbortedError caught, no merge-conflict", async () => {
+    const repo = makeRepo();
+    await makeWorkflowInFinalizing(repo, true);
+
+    let capturedSignal: AbortSignal | undefined;
+    const mergeService = makeMergeService({
+      openOnly: vi.fn().mockImplementation(async (opts: { workflowId: string; taskId: string; signal?: AbortSignal }) => {
+        capturedSignal = opts.signal;
+        return new Promise<CommandResult>((_, reject) => {
+          opts.signal?.addEventListener("abort", () => reject(new MergeAbortedError()), { once: true });
+        });
+      }),
+    });
+    const ctrl = new AbortController();
+    const applyCommandSpy = vi.fn((cmd: Parameters<typeof applyCommand>[1]) => applyCommand(repo, cmd));
+
+    const service = new CompletionDispatcher({
+      workflowRepo: repo,
+      applyCommand: applyCommandSpy,
+      mergeService,
+      signal: ctrl.signal,
+      now,
+    });
+    service.attach(WORKFLOW_ID);
+
+    await new Promise((r) => setTimeout(r, 50));
+    ctrl.abort();
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(capturedSignal).toBeDefined();
+    const mergeConflictCalls = applyCommandSpy.mock.calls.filter(
+      (c) => c[0].kind === "transition-task" && "transition" in c[0] && (c[0] as { transition: { kind: string } }).transition.kind === "merge-conflict",
+    );
+    expect(mergeConflictCalls).toHaveLength(0);
   });
 });

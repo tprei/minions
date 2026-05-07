@@ -687,7 +687,7 @@ describe("CIBabysitterService autoMerge", () => {
     await new Promise((r) => setTimeout(r, 100));
     ctrl.abort();
 
-    expect(mergeService.merge).toHaveBeenCalledWith({ workflowId: WORKFLOW_ID, taskId: TASK_ID });
+    expect(mergeService.merge).toHaveBeenCalledWith(expect.objectContaining({ workflowId: WORKFLOW_ID, taskId: TASK_ID }));
   });
 
   it("green CI + autoMergeOnGreen:true + MergeConflictError → bail", async () => {

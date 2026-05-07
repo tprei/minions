@@ -5,7 +5,7 @@ import type { GitHubClient } from "../plugins/github/github-client.js";
 import type { Command, CommandResult } from "./commands.js";
 import type { WorkflowRepository } from "./repository.js";
 import type { ContinueTaskService } from "./continue-task-service.js";
-import { MergeConflictError, MergeService, MergeServiceError } from "./merge-service.js";
+import { MergeAbortedError, MergeConflictError, MergeService, MergeServiceError } from "./merge-service.js";
 
 export interface PollCadenceInterval {
   afterMs: number;
@@ -310,9 +310,10 @@ export class CIBabysitterService {
         if (!this.deps.mergeService) return;
 
         try {
-          await this.deps.mergeService.merge({ workflowId, taskId });
+          await this.deps.mergeService.merge({ workflowId, taskId, signal });
           return;
         } catch (err) {
+          if (err instanceof MergeAbortedError) return;
           if (err instanceof MergeConflictError) return;
           if (err instanceof MergeServiceError) {
             console.error(`ci-babysitter: catastrophic merge failure for ${workflowId}:${taskId}:`, err);

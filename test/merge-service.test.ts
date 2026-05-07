@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { MergeService, MergeServiceError } from "../src/application/merge-service.js";
+import { MergeAbortedError, MergeService, MergeServiceError } from "../src/application/merge-service.js";
 import { InMemoryWorkflowRepository } from "../src/application/repository.js";
 import { applyCommand } from "../src/application/commands.js";
 import { createSingleTaskWorkflow } from "../src/domain/workflow.js";
@@ -570,5 +570,161 @@ describe("MergeService", () => {
 
     await expect(service.merge({ workflowId: "wf-1", taskId: "wf-1:task" })).rejects.toBeInstanceOf(MergeServiceError);
     expect(mergeTaskAttempts).toBe(3);
+  });
+
+  it("HIGH: merge with prDetail.merged===true and mergeable===null → finalizes via finalizeAlreadyMerged, does not throw mergeable_unknown", async () => {
+    const { repo } = await buildWorkflow();
+    const scm = makeScm({
+      getPullRequest: vi.fn().mockResolvedValue({
+        number: 42,
+        url: "https://github.com/o/r/pull/42",
+        headSha: "sha123",
+        headRef: "branch",
+        baseRef: "main",
+        mergeable: null,
+        mergeableState: null,
+        merged: true,
+        mergeCommitSha: "merged-sha-abc",
+      }),
+    });
+    const workspace = makeWorkspace();
+
+    const service = new MergeService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      scm,
+      workspace,
+      repoCoords: { owner: "o", repo: "r" },
+      baseBranch: "main",
+      now: () => now,
+    });
+
+    const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
+
+    expect(scm.mergePullRequest).not.toHaveBeenCalled();
+    expect(result.workflow.graph["wf-1:task"]?.executionStatus).toBe("merged");
+    expect(scm.getPullRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("MED1: openOnly succeeds when opened PR has mergeable:null → task ends in pr-open, does not throw mergeable_unknown", async () => {
+    const { repo } = await buildWorkflow();
+    const scm = makeScm({
+      getPullRequest: vi.fn().mockResolvedValue({
+        number: 42,
+        url: "https://github.com/o/r/pull/42",
+        headSha: "sha123",
+        headRef: "branch",
+        baseRef: "main",
+        mergeable: null,
+        mergeableState: null,
+        merged: false,
+      }),
+    });
+    const workspace = makeWorkspace();
+
+    const service = new MergeService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      scm,
+      workspace,
+      repoCoords: { owner: "o", repo: "r" },
+      baseBranch: "main",
+      now: () => now,
+    });
+
+    const result = await service.openOnly({ workflowId: "wf-1", taskId: "wf-1:task" });
+
+    expect(result.workflow.graph["wf-1:task"]?.executionStatus).toBe("pr-open");
+    expect(scm.getPullRequest).not.toHaveBeenCalled();
+    expect(scm.mergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it("MED2: openOnly idempotent: task in finalizing + existing PR found → fires open-review, task ends in pr-open", async () => {
+    const { repo } = await buildWorkflow();
+    const existingPr = { number: 42, url: "https://github.com/o/r/pull/42", headRef: "branch", baseRef: "main" };
+    const scm = makeScm({
+      findPullRequest: vi.fn().mockResolvedValue(existingPr),
+    });
+    const workspace = makeWorkspace();
+
+    const service = new MergeService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      scm,
+      workspace,
+      repoCoords: { owner: "o", repo: "r" },
+      baseBranch: "main",
+      now: () => now,
+    });
+
+    const result = await service.openOnly({ workflowId: "wf-1", taskId: "wf-1:task" });
+
+    expect(scm.openPullRequest).not.toHaveBeenCalled();
+    expect(result.workflow.graph["wf-1:task"]?.executionStatus).toBe("pr-open");
+  });
+
+  it("MED3: openOnly aborts mid-flight when signal aborts → throws MergeAbortedError, does not fire merge-conflict", async () => {
+    const { repo } = await buildWorkflow();
+    const ctrl = new AbortController();
+    const scm = makeScm({
+      pushBranch: vi.fn().mockImplementation(async () => {
+        ctrl.abort();
+      }),
+    });
+    const workspace = makeWorkspace();
+    const applyCommandSpy = vi.fn((cmd: Command) => applyCommand(repo, cmd));
+
+    const service = new MergeService({
+      repo,
+      applyCommand: applyCommandSpy,
+      scm,
+      workspace,
+      repoCoords: { owner: "o", repo: "r" },
+      baseBranch: "main",
+      now: () => now,
+    });
+
+    await expect(service.openOnly({ workflowId: "wf-1", taskId: "wf-1:task", signal: ctrl.signal })).rejects.toBeInstanceOf(MergeAbortedError);
+
+    const mergeConflictCalls = applyCommandSpy.mock.calls.filter(
+      (args: unknown[]) => {
+        const cmd = args[0] as Command;
+        return cmd.kind === "transition-task" && "transition" in cmd && cmd.transition.kind === "merge-conflict";
+      },
+    );
+    expect(mergeConflictCalls).toHaveLength(0);
+  });
+
+  it("MED3: merge aborts mid-flight → throws MergeAbortedError, does not fire merge-conflict", async () => {
+    const { repo } = await buildWorkflow();
+    const ctrl = new AbortController();
+    const scm = makeScm({
+      rebase: vi.fn().mockImplementation(async () => {
+        ctrl.abort();
+        return { kind: "clean" } satisfies import("../src/plugins/scm-plugin.js").MergeResult;
+      }),
+    });
+    const workspace = makeWorkspace();
+    const applyCommandSpy = vi.fn((cmd: Command) => applyCommand(repo, cmd));
+
+    const service = new MergeService({
+      repo,
+      applyCommand: applyCommandSpy,
+      scm,
+      workspace,
+      repoCoords: { owner: "o", repo: "r" },
+      baseBranch: "main",
+      now: () => now,
+    });
+
+    await expect(service.merge({ workflowId: "wf-1", taskId: "wf-1:task", signal: ctrl.signal })).rejects.toBeInstanceOf(MergeAbortedError);
+
+    const mergeConflictCalls = applyCommandSpy.mock.calls.filter(
+      (args: unknown[]) => {
+        const cmd = args[0] as Command;
+        return cmd.kind === "transition-task" && "transition" in cmd && cmd.transition.kind === "merge-conflict";
+      },
+    );
+    expect(mergeConflictCalls).toHaveLength(0);
   });
 });

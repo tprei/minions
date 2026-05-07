@@ -1,7 +1,7 @@
 import { DomainError } from "../domain/errors.js";
 import type { WorkflowEvent, MergePhase } from "../domain/events.js";
 import type { Artifact } from "../domain/types.js";
-import type { PullRequestDetail, PullRequestRef, SCMPlugin } from "../plugins/scm-plugin.js";
+import type { PullRequestRef, SCMPlugin } from "../plugins/scm-plugin.js";
 import type { WorkspaceBackend } from "../plugins/workspace-backend.js";
 import { slugify } from "../plugins/workspace-backend.js";
 import type { Command, CommandResult } from "./commands.js";
@@ -31,6 +31,13 @@ export class MergeConflictError extends Error {
   }
 }
 
+export class MergeAbortedError extends Error {
+  constructor() {
+    super("merge aborted by signal");
+    this.name = "MergeAbortedError";
+  }
+}
+
 export interface MergeServiceDeps {
   repo: WorkflowRepository;
   applyCommand: (cmd: Command) => Promise<CommandResult>;
@@ -44,6 +51,7 @@ export interface MergeServiceDeps {
 export interface MergeInput {
   workflowId: string;
   taskId: string;
+  signal?: AbortSignal;
 }
 
 function deriveBranch(workflowId: string, taskId: string): string {
@@ -58,6 +66,7 @@ async function getPRWithMergeable(
 ): Promise<Awaited<ReturnType<SCMPlugin["getPullRequest"]>>> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const pr = await scm.getPullRequest({ owner, repo, number });
+    if (pr.merged === true) return pr;
     if (pr.mergeable !== null) return pr;
     await new Promise<void>((r) => setTimeout(r, 1000));
   }
@@ -66,7 +75,6 @@ async function getPRWithMergeable(
 
 type RunUntilOpenResult = {
   openReviewResult: CommandResult | undefined;
-  prDetail: PullRequestDetail;
   prRef: PullRequestRef;
   branch: string;
 };
@@ -101,6 +109,10 @@ export class MergeService {
   private async handlePhaseError(err: unknown, opts: MergeInput): Promise<CommandResult> {
     const { repo, applyCommand, now } = this.deps;
     const { workflowId, taskId } = opts;
+
+    if (err instanceof MergeAbortedError) {
+      throw err;
+    }
 
     if (err instanceof MergeServiceError) {
       this.emitPhase(workflowId, taskId, "finalize", "completed", "MERGE_INCONSISTENT");
@@ -177,7 +189,7 @@ export class MergeService {
     setHandle: (h: Awaited<ReturnType<WorkspaceBackend["create"]>>) => void,
   ): Promise<RunUntilOpenResult> {
     const { repo, applyCommand, scm, workspace, repoCoords, baseBranch, now } = this.deps;
-    const { workflowId, taskId } = opts;
+    const { workflowId, taskId, signal } = opts;
 
     this.emitPhase(workflowId, taskId, "prepareMerge", "started");
     const workflow = await repo.get(workflowId);
@@ -204,9 +216,13 @@ export class MergeService {
     setHandle(workspaceHandle);
     this.emitPhase(workflowId, taskId, "prepareMerge", "completed");
 
+    if (signal?.aborted) throw new MergeAbortedError();
+
     this.emitPhase(workflowId, taskId, "commit", "started");
     await scm.pushBranch(workspaceHandle.path, branch);
     this.emitPhase(workflowId, taskId, "commit", "completed");
+
+    if (signal?.aborted) throw new MergeAbortedError();
 
     this.emitPhase(workflowId, taskId, "squash", "started");
     this.emitPhase(workflowId, taskId, "squash", "completed");
@@ -222,6 +238,8 @@ export class MergeService {
     }
     await scm.pushBranch(workspaceHandle.path, branch);
     this.emitPhase(workflowId, taskId, "rebase", "completed");
+
+    if (signal?.aborted) throw new MergeAbortedError();
 
     const existingPrRef = await scm.findPullRequest({ owner: repoCoords.owner, repo: repoCoords.repo, head: branch, base: baseBranch });
     let openReviewResult: CommandResult | undefined;
@@ -251,11 +269,27 @@ export class MergeService {
       });
     } else {
       prRef = existingPrRef;
+      try {
+        openReviewResult = await applyCommand({
+          kind: "transition-task",
+          workflowId,
+          transition: {
+            kind: "open-review",
+            taskId,
+            artifacts: [{ kind: "pr", ref: prRef.url, producedBy: "merge-service", createdAt: now() }],
+            now: now(),
+          },
+        });
+      } catch (err) {
+        if (err instanceof DomainError && err.code === "invalid_transition") {
+          openReviewResult = undefined;
+        } else {
+          throw err;
+        }
+      }
     }
 
-    const prDetail = await getPRWithMergeable(scm, repoCoords.owner, repoCoords.repo, prRef.number);
-
-    return { openReviewResult, prDetail, prRef, branch };
+    return { openReviewResult, prRef, branch };
   }
 
   private async buildIdempotentResult(opts: MergeInput): Promise<CommandResult> {
@@ -270,6 +304,7 @@ export class MergeService {
       const open = await this.runUntilOpen(opts, (h) => { workspaceHandle = h; });
       return open.openReviewResult ?? await this.buildIdempotentResult(opts);
     } catch (err) {
+      if (err instanceof MergeAbortedError) throw err;
       return this.handlePhaseError(err, opts);
     } finally {
       if (workspaceHandle !== undefined) {
@@ -285,23 +320,34 @@ export class MergeService {
     try {
       const open = await this.runUntilOpen(opts, (h) => { workspaceHandle = h; });
 
-      if (open.prDetail.merged === true) {
-        const mergedSha = open.prDetail.mergeCommitSha ?? open.prDetail.headSha;
+      if (opts.signal?.aborted) throw new MergeAbortedError();
+
+      const prDetail = await getPRWithMergeable(
+        this.deps.scm,
+        this.deps.repoCoords.owner,
+        this.deps.repoCoords.repo,
+        open.prRef.number,
+      );
+
+      if (prDetail.merged === true) {
+        const mergedSha = prDetail.mergeCommitSha ?? prDetail.headSha;
         return await this.finalizeAlreadyMerged(opts, open.prRef, mergedSha);
       }
 
-      if (open.prDetail.mergeableState !== null
-          && open.prDetail.mergeableState !== "clean"
-          && open.prDetail.mergeableState !== "unstable") {
-        throw new MergeConflictError("not_mergeable", `PR not mergeable: mergeable_state=${open.prDetail.mergeableState}`);
+      if (prDetail.mergeableState !== null
+          && prDetail.mergeableState !== "clean"
+          && prDetail.mergeableState !== "unstable") {
+        throw new MergeConflictError("not_mergeable", `PR not mergeable: mergeable_state=${prDetail.mergeableState}`);
       }
+
+      if (opts.signal?.aborted) throw new MergeAbortedError();
 
       this.emitPhase(opts.workflowId, opts.taskId, "applyMerge", "started");
       const outcome = await this.deps.scm.mergePullRequest({
         owner: this.deps.repoCoords.owner,
         repo: this.deps.repoCoords.repo,
         number: open.prRef.number,
-        expectedHeadSha: open.prDetail.headSha,
+        expectedHeadSha: prDetail.headSha,
         method: "squash",
       });
       if (!outcome.merged) {
@@ -311,6 +357,7 @@ export class MergeService {
 
       return await this.finalizeMerge(opts, open.prRef, outcome.sha);
     } catch (err) {
+      if (err instanceof MergeAbortedError) throw err;
       return this.handlePhaseError(err, opts);
     } finally {
       if (workspaceHandle !== undefined) {

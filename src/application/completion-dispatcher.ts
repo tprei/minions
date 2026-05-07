@@ -1,6 +1,6 @@
 import type { WorkflowEvent } from "../domain/events.js";
 import type { Command, CommandResult } from "./commands.js";
-import { MergeConflictError, MergeService, MergeServiceError } from "./merge-service.js";
+import { MergeAbortedError, MergeConflictError, MergeService, MergeServiceError } from "./merge-service.js";
 import type { WorkflowRepository } from "./repository.js";
 
 export interface CompletionDispatcherDeps {
@@ -117,8 +117,9 @@ export class CompletionDispatcher {
     if (signal.aborted) return;
 
     try {
-      await mergeService.openOnly({ workflowId, taskId });
+      await mergeService.openOnly({ workflowId, taskId, signal });
     } catch (err) {
+      if (err instanceof MergeAbortedError) return;
       if (err instanceof MergeConflictError) return;
       if (err instanceof MergeServiceError) {
         console.error(`completion-dispatcher: catastrophic merge failure for ${workflowId}:${taskId}:`, err);
