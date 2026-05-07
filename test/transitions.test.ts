@@ -175,8 +175,16 @@ describe("quality gate", () => {
   });
 });
 
-describe("mark-ready from needs-review", () => {
-  it("moves a needs-review task back to ready", () => {
+describe("mark-ready", () => {
+  it("mark-ready from pending succeeds", () => {
+    const workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    const after = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+
+    expect(after.graph["task-1:task"]?.executionStatus).toBe("ready");
+    expect(after.graph["task-1:task"]?.sessionId).toBeUndefined();
+  });
+
+  it("mark-ready from needs-review rejects as invalid_transition", () => {
     let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
     workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
     workflow = transitionTask(workflow, {
@@ -188,35 +196,56 @@ describe("mark-ready from needs-review", () => {
     workflow = transitionTask(workflow, { kind: "mark-interrupted", taskId: "task-1:task", now });
     expect(workflow.graph["task-1:task"]?.executionStatus).toBe("needs-review");
 
-    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
-
-    expect(workflow.graph["task-1:task"]?.executionStatus).toBe("ready");
+    expect(() =>
+      transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now }),
+    ).toThrow(DomainError);
   });
+});
 
-  it("clears stale sessionId when moving from needs-review to ready", () => {
+describe("mark-running from needs-review", () => {
+  it("moves needs-review directly to running with sessionId, creates attempt 2", () => {
     let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
     workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
     workflow = transitionTask(workflow, {
       kind: "mark-running",
       taskId: "task-1:task",
-      sessionId: "stale-session",
+      sessionId: "session-1",
       now,
     });
     workflow = transitionTask(workflow, { kind: "mark-interrupted", taskId: "task-1:task", now });
     expect(workflow.graph["task-1:task"]?.executionStatus).toBe("needs-review");
 
-    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-2",
+      providerSessionRef: "ref-abc",
+      now,
+    });
 
-    expect(workflow.graph["task-1:task"]?.executionStatus).toBe("ready");
-    expect(workflow.graph["task-1:task"]?.sessionId).toBeUndefined();
+    const task = workflow.graph["task-1:task"]!;
+    expect(task.executionStatus).toBe("running");
+    expect(task.sessionId).toBe("session-2");
+    expect(task.runs).toHaveLength(2);
+    expect(task.runs[1]?.attempt).toBe(2);
+    expect(task.runs[1]?.providerSessionRef).toBe("ref-abc");
   });
 
-  it("mark-ready from pending leaves no sessionId (pending tasks never have one)", () => {
-    const workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
-    const after = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+  it("mark-running from needs-review without sessionId throws invalid_transition", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+    workflow = transitionTask(workflow, { kind: "mark-interrupted", taskId: "task-1:task", now });
+    expect(workflow.graph["task-1:task"]?.executionStatus).toBe("needs-review");
 
-    expect(after.graph["task-1:task"]?.executionStatus).toBe("ready");
-    expect(after.graph["task-1:task"]?.sessionId).toBeUndefined();
+    expect(() =>
+      transitionTask(workflow, { kind: "mark-running", taskId: "task-1:task", now }),
+    ).toThrow(DomainError);
   });
 });
 

@@ -53,13 +53,6 @@ export class ContinueTaskService {
       throw new DomainError("invalid_transition", "no resumable session on prior run", { taskId });
     }
 
-    // Claim state before allocating resources — fails cleanly if task isn't in needs-review
-    await applyCommand({
-      kind: "transition-task",
-      workflowId,
-      transition: { kind: "mark-ready", taskId, now: now() },
-    });
-
     const provider = providerFactory();
     const invocation = await provider.resume({ sessionRef: priorSessionRef, prompt, taskId, workflowId });
     const startSpec: { taskId: string; workflowId: string; command: string[]; env?: Record<string, string> } = {

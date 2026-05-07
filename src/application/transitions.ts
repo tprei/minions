@@ -58,11 +58,11 @@ const appendArtifacts = (task: TaskNode, command: TransitionCommand): Artifact[]
 
 const TRANSITIONS: Record<TransitionKind, TransitionRule> = {
   "mark-ready": {
-    from: ["pending", "needs-review"],
-    apply: () => ({ patch: { executionStatus: "ready" }, clearSession: true }),
+    from: ["pending"],
+    apply: () => ({ patch: { executionStatus: "ready" } }),
   },
   "mark-running": {
-    from: ["ready"],
+    from: ["ready", "needs-review"],
     apply: (task, command) => {
       if (!command.sessionId) {
         throw new DomainError("invalid_transition", "running task requires session id", {

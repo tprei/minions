@@ -125,7 +125,7 @@ describe("ContinueTaskService", () => {
     expect(resumeSpy).not.toHaveBeenCalled();
   });
 
-  it("sad path: provider.resume rejects → error propagates, task left in ready state", async () => {
+  it("sad path: provider.resume rejects → error propagates, task stays in needs-review", async () => {
     const repo = new InMemoryWorkflowRepository();
     const runtime = new StubRuntimeBackend();
     const provider = new StubProviderPlugin({ frames: [] });
@@ -145,18 +145,18 @@ describe("ContinueTaskService", () => {
       service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "continue" }),
     ).rejects.toThrow("provider unavailable");
 
-    // mark-ready fires before provider.resume; task is in ready state after failure
     const wfAfter = await repo.get("wf-1");
-    expect(wfAfter!.graph["wf-1:task"]!.executionStatus).toBe("ready");
+    expect(wfAfter!.graph["wf-1:task"]!.executionStatus).toBe("needs-review");
   });
 
-  it("sad path: provider.resume rejects → stale sessionId cleared, task recoverable by stale-ready-no-session rule", async () => {
+  it("sad path: runtime.start rejects → error propagates, task stays in needs-review", async () => {
     const repo = new InMemoryWorkflowRepository();
     const runtime = new StubRuntimeBackend();
-    const provider = new StubProviderPlugin({ frames: [] });
-    vi.spyOn(provider, "resume").mockRejectedValue(new Error("provider unavailable"));
+    vi.spyOn(runtime, "start").mockRejectedValue(new Error("runtime unavailable"));
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "new-session" };
+    const provider = new StubProviderPlugin({ frames: [[finalEvent]] });
 
-    await makeNeedsReviewTask(repo, "stale-ref");
+    await makeNeedsReviewTask(repo, "existing-ref");
 
     const service = new ContinueTaskService({
       repo,
@@ -168,12 +168,10 @@ describe("ContinueTaskService", () => {
 
     await expect(
       service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "continue" }),
-    ).rejects.toThrow("provider unavailable");
+    ).rejects.toThrow("runtime unavailable");
 
     const wfAfter = await repo.get("wf-1");
-    const task = wfAfter!.graph["wf-1:task"]!;
-    expect(task.executionStatus).toBe("ready");
-    expect(task.sessionId).toBeUndefined();
+    expect(wfAfter!.graph["wf-1:task"]!.executionStatus).toBe("needs-review");
   });
 
   it("sad path: mark-running rejects → runtime.stop called for cleanup before error propagates", async () => {
