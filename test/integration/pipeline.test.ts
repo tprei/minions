@@ -429,6 +429,9 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
       expect(opPayload.kind).toBe("restack");
       expect(opPayload.toStatus).toBe("pending");
 
+      // Restack operation targets the correct ancestor node
+      expect(postRestackWf.operations["op-restack-1"]?.targetNodeId).toBe("backend");
+
       // tests task: restack-pending + pending
       expect(postRestackWf.graph["tests"]?.stackStatus).toBe("restack-pending");
       expect(postRestackWf.graph["tests"]?.executionStatus).toBe("pending");
@@ -442,6 +445,11 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
       // No orphan workspace for tests task (it was never started)
       const testsWorkspaceId = `ws-${slugify(wfId)}_${slugify("tests")}`;
       expect(harness.workspace.counts.create.has(testsWorkspaceId)).toBe(false);
+
+      // Clean up the workspaces created during the test so they don't appear as stranded worktrees
+      await harness.workspace.cleanup(backendHandle.workspaceId);
+      await harness.workspace.cleanup(frontendHandle.workspaceId);
+      await assertNoStrandedWorktrees(harness.repoPath);
     } finally {
       await harness.cleanup();
     }
@@ -458,86 +466,84 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
     const now = new Date().toISOString();
     const branch = `minions/${slugify(wfId)}_${slugify(taskId)}`;
     let workspaceId = "";
+    let harnessB: Awaited<ReturnType<typeof makeHarness>> | undefined;
 
     try {
-      const createRes = await harness.fetch("/workflows", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: wfId,
-          kind: "single-task",
-          tasks: [{ id: taskId, title: "Recovery Task", prompt: "recover me" }],
-          policy: { autoLand: true },
-        }),
+      try {
+        const createRes = await harness.fetch("/workflows", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: wfId,
+            kind: "single-task",
+            tasks: [{ id: taskId, title: "Recovery Task", prompt: "recover me" }],
+            policy: { autoLand: true },
+          }),
+        });
+        expect(createRes.status).toBe(201);
+
+        await postCommand(harness.fetch, {
+          kind: "transition-task",
+          workflowId: wfId,
+          transition: { kind: "mark-ready", taskId, now },
+        });
+
+        const handle = await harness.workspace.create({
+          workflowId: wfId,
+          taskId,
+          branch,
+          mode: "worktree",
+        });
+        workspaceId = handle.workspaceId;
+
+        await postCommand(harness.fetch, {
+          kind: "transition-task",
+          workflowId: wfId,
+          transition: { kind: "mark-running", taskId, sessionId: "sess-4", workspaceId, now },
+        });
+
+        // Seed a real commit on the task branch before completing runtime
+        const scmA = new FakeSCM();
+        await scmA.seedTaskCommit(handle.path, "task-output.txt", "recovery task work\n");
+
+        await postCommand(harness.fetch, {
+          kind: "transition-task",
+          workflowId: wfId,
+          transition: { kind: "complete-runtime", taskId, expectedSessionId: "sess-4", artifacts: [], now },
+        });
+
+        await postCommand(harness.fetch, {
+          kind: "transition-task",
+          workflowId: wfId,
+          transition: { kind: "start-finalization", taskId, now },
+        });
+
+        // Verify task is at finalizing before engine A closes
+        const preClosedWf = await getWorkflow(harness.fetch, wfId);
+        expect(preClosedWf.graph[taskId]?.executionStatus).toBe("finalizing");
+      } finally {
+        // Close engine A — task stays in finalizing in DB; baseDir kept for engine B
+        await harness.engine.close();
+      }
+
+      // Engine B: fresh FakeSCM, same baseDir (shares DB/repo/workspaces) — dispatcher picks up the finalizing task
+      const scmB = new FakeSCM();
+      harnessB = await makeHarness({
+        withRealQuality: false,
+        scm: scmB,
+        baseDir: harness.baseDir,
       });
-      expect(createRes.status).toBe(201);
 
-      await postCommand(harness.fetch, {
-        kind: "transition-task",
-        workflowId: wfId,
-        transition: { kind: "mark-ready", taskId, now },
-      });
-
-      const handle = await harness.workspace.create({
-        workflowId: wfId,
-        taskId,
-        branch,
-        mode: "worktree",
-      });
-      workspaceId = handle.workspaceId;
-
-      await postCommand(harness.fetch, {
-        kind: "transition-task",
-        workflowId: wfId,
-        transition: { kind: "mark-running", taskId, sessionId: "sess-4", workspaceId, now },
-      });
-
-      // Seed a real commit on the task branch before completing runtime
-      const scmA = new FakeSCM();
-      await scmA.seedTaskCommit(handle.path, "task-output.txt", "recovery task work\n");
-
-      await postCommand(harness.fetch, {
-        kind: "transition-task",
-        workflowId: wfId,
-        transition: { kind: "complete-runtime", taskId, expectedSessionId: "sess-4", artifacts: [], now },
-      });
-
-      await postCommand(harness.fetch, {
-        kind: "transition-task",
-        workflowId: wfId,
-        transition: { kind: "start-finalization", taskId, now },
-      });
-
-      // Verify task is at finalizing before engine A closes
-      const preClosedWf = await getWorkflow(harness.fetch, wfId);
-      expect(preClosedWf.graph[taskId]?.executionStatus).toBe("finalizing");
-    } finally {
-      // Close engine A — task stays in finalizing in DB; baseDir not cleaned up yet
-      await harness.engine.close();
-    }
-
-    // Engine B: fresh FakeSCM, same DB/repo/workspace dirs — dispatcher picks up the finalizing task
-    const scmB = new FakeSCM();
-    const harnessB = await makeHarness({
-      withRealQuality: false,
-      scm: scmB,
-      dbPath: harness.dbPath,
-      repoPath: harness.repoPath,
-      workspaceRoot: harness.workspaceRoot,
-    });
-
-    try {
-      // Collect merge-phase events from openOnly (CompletionDispatcher boot recovery)
-      // Break on pr-open transition (which follows rebase in runUntilOpen)
-      const mergePhases4: Array<{ phase: string; status: string }> = [];
-      const phaseCollector4 = (async () => {
+      // Collect durable task-transitioned events via subscribe with cursor 0 (replays from start).
+      // merge-phase events are transient (publishTransient) and are NOT asserted here because
+      // CompletionDispatcher.attach() fires inside createEngine before the test can subscribe,
+      // making their collection inherently racy. Tests 1 and 2 cover merge-phase exhaustively.
+      const durableTransitions: Array<[string, string]> = [];
+      const transitionCollector = (async () => {
         for await (const ev of harnessB.engine.repo.subscribe(wfId, 0)) {
-          if (ev.kind === "merge-phase") {
-            const p = ev.payload as MergePhasePayload;
-            mergePhases4.push({ phase: p.phase, status: p.status });
-          }
           if (ev.kind === "task-transitioned") {
             const p = ev.payload as TaskTransitionedPayload;
+            durableTransitions.push([p.fromExecutionStatus, p.toExecutionStatus]);
             if (p.toExecutionStatus === "pr-open") break;
           }
         }
@@ -545,13 +551,18 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
 
       // CompletionDispatcher fires openOnly on the recovered finalizing task
       await waitFor(async () => {
-        const wf = await getWorkflow(harnessB.fetch, wfId);
+        const wf = await getWorkflow(harnessB!.fetch, wfId);
         return wf.graph[taskId]?.executionStatus === "pr-open";
       }, 10_000);
 
-      await phaseCollector4;
-      expect(mergePhases4).toContainEqual({ phase: "rebase", status: "started" });
-      expect(mergePhases4).toContainEqual({ phase: "rebase", status: "completed" });
+      await transitionCollector;
+
+      // pr-open transition must be present (durable events replay from cursor 0)
+      expect(durableTransitions).toContainEqual(["finalizing", "pr-open"]);
+
+      // No merge-conflict transition fired (would indicate a real rebase failure)
+      const hasConflict = durableTransitions.some(([, to]) => to === "merge-conflict");
+      expect(hasConflict).toBe(false);
 
       const postRecoveryWf = await getWorkflow(harnessB.fetch, wfId);
       expect(postRecoveryWf.graph[taskId]?.executionStatus).toBe("pr-open");
@@ -564,16 +575,16 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
       // Engine B cleaned up the workspace created by engine-A during openOnly
       // Wait for async cleanup to complete (cleanup runs in finally after pr-open transition)
       await waitFor(async () => {
-        const successCount = harnessB.workspace.counts.cleanupSuccesses.get(workspaceId) ?? 0;
+        const successCount = harnessB!.workspace.counts.cleanupSuccesses.get(workspaceId) ?? 0;
         return successCount >= 1;
       });
       expect(harnessB.workspace.counts.cleanupSuccesses.get(workspaceId) ?? 0).toBeGreaterThanOrEqual(1);
 
       await assertNoStrandedWorktrees(harness.repoPath);
     } finally {
-      await harnessB.engine.close();
-      const { rm } = await import("node:fs/promises");
-      await rm(harness.baseDir, { recursive: true, force: true });
+      // harnessB shares baseDir with harness — only close its engine, not rm
+      if (harnessB) await harnessB.engine.close();
+      await harness.cleanup();
     }
   }, 30_000);
 });

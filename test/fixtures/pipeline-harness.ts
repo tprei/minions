@@ -27,6 +27,7 @@ export interface HarnessOptions {
   ciBabysitterCadence?: PollCadence;
   providerFactory?: EngineConfig["providerFactory"];
   now?: () => string;
+  baseDir?: string;
   dbPath?: string;
   repoPath?: string;
   workspaceRoot?: string;
@@ -71,7 +72,7 @@ export interface PipelineHarness {
 }
 
 export async function makeHarness(opts: HarnessOptions = {}): Promise<PipelineHarness> {
-  const baseDir = await mkdtemp(join(tmpdir(), "mwf-pipeline-"));
+  const baseDir = opts.baseDir ?? await mkdtemp(join(tmpdir(), "mwf-pipeline-"));
   const repoPath = opts.repoPath ?? join(baseDir, "repo");
   const workspaceRoot = opts.workspaceRoot ?? join(baseDir, "workspaces");
   const dbPath = opts.dbPath ?? join(baseDir, "engine.db");
@@ -79,7 +80,7 @@ export async function makeHarness(opts: HarnessOptions = {}): Promise<PipelineHa
   await mkdir(repoPath, { recursive: true });
   await mkdir(workspaceRoot, { recursive: true });
 
-  if (!opts.repoPath) {
+  if (!opts.repoPath && !opts.baseDir) {
     await setupBareRepo(repoPath);
     if (opts.withRealQuality) await seedQualityConfig(repoPath, opts.qualityCommand ?? "pass");
   }
@@ -115,9 +116,10 @@ export async function makeHarness(opts: HarnessOptions = {}): Promise<PipelineHa
     return engine.server.fetch(new Request(url, init));
   };
 
+  const ownsBaseDir = opts.baseDir === undefined;
   const cleanup = async (): Promise<void> => {
     await engine.close();
-    await rm(baseDir, { recursive: true, force: true });
+    if (ownsBaseDir) await rm(baseDir, { recursive: true, force: true });
   };
 
   return { engine, dbPath, baseDir, repoPath, workspaceRoot, workspace, fetch: fetchHelper, cleanup };
