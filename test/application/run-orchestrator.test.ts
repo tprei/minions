@@ -409,6 +409,37 @@ describe("RunOrchestrator", () => {
     expect(calls).not.toContain("complete-runtime");
   });
 
+  it("publish throws on final event: finalReceived prevents outputOffset write, mark-interrupted dispatched", async () => {
+    const updateRunTransitions: Array<Record<string, unknown>> = [];
+    const calls: string[] = [];
+    const applyCommand = vi.fn(async (cmd: Command): Promise<CommandResult> => {
+      if (cmd.kind === "transition-task") {
+        calls.push(cmd.transition.kind);
+        if (cmd.transition.kind === "update-run") {
+          updateRunTransitions.push(cmd.transition as unknown as Record<string, unknown>);
+        }
+      }
+      return makeCommandResult();
+    });
+
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "ref-final-throw" };
+    const chunks = makeChunks(["line-1"], 0);
+
+    const orchestrator = makeOrchestrator(
+      [[finalEvent]],
+      chunks,
+      applyCommand,
+      undefined,
+      (e) => { if (e.kind === "final") throw new Error("publish exploded on final"); },
+    );
+    await expect(orchestrator.run()).resolves.toBeUndefined();
+
+    expect(calls).toContain("mark-interrupted");
+    expect(calls).not.toContain("complete-runtime");
+    const offsetWrite = updateRunTransitions.find((t) => t["outputOffset"] !== undefined);
+    expect(offsetWrite).toBeUndefined();
+  });
+
   it("error{recoverable:false} then final: both published, then mark-interrupted fires", async () => {
     const published: ProviderEvent[] = [];
     const calls: string[] = [];

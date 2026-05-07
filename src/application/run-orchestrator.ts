@@ -86,6 +86,8 @@ export class RunOrchestrator {
 
         const event = item.event;
 
+        // set finalReceived before publish so a publish throw on final still marks final as seen
+        if (event.kind === "final") finalReceived = true;
         this.deps.publish(event);
 
         if (event.kind === "error" && !event.recoverable) {
@@ -96,8 +98,6 @@ export class RunOrchestrator {
         if (event.kind !== "final") {
           continue;
         }
-
-        finalReceived = true;
         const effectiveSessionRef = event.sessionRef || latestSessionRef;
 
         // Only persist providerSessionRef on the success path — never outputOffset.
