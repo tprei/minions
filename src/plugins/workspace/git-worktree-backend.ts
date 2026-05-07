@@ -102,6 +102,20 @@ export class GitWorktreeWorkspaceBackend implements WorkspaceBackend {
     });
   }
 
+  private async probeWorktree(worktreePath: string): Promise<"worktree" | "stale-dir" | "absent"> {
+    try {
+      await fsp.access(join(worktreePath, ".git"));
+      return "worktree";
+    } catch {
+      try {
+        await fsp.access(worktreePath);
+        return "stale-dir";
+      } catch {
+        return "absent";
+      }
+    }
+  }
+
   async create(spec: WorkspaceCreateSpec): Promise<WorkspaceHandle> {
     const mode = spec.mode ?? "worktree";
     const wfSlug = slugify(spec.workflowId);
@@ -133,6 +147,28 @@ export class GitWorktreeWorkspaceBackend implements WorkspaceBackend {
     const workspaceId = `ws-${wfSlug}_${taskSlug}`;
 
     return this.withLock(this.repoPath, async () => {
+      const existingWorktree = await this.probeWorktree(worktreePath);
+
+      if (existingWorktree === "worktree") {
+        if (spec.resetBranch === true) {
+          await this.gitClient.worktreeRemove(this.repoPath, worktreePath, { force: true });
+          await this.gitClient.worktreePrune(this.repoPath);
+          await fsp.rm(worktreePath, { recursive: true, force: true });
+        } else {
+          const handle: WorkspaceHandle = {
+            workspaceId,
+            mode: "worktree",
+            path: worktreePath,
+            containerPath: this.toContainerPath(worktreePath),
+            branch: spec.branch,
+          };
+          this.handles.set(workspaceId, handle);
+          return handle;
+        }
+      } else if (existingWorktree === "stale-dir") {
+        await fsp.rm(worktreePath, { recursive: true, force: true });
+      }
+
       const addOpts: { path: string; branch: string; baseRef?: string; resetBranch?: boolean } = {
         path: worktreePath,
         branch: spec.branch,
@@ -165,6 +201,12 @@ export class GitWorktreeWorkspaceBackend implements WorkspaceBackend {
 
     const slug = workspaceId.slice(3);
     const worktreePath = join(this.workspaceRoot, slug);
+
+    try {
+      await this.validateContainment(worktreePath);
+    } catch {
+      return;
+    }
 
     await this.withLock(this.repoPath, async () => {
       try {

@@ -6,6 +6,7 @@ vi.mock("node:fs/promises", () => ({
   realpath: vi.fn(async (p: unknown) => String(p)),
   mkdir: vi.fn(async () => undefined),
   rm: vi.fn(async () => undefined),
+  access: vi.fn(async () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); }),
 }));
 
 const FAKE_REPO = "/fake/repo";
@@ -44,6 +45,7 @@ beforeEach(async () => {
   fsp.realpath.mockImplementation(async (p) => String(p));
   fsp.mkdir.mockResolvedValue(undefined);
   fsp.rm.mockResolvedValue(undefined);
+  fsp.access.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
 });
 
 describe("GitWorktreeWorkspaceBackend", () => {
@@ -277,6 +279,120 @@ describe("GitWorktreeWorkspaceBackend", () => {
         FAKE_REPO,
         expect.objectContaining({ resetBranch: false }),
       );
+    });
+  });
+
+  describe("create — idempotent on existing worktree", () => {
+    it("reuses existing worktree when resetBranch is not set (continue-task intent)", async () => {
+      const gitClient = makeGitClient();
+      const backend = await makeBackend(gitClient);
+      const fsp = vi.mocked(await import("node:fs/promises"));
+
+      const worktreePath = "/fake/workspaces/wf1-a16d54_task1-943be8";
+      // Simulate: worktreePath/.git exists → it's a worktree
+      fsp.access.mockImplementation(async (p) => {
+        if (String(p) === `${worktreePath}/.git`) return undefined;
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      });
+
+      const handle = await backend.create({
+        workflowId: "wf1",
+        taskId: "task1",
+        branch: "minions/wf1_task1",
+        mode: "worktree",
+      });
+
+      expect(gitClient.worktreeAdd).not.toHaveBeenCalled();
+      expect(handle.path).toBe(worktreePath);
+      expect(handle.workspaceId).toBe("ws-wf1-a16d54_task1-943be8");
+    });
+
+    it("tears down and recreates when resetBranch: true (retry-task intent)", async () => {
+      const gitClient = makeGitClient();
+      const backend = await makeBackend(gitClient);
+      const fsp = vi.mocked(await import("node:fs/promises"));
+
+      const worktreePath = "/fake/workspaces/wf1-a16d54_task1-943be8";
+      fsp.access.mockImplementation(async (p) => {
+        if (String(p) === `${worktreePath}/.git`) return undefined;
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      });
+
+      await backend.create({
+        workflowId: "wf1",
+        taskId: "task1",
+        branch: "minions/wf1_task1",
+        mode: "worktree",
+        resetBranch: true,
+      });
+
+      expect(gitClient.worktreeRemove).toHaveBeenCalledOnce();
+      expect(gitClient.worktreeRemove).toHaveBeenCalledWith(FAKE_REPO, worktreePath, { force: true });
+      expect(gitClient.worktreePrune).toHaveBeenCalledOnce();
+      expect(fsp.rm).toHaveBeenCalledWith(worktreePath, { recursive: true, force: true });
+      expect(gitClient.worktreeAdd).toHaveBeenCalledOnce();
+      expect(gitClient.worktreeAdd).toHaveBeenCalledWith(
+        FAKE_REPO,
+        expect.objectContaining({ resetBranch: true }),
+      );
+    });
+
+    it("removes stale directory (no .git file) then creates fresh worktree", async () => {
+      const gitClient = makeGitClient();
+      const backend = await makeBackend(gitClient);
+      const fsp = vi.mocked(await import("node:fs/promises"));
+
+      const worktreePath = "/fake/workspaces/wf1-a16d54_task1-943be8";
+      // .git access fails but directory itself is accessible → stale dir
+      fsp.access.mockImplementation(async (p) => {
+        if (String(p) === worktreePath) return undefined;
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      });
+
+      await backend.create({
+        workflowId: "wf1",
+        taskId: "task1",
+        branch: "minions/wf1_task1",
+        mode: "worktree",
+      });
+
+      expect(fsp.rm).toHaveBeenCalledWith(worktreePath, { recursive: true, force: true });
+      expect(gitClient.worktreeAdd).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("cleanup — path traversal containment guard", () => {
+    it("does not call any fs or git ops for an escape-attempt workspaceId", async () => {
+      const gitClient = makeGitClient();
+      const fsp = vi.mocked(await import("node:fs/promises"));
+
+      // Make realpath resolve to the parent so validateContainment sees the escape
+      fsp.realpath.mockImplementation(async (p) => {
+        // For the workspaceRoot itself, return as-is
+        if (String(p) === FAKE_ROOT) return FAKE_ROOT;
+        // For the dirname of the escape path (/fake/workspaces/..), resolve to /fake
+        if (String(p) === FAKE_ROOT) return FAKE_ROOT;
+        // dirname("ws-../victim") slug "../victim" → worktreePath = "/fake/workspaces/../victim"
+        // dirname of that is "/fake/workspaces/.." → resolve to "/fake"
+        return String(p).replace(/\/\.$/, "").replace(/\/[^/]+\/\.\.$/, "").replace(/\/\.\.$/, "") || "/";
+      });
+
+      const realpathMock = vi.fn(async (p: unknown) => {
+        const s = String(p);
+        // Simulate: /fake/workspaces → /fake/workspaces (workspaceRoot)
+        // /fake/workspaces/.. → /fake (escapes root)
+        if (s === "/fake/workspaces") return "/fake/workspaces";
+        if (s === "/fake/workspaces/..") return "/fake";
+        return s;
+      });
+      fsp.realpath.mockImplementation(realpathMock);
+
+      const backend = await makeBackend(gitClient);
+
+      await backend.cleanup("ws-../victim");
+
+      expect(gitClient.worktreeRemove).not.toHaveBeenCalled();
+      expect(fsp.rm).not.toHaveBeenCalled();
     });
   });
 
