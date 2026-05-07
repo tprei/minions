@@ -270,14 +270,25 @@ describe("SQLiteWorkflowRepository", () => {
     expect(result.map((w) => w.id)).toEqual(["wf-2", "wf-3", "wf-1"]);
   });
 
-  it("list excludes completed workflows by default", async () => {
+  it("list excludes terminal statuses by default", async () => {
     const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
     await repo.save(wf, []);
+
     const completed = { ...wf, version: 2, status: "completed" as const };
     await repo.save(completed, []);
+    expect(await repo.list()).toHaveLength(0);
 
-    const result = await repo.list();
-    expect(result).toHaveLength(0);
+    const wf2 = createSingleTaskWorkflow("wf-2", { title: "T2", prompt: "P2" }, () => now);
+    await repo.save(wf2, []);
+    const failed = { ...wf2, version: 2, status: "failed" as const };
+    await repo.save(failed, []);
+    expect(await repo.list()).toHaveLength(0);
+
+    const wf3 = createSingleTaskWorkflow("wf-3", { title: "T3", prompt: "P3" }, () => now);
+    await repo.save(wf3, []);
+    const cancelled = { ...wf3, version: 2, status: "cancelled" as const };
+    await repo.save(cancelled, []);
+    expect(await repo.list()).toHaveLength(0);
   });
 
   it("list includes completed workflows with includeCompleted: true", async () => {
@@ -289,5 +300,17 @@ describe("SQLiteWorkflowRepository", () => {
 
     const result = await repo.list({ includeCompleted: true });
     expect(result.map((w) => w.id).sort()).toEqual(["wf-1", "wf-2"]);
+  });
+
+  it("list with includeCompleted: true includes failed and cancelled", async () => {
+    const wf1 = createSingleTaskWorkflow("wf-1", { title: "T1", prompt: "P1" }, () => now);
+    const wf2 = createSingleTaskWorkflow("wf-2", { title: "T2", prompt: "P2" }, () => now);
+    const wf3 = createSingleTaskWorkflow("wf-3", { title: "T3", prompt: "P3" }, () => now);
+    await repo.save(wf1, []);
+    await repo.save({ ...wf2, version: 1, status: "failed" as const }, []);
+    await repo.save({ ...wf3, version: 1, status: "cancelled" as const }, []);
+
+    const result = await repo.list({ includeCompleted: true });
+    expect(result.map((w) => w.id).sort()).toEqual(["wf-1", "wf-2", "wf-3"]);
   });
 });

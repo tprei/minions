@@ -54,6 +54,31 @@ describe("static serving with pwaRoot set", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-cache");
   });
+
+  it("GET /sw.js returns 200", async () => {
+    const app = makeApp(pwaRoot);
+    const res = await app.request("/sw.js");
+    expect(res.status).toBe(200);
+  });
+
+  it("GET /sw.js includes Cache-Control: no-cache header", async () => {
+    const app = makeApp(pwaRoot);
+    const res = await app.request("/sw.js");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-cache");
+  });
+
+  it("GET /icons/icon-192.png returns 200", async () => {
+    const app = makeApp(pwaRoot);
+    const res = await app.request("/icons/icon-192.png");
+    expect(res.status).toBe(200);
+  });
+
+  it("GET /assets/app-v1.js returns 200", async () => {
+    const app = makeApp(pwaRoot);
+    const res = await app.request("/assets/app-v1.js");
+    expect(res.status).toBe(200);
+  });
 });
 
 describe("static serving without pwaRoot", () => {
@@ -66,6 +91,16 @@ describe("static serving without pwaRoot", () => {
   it("GET /manifest.json returns 404", async () => {
     const app = makeApp();
     const res = await app.request("/manifest.json");
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("static serving with pwaRoot set but no sw.js in fixture", () => {
+  const pwaRoot = "test/fixtures/pwa-no-sw-stub";
+
+  it("GET /sw.js returns 404 when sw.js is absent from fixture", async () => {
+    const app = makeApp(pwaRoot);
+    const res = await app.request("/sw.js");
     expect(res.status).toBe(404);
   });
 });

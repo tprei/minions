@@ -114,7 +114,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
 
   async list(opts?: { includeCompleted?: boolean }): Promise<Workflow[]> {
     return [...this.workflows.values()]
-      .filter((w) => opts?.includeCompleted === true || w.status !== "completed")
+      .filter((w) => opts?.includeCompleted === true || w.status === "active")
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 }

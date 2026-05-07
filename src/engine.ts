@@ -41,7 +41,12 @@ export interface EngineConfig {
   gitCommandPrefix?: readonly string[];
   vapid?: VapidConfig;
   pushSender?: PushSender;
-  /** Relative paths resolve against process.cwd() at engine startup. */
+  /**
+   * Directory that contains the built PWA assets (index.html, sw.js, etc.).
+   * Relative paths resolve against `process.cwd()` at engine startup.
+   * `process.cwd()` MUST NOT change after the engine is created — the resolved
+   * path is captured once and reused for every request.
+   */
   pwaDir?: string;
 }
 
@@ -172,6 +177,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
 
   let pwaRoot: string | undefined;
   if (config.pwaDir !== undefined) {
+    // serveStatic refuses absolute paths; resolve abs first then make CWD-relative for stability across path forms.
     const abs = isAbsolute(config.pwaDir)
       ? config.pwaDir
       : resolve(process.cwd(), config.pwaDir);
