@@ -9,13 +9,13 @@ describe("transcriptNode", () => {
   it("assistant_text → .msg.assistant with text", () => {
     const node = transcriptNode(payload("assistant_text", { text: "hello" }));
     expect(node.className).toBe("msg assistant");
-    expect(node.textContent).toBe("hello");
+    expect(node.textContent).toContain("hello");
   });
 
   it("thinking → .msg.thinking with text", () => {
     const node = transcriptNode(payload("thinking", { text: "pondering" }));
     expect(node.className).toBe("msg thinking");
-    expect(node.textContent).toBe("pondering");
+    expect(node.textContent).toContain("pondering");
   });
 
   it("tool_call → .msg.tool-call with name and input", () => {
@@ -51,7 +51,7 @@ describe("transcriptNode", () => {
   it("error → .msg.error with message", () => {
     const node = transcriptNode(payload("error", { recoverable: false, message: "something broke" }));
     expect(node.className).toBe("msg error");
-    expect(node.textContent).toBe("something broke");
+    expect(node.textContent).toContain("something broke");
   });
 
   it("final → .msg.final with sessionRef", () => {

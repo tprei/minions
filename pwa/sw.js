@@ -1,4 +1,4 @@
-const CACHE = "minions-v1";
+const CACHE = "minions-v2";
 const ASSETS = [
   "/",
   "/assets/app-v1.js",
