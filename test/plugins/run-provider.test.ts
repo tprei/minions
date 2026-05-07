@@ -42,7 +42,7 @@ describe("runProvider", () => {
     const runtime = makeRuntime(chunks);
 
     const items: RunProviderItem[] = [];
-    for await (const item of runProvider(runtime, "s1", provider)) {
+    for await (const item of runProvider(runtime, "s1", provider, {})) {
       items.push(item);
     }
 
@@ -101,5 +101,23 @@ describe("runProvider", () => {
 
     const providerItems = items.filter((i) => i.kind === "provider");
     expect(providerItems).toHaveLength(1);
+  });
+
+  it("passes fromOffset to runtime.attach", async () => {
+    let capturedOpts: RuntimeAttachOptions | undefined;
+    const runtime: RuntimeBackend = {
+      start: () => Promise.reject(new Error("not used")),
+      stop: () => Promise.reject(new Error("not used")),
+      probe: () => Promise.resolve("live" as RuntimeProbeState),
+      attach(_sessionId: string, opts?: RuntimeAttachOptions): AsyncIterable<RuntimeOutputChunk> {
+        capturedOpts = opts;
+        return { [Symbol.asyncIterator]: async function* () {} };
+      },
+    };
+
+    const provider = new StubProviderPlugin({ frames: [] });
+    for await (const _ of runProvider(runtime, "s1", provider, { fromOffset: 7 })) { /* drain */ }
+
+    expect(capturedOpts?.fromOffset).toBe(7);
   });
 });

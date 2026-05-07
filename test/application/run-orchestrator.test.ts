@@ -206,4 +206,34 @@ describe("RunOrchestrator", () => {
     expect(calls).toEqual(["update-run", "mark-interrupted"]);
     expect(calls).not.toContain("complete-runtime");
   });
+
+  it("threads fromOffset from deps to runtime.attach", async () => {
+    let capturedAttachOpts: RuntimeAttachOptions | undefined;
+    const runtime: RuntimeBackend = {
+      start: vi.fn(),
+      stop: vi.fn(),
+      probe: vi.fn().mockResolvedValue("live" as RuntimeProbeState),
+      attach(_sessionId: string, opts?: RuntimeAttachOptions): AsyncIterable<RuntimeOutputChunk> {
+        capturedAttachOpts = opts;
+        return { [Symbol.asyncIterator]: async function* () {} };
+      },
+    };
+
+    const provider = new StubProviderPlugin({ frames: [] });
+    const applyCommand = vi.fn(async (_cmd: Command): Promise<CommandResult> => makeCommandResult());
+
+    const orch = new RunOrchestrator({
+      workflowId: "wf-1",
+      taskId: "task-1",
+      runtimeSessionId: "session-1",
+      provider,
+      runtime,
+      applyCommand,
+      now: () => now,
+      fromOffset: 42,
+    });
+    await orch.run();
+
+    expect(capturedAttachOpts?.fromOffset).toBe(42);
+  });
 });

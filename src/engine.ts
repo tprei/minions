@@ -1,12 +1,14 @@
 import type { Hono } from "hono";
 import { dirname } from "node:path";
 import { runBootRecovery } from "./application/boot.js";
-import type { BootRecoveryReport } from "./application/boot.js";
+import type { BootRecoveryReport, BootRespawnContext } from "./application/boot.js";
 import { applyCommand } from "./application/commands.js";
 import { ContinueTaskService } from "./application/continue-task-service.js";
 import { createRecoveryService } from "./application/recovery-service.js";
 import { NoopRestackExecutor } from "./application/restack-executor.js";
 import type { RestackExecutor } from "./application/restack-executor.js";
+import { RunOrchestrator } from "./application/run-orchestrator.js";
+import type { RunOrchestratorDeps } from "./application/run-orchestrator.js";
 import { SQLiteWorkflowRepository } from "./persistence/sqlite-repo.js";
 import type { ProviderPlugin } from "./plugins/provider-plugin.js";
 import type { RuntimeBackend } from "./plugins/runtime-backend.js";
@@ -42,11 +44,32 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   const repo = new SQLiteWorkflowRepository(config.dbPath);
   const recoveryService = createRecoveryService(repo, executor, runtime, now);
 
-  const bootReport = await runBootRecovery(repo, recoveryService, runtime, {
+  const spawnOrchestrator = config.providerFactory
+    ? (ctx: BootRespawnContext) => {
+        const provider = config.providerFactory!();
+        const deps: RunOrchestratorDeps = {
+          workflowId: ctx.workflowId,
+          taskId: ctx.taskId,
+          runtimeSessionId: ctx.runtimeSessionId,
+          provider,
+          runtime,
+          applyCommand: (cmd) => applyCommand(repo, cmd),
+          now,
+        };
+        if (ctx.fromOffset !== undefined) deps.fromOffset = ctx.fromOffset;
+        const orch = new RunOrchestrator(deps);
+        orch.run().catch((err) => console.error("boot run-orchestrator error:", err));
+      }
+    : undefined;
+
+  const bootRecoveryOpts: Parameters<typeof runBootRecovery>[3] = {
     now,
     staleReadyMs,
     staleGateMs,
-  });
+  };
+  if (spawnOrchestrator !== undefined) bootRecoveryOpts.spawnOrchestrator = spawnOrchestrator;
+
+  const bootReport = await runBootRecovery(repo, recoveryService, runtime, bootRecoveryOpts);
 
   const serverDeps: Parameters<typeof createServer>[0] = { repo, recoveryService, executor };
 

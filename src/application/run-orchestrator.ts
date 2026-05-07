@@ -1,6 +1,7 @@
 import { DomainError } from "../domain/errors.js";
 import type { ProviderEvent, ProviderPlugin } from "../plugins/provider-plugin.js";
 import { runProvider } from "../plugins/providers/run-provider.js";
+import type { RunProviderOptions } from "../plugins/providers/run-provider.js";
 import type { RuntimeBackend } from "../plugins/runtime-backend.js";
 import type { Command, CommandResult } from "./commands.js";
 import type { TransitionCommand } from "./transitions.js";
@@ -14,6 +15,7 @@ export interface RunOrchestratorDeps {
   applyCommand: (cmd: Command) => Promise<CommandResult>;
   now: () => string;
   signal?: AbortSignal;
+  fromOffset?: number;
 }
 
 export class RunOrchestrator {
@@ -24,7 +26,7 @@ export class RunOrchestrator {
   }
 
   async run(): Promise<void> {
-    const { workflowId, taskId, runtimeSessionId, provider, runtime, applyCommand, now, signal } = this.deps;
+    const { workflowId, taskId, runtimeSessionId, provider, runtime, applyCommand, now } = this.deps;
 
     let latestOffset: number | undefined;
     let latestSessionRef: string | undefined;
@@ -45,8 +47,12 @@ export class RunOrchestrator {
     const isStale = (err: unknown): boolean =>
       err instanceof DomainError && err.code === "session_mismatch";
 
+    const providerOpts: RunProviderOptions = {};
+    if (this.deps.signal !== undefined) providerOpts.signal = this.deps.signal;
+    if (this.deps.fromOffset !== undefined) providerOpts.fromOffset = this.deps.fromOffset;
+
     try {
-      for await (const item of runProvider(runtime, runtimeSessionId, provider, signal)) {
+      for await (const item of runProvider(runtime, runtimeSessionId, provider, providerOpts)) {
         if (item.kind === "offset") {
           latestOffset = item.offset;
           continue;

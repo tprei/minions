@@ -1,10 +1,48 @@
 import { describe, expect, it } from "vitest";
 import { transitionTask } from "../src/application/transitions.js";
-import { patchOpenRun } from "../src/domain/runs.js";
+import { getOpenRun, patchOpenRun } from "../src/domain/runs.js";
+import type { NodeRun } from "../src/domain/runs.js";
 import { createSingleTaskWorkflow } from "../src/domain/workflow.js";
 
 const now = "2026-05-04T11:19:00.000Z";
 const later = "2026-05-04T11:20:00.000Z";
+
+function makeRun(id: string, open: boolean): NodeRun {
+  const base: NodeRun = {
+    id,
+    taskId: "t",
+    attempt: 1,
+    providerType: "stub",
+    runtimeType: "stub",
+    runtimeSessionId: "s",
+    startedAt: now,
+  };
+  if (!open) {
+    return { ...base, endedAt: now, terminalReason: "completed" };
+  }
+  return base;
+}
+
+describe("getOpenRun", () => {
+  it("returns undefined for empty array", () => {
+    expect(getOpenRun([])).toBeUndefined();
+  });
+
+  it("returns undefined when all runs are closed", () => {
+    expect(getOpenRun([makeRun("r1", false), makeRun("r2", false)])).toBeUndefined();
+  });
+
+  it("returns the last run when it is open", () => {
+    const open = makeRun("r2", true);
+    expect(getOpenRun([makeRun("r1", false), open])).toBe(open);
+  });
+
+  it("returns the open run when a later run is closed (walks from end)", () => {
+    const open = makeRun("r2", true);
+    const closed = makeRun("r3", false);
+    expect(getOpenRun([makeRun("r1", false), open, closed])).toBe(open);
+  });
+});
 
 describe("NodeRun lifecycle", () => {
   it("appends a run on mark-running", () => {

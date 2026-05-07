@@ -25,19 +25,23 @@ export function appendRun(runs: NodeRun[], run: NodeRun): NodeRun[] {
   return [...runs, run];
 }
 
+export function getOpenRun(runs: NodeRun[]): NodeRun | undefined {
+  for (let i = runs.length - 1; i >= 0; i--) {
+    if (runs[i]!.endedAt === undefined) return runs[i];
+  }
+  return undefined;
+}
+
 export function closeLatestRun(
   runs: NodeRun[],
   terminalReason: NodeRunTerminalReason,
   endedAt: string,
 ): NodeRun[] {
-  const openIndex = [...runs].reverse().findIndex((r) => r.endedAt === undefined);
-  if (openIndex === -1) return runs;
+  const open = getOpenRun(runs);
+  if (!open) return runs;
 
-  const realIndex = runs.length - 1 - openIndex;
-  const run = runs[realIndex];
-  if (!run) return runs;
-
-  const closed: NodeRun = { ...run, endedAt, terminalReason };
+  const realIndex = runs.indexOf(open);
+  const closed: NodeRun = { ...open, endedAt, terminalReason };
   return [...runs.slice(0, realIndex), closed, ...runs.slice(realIndex + 1)];
 }
 
@@ -45,13 +49,10 @@ export function patchOpenRun(
   runs: NodeRun[],
   patch: { providerSessionRef?: string; outputOffset?: number },
 ): NodeRun[] {
-  const openIndex = [...runs].reverse().findIndex((r) => r.endedAt === undefined);
-  if (openIndex === -1) throw new Error("no open run to patch");
+  const open = getOpenRun(runs);
+  if (!open) throw new Error("no open run to patch");
 
-  const realIndex = runs.length - 1 - openIndex;
-  const run = runs[realIndex];
-  if (!run) throw new Error("no open run to patch");
-
-  const patched: NodeRun = { ...run, ...patch };
+  const realIndex = runs.indexOf(open);
+  const patched: NodeRun = { ...open, ...patch };
   return [...runs.slice(0, realIndex), patched, ...runs.slice(realIndex + 1)];
 }

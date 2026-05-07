@@ -6,6 +6,11 @@ export type RunProviderItem =
   | { kind: "provider"; event: ProviderEvent }
   | { kind: "offset"; offset: number };
 
+export interface RunProviderOptions {
+  signal?: AbortSignal;
+  fromOffset?: number;
+}
+
 // Offset is the upper bound of bytes received so far for the chunk.
 // Yielding it before events means latestOffset is always >= the byte position
 // of any event in the same chunk, so resume re-attaches from a safe position.
@@ -13,12 +18,13 @@ export async function* runProvider(
   runtime: RuntimeBackend,
   sessionId: string,
   provider: ProviderPlugin,
-  signal?: AbortSignal,
+  opts: RunProviderOptions = {},
 ): AsyncIterable<RunProviderItem> {
   const buffer = new LineBuffer();
-  const opts: RuntimeAttachOptions = signal !== undefined ? { fromOffset: 0, signal } : { fromOffset: 0 };
+  const attachOpts: RuntimeAttachOptions = { fromOffset: opts.fromOffset ?? 0 };
+  if (opts.signal !== undefined) attachOpts.signal = opts.signal;
 
-  for await (const chunk of runtime.attach(sessionId, opts)) {
+  for await (const chunk of runtime.attach(sessionId, attachOpts)) {
     const offset = chunk.offset + chunk.bytes.byteLength;
     yield { kind: "offset", offset };
     const lines = buffer.push(chunk.bytes);
