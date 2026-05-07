@@ -111,7 +111,45 @@ If step 4 returns anything other than `"missing"`, the slice is not correctly la
 
 ## Workspace v2 (slice 14)
 
-Slice 14 replaces the named Docker volume `minions-worker-workspace` with a host-bind mount. This allows the host engine to create and tear down git worktrees that the container mounts at the same path.
+Slice 14 adds git worktree support via `GitWorktreeWorkspaceBackend`. The backend operates in two distinct modes depending on whether `gitCommandPrefix` is configured.
+
+### Local mode (no `gitCommandPrefix`)
+
+Paths are host-side. The engine calls `realpath` on `repoPath` and `workspaceRoot`, creates the workspace root directory if absent, and runs `git worktree add/remove` directly.
+
+### Docker mode (`gitCommandPrefix` set)
+
+The canonical git repo lives **inside the worker container**. The host engine drives git via `docker exec` (through `GitClient`'s `commandPrefix`). The host never touches container-internal paths with `fs`; all filesystem operations on worktree paths are routed through `DockerFs`, which shells out to `docker exec sh -c`.
+
+**Operator setup for docker mode:**
+
+1. Create and own the workspace bind-mount directory on the host:
+   ```sh
+   sudo mkdir -p /var/lib/minions/workspaces
+   sudo chown 1001:1001 /var/lib/minions/workspaces
+   export HOST_WORKSPACE_ROOT=/var/lib/minions/workspaces
+   ```
+
+2. Start the worker:
+   ```sh
+   docker compose up -d minions-worker
+   ```
+
+3. Clone the canonical repo **inside** the container:
+   ```sh
+   docker exec -it -u 1001 minions-worker git clone <url> /workspace/repo
+   ```
+
+4. Configure the engine:
+   ```ts
+   {
+     repoPath: "/workspace/repo",          // container-internal path
+     workspaceRoot: "/workspace/repo-worktrees",  // container-internal path
+     gitCommandPrefix: ["docker", "exec", "-u", "1001", "minions-worker"],
+   }
+   ```
+
+The `HOST_WORKSPACE_ROOT` bind mount (`${HOST_WORKSPACE_ROOT}:/workspace`) stays in `docker-compose.yml` so the operator can browse worktrees from the host. The engine treats `/workspace/repo` and `/workspace/repo-worktrees` as opaque container-internal paths and never realpaths or mkdirs them.
 
 ### New env var: `HOST_WORKSPACE_ROOT`
 
@@ -119,18 +157,13 @@ Before running `docker compose up`, set `HOST_WORKSPACE_ROOT` to the host direct
 
 ```sh
 export HOST_WORKSPACE_ROOT=/var/lib/minions/workspaces
-```
-
-The directory must exist and be owned by uid/gid 1001:
-
-```sh
 sudo mkdir -p /var/lib/minions/workspaces
 sudo chown 1001:1001 /var/lib/minions/workspaces
 ```
 
 ### Migration from named volume
 
-If you previously ran with the named volume, delete it after stopping the container:
+If you previously ran with the named volume `minions-worker-workspace`, delete it after stopping the container:
 
 ```sh
 docker compose down
@@ -143,10 +176,11 @@ Then set `HOST_WORKSPACE_ROOT` and bring the stack back up.
 
 `EngineConfig.repoPath` controls workspace backend selection:
 
-| `repoPath` set? | `workspace` set? | Backend |
-|---|---|---|
-| No | No | `StubWorkspaceBackend` (deterministic stubs, no git ops) |
-| Yes | No | `GitWorktreeWorkspaceBackend` (real git worktrees under `repoPath-worktrees/`) |
-| — | Yes | Provided backend (used as-is) |
+| `repoPath` set? | `gitCommandPrefix` set? | `workspace` set? | Backend |
+|---|---|---|---|
+| No | — | No | `StubWorkspaceBackend` (no git ops) |
+| Yes | No | No | `GitWorktreeWorkspaceBackend` — local mode (host paths, host fs) |
+| Yes | Yes | No | `GitWorktreeWorkspaceBackend` — docker mode (container-internal paths, `docker exec` fs) |
+| — | — | Yes | Provided backend (used as-is) |
 
-`workspaceRoot` defaults to `${dirname(repoPath)}/${basename(repoPath)}-worktrees`. `containerWorkspaceRoot` defaults to `workspaceRoot` for local mode; override it when the host and container see different paths for the workspace root.
+`workspaceRoot` defaults to `${dirname(repoPath)}/${basename(repoPath)}-worktrees`.

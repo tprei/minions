@@ -24,19 +24,12 @@ function makeGitClient(): GitClient {
   } as unknown as GitClient;
 }
 
-async function makeBackend(
-  gitClient: GitClient,
-  opts?: { containerWorkspaceRoot?: string },
-): Promise<GitWorktreeWorkspaceBackend> {
-  const config: Parameters<typeof GitWorktreeWorkspaceBackend.create>[0] = {
+async function makeBackend(gitClient: GitClient): Promise<GitWorktreeWorkspaceBackend> {
+  return GitWorktreeWorkspaceBackend.create({
     gitClient,
     repoPath: FAKE_REPO,
     workspaceRoot: FAKE_ROOT,
-  };
-  if (opts?.containerWorkspaceRoot !== undefined) {
-    config.containerWorkspaceRoot = opts.containerWorkspaceRoot;
-  }
-  return GitWorktreeWorkspaceBackend.create(config);
+  });
 }
 
 beforeEach(async () => {
@@ -88,6 +81,17 @@ describe("GitWorktreeWorkspaceBackend", () => {
       expect(handle.mode).toBe("existing");
       expect(handle.path).toBe(FAKE_REPO);
       expect(handle.workspaceId).toBe("existing-wf1-a16d54_task1-943be8");
+    });
+  });
+
+  describe("local mode: path is containerPath", () => {
+    it("containerPath equals path in local mode", async () => {
+      const gitClient = makeGitClient();
+      const backend = await makeBackend(gitClient);
+
+      const handle = await backend.create({ workflowId: "wf1", taskId: "task1", branch: "b", mode: "worktree" });
+
+      expect(handle.containerPath).toBe(handle.path);
     });
   });
 
@@ -395,27 +399,125 @@ describe("GitWorktreeWorkspaceBackend", () => {
       expect(fsp.rm).not.toHaveBeenCalled();
     });
   });
+});
 
-  describe("containerPath translation", () => {
-    it("returns hostPath unchanged when containerWorkspaceRoot equals workspaceRoot", async () => {
-      const gitClient = makeGitClient();
-      const backend = await makeBackend(gitClient);
+describe("GitWorktreeWorkspaceBackend — docker mode", () => {
+  const DOCKER_PREFIX = ["docker", "exec", "-u", "1001", "minions-worker"];
+  const CONTAINER_REPO = "/workspace/repo";
+  const CONTAINER_ROOT = "/workspace/repo-worktrees";
 
-      const handle = await backend.create({ workflowId: "wf1", taskId: "task1", branch: "b", mode: "worktree" });
+  function makeDockerGitClient(): GitClient {
+    return {
+      run: vi.fn().mockResolvedValue({ stdout: "", stderr: "" }),
+      worktreeAdd: vi.fn().mockResolvedValue(undefined),
+      worktreeRemove: vi.fn().mockResolvedValue(undefined),
+      worktreePrune: vi.fn().mockResolvedValue(undefined),
+      worktreeList: vi.fn().mockResolvedValue([]),
+      revParse: vi.fn().mockResolvedValue("abc123"),
+      branchExists: vi.fn().mockResolvedValue(false),
+    } as unknown as GitClient;
+  }
 
-      expect(handle.containerPath).toBe(handle.path);
+  it("constructs without calling realpath or mkdir on container-internal paths", async () => {
+    const fsp = vi.mocked(await import("node:fs/promises"));
+    const gitClient = makeDockerGitClient();
+
+    await GitWorktreeWorkspaceBackend.create({
+      gitClient,
+      repoPath: CONTAINER_REPO,
+      workspaceRoot: CONTAINER_ROOT,
+      gitCommandPrefix: DOCKER_PREFIX,
     });
 
-    it("applies suffix substitution when containerWorkspaceRoot differs", async () => {
-      const gitClient = makeGitClient();
-      const backend = await makeBackend(gitClient, { containerWorkspaceRoot: "/container/workspaces" });
+    expect(fsp.realpath).not.toHaveBeenCalled();
+    expect(fsp.mkdir).not.toHaveBeenCalled();
+  });
 
-      const handle = await backend.create({ workflowId: "wf1", taskId: "task1", branch: "b", mode: "worktree" });
+  it("uses DockerFs: does not call fsp.access for probe, does not call fsp.rm for cleanup", async () => {
+    const fsp = vi.mocked(await import("node:fs/promises"));
+    const gitClient = makeDockerGitClient();
 
-      // host path: /fake/workspaces/wf1-a16d54_task1-943be8
-      // container: /container/workspaces/wf1-a16d54_task1-943be8
-      expect(handle.containerPath).toBe("/container/workspaces/wf1-a16d54_task1-943be8");
-      expect(handle.path).toBe("/fake/workspaces/wf1-a16d54_task1-943be8");
+    const backend = await GitWorktreeWorkspaceBackend.create({
+      gitClient,
+      repoPath: CONTAINER_REPO,
+      workspaceRoot: CONTAINER_ROOT,
+      gitCommandPrefix: DOCKER_PREFIX,
     });
+
+    vi.clearAllMocks();
+
+    const handle = await backend.create({
+      workflowId: "wf1",
+      taskId: "task1",
+      branch: "minions/wf1",
+      mode: "worktree",
+    });
+
+    expect(fsp.access).not.toHaveBeenCalled();
+
+    await backend.cleanup(handle.workspaceId);
+
+    expect(fsp.rm).not.toHaveBeenCalled();
+  });
+
+  it("path and containerPath are equal (container-internal paths, no translation)", async () => {
+    const gitClient = makeDockerGitClient();
+
+    const backend = await GitWorktreeWorkspaceBackend.create({
+      gitClient,
+      repoPath: CONTAINER_REPO,
+      workspaceRoot: CONTAINER_ROOT,
+      gitCommandPrefix: DOCKER_PREFIX,
+    });
+
+    const handle = await backend.create({
+      workflowId: "wf1",
+      taskId: "task1",
+      branch: "minions/wf1",
+      mode: "worktree",
+    });
+
+    expect(handle.path).toBe(handle.containerPath);
+    expect(handle.path.startsWith(CONTAINER_ROOT)).toBe(true);
+  });
+
+  it("git ops (worktreeAdd) are called with container-internal paths", async () => {
+    const gitClient = makeDockerGitClient();
+
+    const backend = await GitWorktreeWorkspaceBackend.create({
+      gitClient,
+      repoPath: CONTAINER_REPO,
+      workspaceRoot: CONTAINER_ROOT,
+      gitCommandPrefix: DOCKER_PREFIX,
+    });
+
+    await backend.create({
+      workflowId: "wf1",
+      taskId: "task1",
+      branch: "minions/wf1",
+      mode: "worktree",
+    });
+
+    expect(gitClient.worktreeAdd).toHaveBeenCalledWith(
+      CONTAINER_REPO,
+      expect.objectContaining({ path: expect.stringContaining(CONTAINER_ROOT) }),
+    );
+  });
+
+  it("docker-mode containment guard rejects paths with .. traversal", async () => {
+    const gitClient = makeDockerGitClient();
+
+    const backend = await GitWorktreeWorkspaceBackend.create({
+      gitClient,
+      repoPath: CONTAINER_REPO,
+      workspaceRoot: CONTAINER_ROOT,
+      gitCommandPrefix: DOCKER_PREFIX,
+    });
+
+    // Attempt to clean up a path that would escape workspaceRoot
+    // slug "../victim" → worktreePath = /workspace/repo-worktrees/../victim
+    // structural check catches the ".." segment
+    await backend.cleanup("ws-../victim");
+    expect(gitClient.worktreeRemove).not.toHaveBeenCalled();
   });
 });

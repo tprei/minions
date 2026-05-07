@@ -1,16 +1,17 @@
 import { join, sep, dirname, basename } from "node:path";
 import { realpath, mkdir } from "node:fs/promises";
-import * as fsp from "node:fs/promises";
 import type { GitClient } from "../git/git-client.js";
 import { GitError } from "../git/git-client.js";
 import type { WorkspaceBackend, WorkspaceCreateSpec, WorkspaceHandle } from "../workspace-backend.js";
 import { WorkspaceError, slugify } from "../workspace-backend.js";
+import type { WorkspaceFs } from "./workspace-fs.js";
+import { HostFs, DockerFs } from "./workspace-fs.js";
 
 export interface GitWorktreeBackendConfig {
   gitClient: GitClient;
   repoPath: string;
   workspaceRoot: string;
-  containerWorkspaceRoot?: string;
+  gitCommandPrefix?: readonly string[];
 }
 
 function isNotFoundError(err: unknown): boolean {
@@ -30,7 +31,8 @@ export class GitWorktreeWorkspaceBackend implements WorkspaceBackend {
 
   private readonly gitClient: GitClient;
   private readonly workspaceRoot: string;
-  private readonly containerWorkspaceRoot: string;
+  private readonly fs: WorkspaceFs;
+  private readonly dockerMode: boolean;
   private readonly handles: Map<string, WorkspaceHandle> = new Map();
 
   private repoPath: string;
@@ -39,33 +41,62 @@ export class GitWorktreeWorkspaceBackend implements WorkspaceBackend {
     gitClient: GitClient,
     repoPath: string,
     workspaceRoot: string,
-    containerWorkspaceRoot: string,
+    fs: WorkspaceFs,
+    dockerMode: boolean,
   ) {
     this.gitClient = gitClient;
     this.repoPath = repoPath;
     this.workspaceRoot = workspaceRoot;
-    this.containerWorkspaceRoot = containerWorkspaceRoot;
+    this.fs = fs;
+    this.dockerMode = dockerMode;
   }
 
   static async create(config: GitWorktreeBackendConfig): Promise<GitWorktreeWorkspaceBackend> {
-    const repoPath = await realpath(config.repoPath);
-    let workspaceRoot: string;
-    try {
-      workspaceRoot = await realpath(config.workspaceRoot);
-    } catch {
-      await mkdir(config.workspaceRoot, { recursive: true });
-      workspaceRoot = await realpath(config.workspaceRoot);
-    }
-    const containerWorkspaceRoot = config.containerWorkspaceRoot ?? workspaceRoot;
-    return new GitWorktreeWorkspaceBackend(config.gitClient, repoPath, workspaceRoot, containerWorkspaceRoot);
-  }
+    const dockerMode = (config.gitCommandPrefix?.length ?? 0) > 0;
+    const fs: WorkspaceFs = dockerMode
+      ? new DockerFs(config.gitCommandPrefix!)
+      : new HostFs();
 
-  private toContainerPath(hostPath: string): string {
-    if (this.containerWorkspaceRoot === this.workspaceRoot) return hostPath;
-    return this.containerWorkspaceRoot + hostPath.slice(this.workspaceRoot.length);
+    let repoPath: string;
+    let workspaceRoot: string;
+
+    if (dockerMode) {
+      // In docker mode, repoPath and workspaceRoot are container-internal paths.
+      // The host cannot realpath or mkdir them. Operator owns container-side setup.
+      repoPath = config.repoPath;
+      workspaceRoot = config.workspaceRoot;
+    } else {
+      repoPath = await realpath(config.repoPath);
+      try {
+        workspaceRoot = await realpath(config.workspaceRoot);
+      } catch {
+        await mkdir(config.workspaceRoot, { recursive: true });
+        workspaceRoot = await realpath(config.workspaceRoot);
+      }
+    }
+
+    return new GitWorktreeWorkspaceBackend(config.gitClient, repoPath, workspaceRoot, fs, dockerMode);
   }
 
   private async validateContainment(candidate: string): Promise<void> {
+    if (this.dockerMode) {
+      // In docker mode the host cannot realpath container-internal paths.
+      // Validate structurally: the candidate must be exactly one level under workspaceRoot.
+      if (!candidate.startsWith(this.workspaceRoot + sep)) {
+        throw new WorkspaceError("path_escape", `candidate path escapes workspace root`, {
+          candidate,
+          workspaceRoot: this.workspaceRoot,
+        });
+      }
+      const relative = candidate.slice(this.workspaceRoot.length + 1);
+      if (relative.includes(sep) || relative === "" || relative === "." || relative === "..") {
+        throw new WorkspaceError("path_escape", `workspace path must be exactly one level deep`, {
+          candidate,
+        });
+      }
+      return;
+    }
+
     const parentResolved = await realpath(dirname(candidate)).catch(() => null);
     if (parentResolved === null) {
       throw new WorkspaceError("path_escape", `parent directory does not exist: ${dirname(candidate)}`);
@@ -103,17 +134,9 @@ export class GitWorktreeWorkspaceBackend implements WorkspaceBackend {
   }
 
   private async probeWorktree(worktreePath: string): Promise<"worktree" | "stale-dir" | "absent"> {
-    try {
-      await fsp.access(join(worktreePath, ".git"));
-      return "worktree";
-    } catch {
-      try {
-        await fsp.access(worktreePath);
-        return "stale-dir";
-      } catch {
-        return "absent";
-      }
-    }
+    if (await this.fs.gitMarkerExists(worktreePath)) return "worktree";
+    if (await this.fs.pathExists(worktreePath)) return "stale-dir";
+    return "absent";
   }
 
   async create(spec: WorkspaceCreateSpec): Promise<WorkspaceHandle> {
@@ -153,20 +176,20 @@ export class GitWorktreeWorkspaceBackend implements WorkspaceBackend {
         if (spec.resetBranch === true) {
           await this.gitClient.worktreeRemove(this.repoPath, worktreePath, { force: true });
           await this.gitClient.worktreePrune(this.repoPath);
-          await fsp.rm(worktreePath, { recursive: true, force: true });
+          await this.fs.removeRecursive(worktreePath);
         } else {
           const handle: WorkspaceHandle = {
             workspaceId,
             mode: "worktree",
             path: worktreePath,
-            containerPath: this.toContainerPath(worktreePath),
+            containerPath: worktreePath,
             branch: spec.branch,
           };
           this.handles.set(workspaceId, handle);
           return handle;
         }
       } else if (existingWorktree === "stale-dir") {
-        await fsp.rm(worktreePath, { recursive: true, force: true });
+        await this.fs.removeRecursive(worktreePath);
       }
 
       const addOpts: { path: string; branch: string; baseRef?: string; resetBranch?: boolean } = {
@@ -181,7 +204,7 @@ export class GitWorktreeWorkspaceBackend implements WorkspaceBackend {
         workspaceId,
         mode: "worktree",
         path: worktreePath,
-        containerPath: this.toContainerPath(worktreePath),
+        containerPath: worktreePath,
         branch: spec.branch,
       };
       this.handles.set(workspaceId, handle);
@@ -222,7 +245,7 @@ export class GitWorktreeWorkspaceBackend implements WorkspaceBackend {
       }
 
       try {
-        await fsp.rm(worktreePath, { recursive: true, force: true });
+        await this.fs.removeRecursive(worktreePath);
       } catch {
         // non-fatal; directory may already be gone
       }

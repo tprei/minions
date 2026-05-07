@@ -33,7 +33,6 @@ export interface EngineConfig {
   workspace?: WorkspaceBackend;
   repoPath?: string;
   workspaceRoot?: string;
-  containerWorkspaceRoot?: string;
   gitCommandPrefix?: readonly string[];
 }
 
@@ -56,17 +55,14 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   if (config.workspace) {
     workspace = config.workspace;
   } else if (config.repoPath) {
-    const gitClientConfig = config.gitCommandPrefix !== undefined
-      ? { commandPrefix: config.gitCommandPrefix }
-      : {};
-    const gitClient = new GitClient(gitClientConfig);
+    const gitCommandPrefix = config.gitCommandPrefix ?? [];
+    const gitClient = new GitClient(gitCommandPrefix.length > 0 ? { commandPrefix: gitCommandPrefix } : {});
     const workspaceRoot = config.workspaceRoot ?? join(dirname(config.repoPath), `${basename(config.repoPath)}-worktrees`);
-    const containerWorkspaceRoot = config.containerWorkspaceRoot ?? workspaceRoot;
     workspace = await GitWorktreeWorkspaceBackend.create({
       gitClient,
       repoPath: config.repoPath,
       workspaceRoot,
-      containerWorkspaceRoot,
+      gitCommandPrefix,
     });
   } else {
     workspace = new StubWorkspaceBackend();
