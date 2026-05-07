@@ -365,6 +365,68 @@ describe("GitWorktreeWorkspaceBackend", () => {
     });
   });
 
+  describe("get", () => {
+    it("after create, get returns matching handle (cache hit)", async () => {
+      const gitClient = makeGitClient();
+      const backend = await makeBackend(gitClient);
+
+      const created = await backend.create({ workflowId: "wf1", taskId: "task1", branch: "b", mode: "worktree" });
+      const got = await backend.get(created.workspaceId);
+
+      expect(got).toBeDefined();
+      expect(got!.workspaceId).toBe(created.workspaceId);
+      expect(got!.path).toBe(created.path);
+      expect(gitClient.run).not.toHaveBeenCalled();
+    });
+
+    it("unknown workspaceId returns undefined", async () => {
+      const gitClient = makeGitClient();
+      const backend = await makeBackend(gitClient);
+
+      const got = await backend.get("ws-totally-unknown");
+      expect(got).toBeUndefined();
+    });
+
+    it("existing- workspaceId returns undefined", async () => {
+      const gitClient = makeGitClient();
+      const backend = await makeBackend(gitClient);
+
+      const got = await backend.get("existing-wf1-a16d54_task1-943be8");
+      expect(got).toBeUndefined();
+    });
+
+    it("ws- workspaceId with live worktree (no cache) reads branch from git", async () => {
+      const gitClient = makeGitClient();
+      (gitClient.run as ReturnType<typeof vi.fn>).mockResolvedValue({ stdout: "minions/wf1_task1\n", stderr: "" });
+      const backend = await makeBackend(gitClient);
+      const fsp = vi.mocked(await import("node:fs/promises"));
+
+      const worktreePath = "/fake/workspaces/wf1-a16d54_task1-943be8";
+      fsp.access.mockImplementation(async (p) => {
+        if (String(p) === `${worktreePath}/.git`) return undefined;
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      });
+
+      const got = await backend.get("ws-wf1-a16d54_task1-943be8");
+
+      expect(got).toBeDefined();
+      expect(got!.branch).toBe("minions/wf1_task1");
+      expect(got!.path).toBe(worktreePath);
+      expect(gitClient.run).toHaveBeenCalledWith(worktreePath, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    });
+
+    it("after cleanup, get returns undefined (cache miss + absent probe)", async () => {
+      const gitClient = makeGitClient();
+      const backend = await makeBackend(gitClient);
+
+      const created = await backend.create({ workflowId: "wf1", taskId: "task1", branch: "b", mode: "worktree" });
+      await backend.cleanup(created.workspaceId);
+
+      const got = await backend.get(created.workspaceId);
+      expect(got).toBeUndefined();
+    });
+  });
+
   describe("cleanup — path traversal containment guard", () => {
     it("does not call any fs or git ops for an escape-attempt workspaceId", async () => {
       const gitClient = makeGitClient();

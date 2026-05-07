@@ -30,4 +30,30 @@ describe("StubWorkspaceBackend", () => {
     await expect(backend.cleanup("any-id")).resolves.toBeUndefined();
     await expect(backend.cleanup("nonexistent")).resolves.toBeUndefined();
   });
+
+  it("get returns handle after create", async () => {
+    const backend = new StubWorkspaceBackend();
+    const handle = await backend.create({ workflowId: "wf-1", taskId: "task-1", branch: "b" });
+    const got = await backend.get(handle.workspaceId);
+
+    expect(got).toBeDefined();
+    expect(got!.workspaceId).toBe(handle.workspaceId);
+    expect(got!.branch).toBe("b");
+  });
+
+  it("get returns undefined for unknown workspaceId", async () => {
+    const backend = new StubWorkspaceBackend();
+    const got = await backend.get("stub-no-such");
+
+    expect(got).toBeUndefined();
+  });
+
+  it("get returns undefined after cleanup", async () => {
+    const backend = new StubWorkspaceBackend();
+    const handle = await backend.create({ workflowId: "wf-1", taskId: "task-1", branch: "b" });
+    await backend.cleanup(handle.workspaceId);
+    const got = await backend.get(handle.workspaceId);
+
+    expect(got).toBeUndefined();
+  });
 });

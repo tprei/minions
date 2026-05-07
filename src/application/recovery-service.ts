@@ -1,5 +1,5 @@
 import { DomainError } from "../domain/errors.js";
-import type { Workflow } from "../domain/types.js";
+import type { Artifact, Workflow } from "../domain/types.js";
 import type { Command, CommandResult } from "./commands.js";
 import { applyCommand } from "./commands.js";
 import type {
@@ -136,11 +136,61 @@ const resumeOperationRule: ActionRule<GraphOperationRecoveryAction> = (workflow,
   };
 };
 
+const probeGateRule: ActionRule<TaskRecoveryAction> = (workflow, action) => {
+  if (action.kind !== "probe-gate") return null;
+  const task = workflow.graph[action.taskId];
+  if (!task) return null;
+
+  const planKey = `recovery:${workflow.id}:${action.taskId}:probe-gate:${task.runs.length}`;
+
+  return {
+    key: planKey,
+    run: async (deps) => {
+      const transitionKind: TransitionKind =
+        task.executionStatus === "quality-pending" ? "complete-quality-gate" : "complete-ci-gate";
+      const artifactKind = task.executionStatus === "quality-pending" ? "quality-report" : "ci-report";
+
+      const artifact: Artifact = {
+        kind: artifactKind,
+        ref: JSON.stringify({
+          overallStatus: "failed",
+          checks: [],
+          ranAt: deps.now(),
+          reason: "stale-recovery",
+        }),
+        producedBy: "recovery",
+        createdAt: deps.now(),
+      };
+
+      const recoveryRecord: IdempotencyRecord = {
+        key: planKey,
+        resultRef: `recovery:probe-gate:${action.taskId}`,
+      };
+
+      return applyCommand(
+        deps.repo,
+        {
+          kind: "transition-task",
+          workflowId: workflow.id,
+          transition: {
+            kind: transitionKind,
+            taskId: action.taskId,
+            passed: false,
+            artifacts: [artifact],
+            now: deps.now(),
+          },
+        },
+        { recoveryIdempotency: recoveryRecord },
+      );
+    },
+  };
+};
+
 const ACTION_RULES: { [K in RecoveryAction["kind"]]: ActionRule<Extract<RecoveryAction, { kind: K }>> } = {
   "recover-task": taskActionRule,
   "interrupt-task": taskActionRule,
   "stop-runtime": taskActionRule,
-  "probe-gate": () => null,
+  "probe-gate": probeGateRule as ActionRule<Extract<RecoveryAction, { kind: "probe-gate" }>>,
   "operator-review": () => null,
   "resume-graph-operation": resumeOperationRule,
 };

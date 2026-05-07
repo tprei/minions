@@ -118,13 +118,11 @@ export class MergeService {
         );
       }
       branch = deriveBranch(workflowId, taskId);
-      workspaceHandle = await workspace.create({
-        workflowId,
-        taskId,
-        branch,
-        mode: "worktree",
-        resetBranch: false,
-      });
+      const workspaceId = `ws-${slugify(workflowId)}_${slugify(taskId)}`;
+      workspaceHandle = await workspace.get(workspaceId);
+      if (!workspaceHandle) {
+        workspaceHandle = await workspace.create({ workflowId, taskId, branch, mode: "worktree", resetBranch: false });
+      }
       emitPhase("prepareMerge", "completed");
 
       // Phase 2: commit (push branch)

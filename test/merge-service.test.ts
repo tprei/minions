@@ -30,9 +30,10 @@ function makeScm(overrides: Partial<SCMPlugin> = {}): SCMPlugin {
   };
 }
 
-function makeWorkspace(): WorkspaceBackend {
+function makeWorkspace(getHandle?: WorkspaceHandle): WorkspaceBackend {
   return {
     create: vi.fn().mockResolvedValue(makeHandle()),
+    get: vi.fn().mockResolvedValue(getHandle),
     cleanup: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -327,6 +328,49 @@ describe("MergeService", () => {
     const patchArtifact = artifacts.find((a) => a.kind === "patch");
     const ref = JSON.parse(patchArtifact!.ref) as { phase: string };
     expect(ref.phase).toBe("rebase");
+  });
+
+  it("workspace.get returns handle — merge proceeds without calling create()", async () => {
+    const { repo } = await buildWorkflow();
+    const scm = makeScm();
+    const handle = makeHandle();
+    const workspace = makeWorkspace(handle);
+
+    const service = new MergeService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      scm,
+      workspace,
+      repoCoords: { owner: "o", repo: "r" },
+      baseBranch: "main",
+      now: () => now,
+    });
+
+    const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
+    expect(result.workflow.graph["wf-1:task"]?.executionStatus).toBe("merged");
+    expect(workspace.get).toHaveBeenCalledOnce();
+    expect(workspace.create).not.toHaveBeenCalled();
+  });
+
+  it("workspace.get returns undefined — falls back to create()", async () => {
+    const { repo } = await buildWorkflow();
+    const scm = makeScm();
+    const workspace = makeWorkspace(undefined);
+
+    const service = new MergeService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      scm,
+      workspace,
+      repoCoords: { owner: "o", repo: "r" },
+      baseBranch: "main",
+      now: () => now,
+    });
+
+    const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
+    expect(result.workflow.graph["wf-1:task"]?.executionStatus).toBe("merged");
+    expect(workspace.get).toHaveBeenCalledOnce();
+    expect(workspace.create).toHaveBeenCalledOnce();
   });
 
   it("workspace not yet created when prepareMerge fails: cleanup not called", async () => {

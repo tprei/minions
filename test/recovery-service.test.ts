@@ -339,4 +339,81 @@ describe("RecoveryService.scan", () => {
     expect(saved?.graph["wf-x:b"]?.executionStatus).toBe("pending");
     expect(results).toHaveLength(1);
   });
+
+  it("stale quality-pending → probe-gate → complete-quality-gate{passed:false} with stale artifact", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => started);
+    await repo.save(wf, []);
+
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-ready", taskId: "wf-1:task", now: started },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s1", now: started },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "complete-runtime", taskId: "wf-1:task", now: started },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "start-quality-gate", taskId: "wf-1:task", now: started },
+    });
+
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const results = await service.scan("wf-1", { ...defaultOptions, staleGateMs: 60_000 });
+
+    expect(results).toHaveLength(1);
+    const saved = await repo.get("wf-1");
+    const task = saved?.graph["wf-1:task"];
+    expect(task?.executionStatus).toBe("needs-review");
+    const report = task?.artifacts.find((a) => a.kind === "quality-report");
+    expect(report).toBeDefined();
+    const ref = JSON.parse(report!.ref) as { reason: string };
+    expect(ref.reason).toBe("stale-recovery");
+  });
+
+  it("probe-gate idempotency: second scan does not re-fire", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => started);
+    await repo.save(wf, []);
+
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-ready", taskId: "wf-1:task", now: started },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s1", now: started },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "complete-runtime", taskId: "wf-1:task", now: started },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "start-quality-gate", taskId: "wf-1:task", now: started },
+    });
+
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const staleOpts = { ...defaultOptions, staleGateMs: 60_000 };
+    await service.scan("wf-1", staleOpts);
+
+    const beforeCursor = (await repo.eventsSince("wf-1", 0)).length;
+    const secondResults = await service.scan("wf-1", staleOpts);
+    const afterCursor = (await repo.eventsSince("wf-1", 0)).length;
+
+    expect(secondResults).toHaveLength(0);
+    expect(afterCursor).toBe(beforeCursor);
+  });
 });

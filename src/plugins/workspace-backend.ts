@@ -19,6 +19,7 @@ export interface WorkspaceHandle {
 
 export interface WorkspaceBackend {
   create(spec: WorkspaceCreateSpec): Promise<WorkspaceHandle>;
+  get(workspaceId: string): Promise<WorkspaceHandle | undefined>;
   cleanup(workspaceId: string): Promise<void>;
 }
 

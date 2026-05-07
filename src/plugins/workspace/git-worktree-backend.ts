@@ -139,6 +139,37 @@ export class GitWorktreeWorkspaceBackend implements WorkspaceBackend {
     return "absent";
   }
 
+  async get(workspaceId: string): Promise<WorkspaceHandle | undefined> {
+    const cached = this.handles.get(workspaceId);
+    if (cached) return cached;
+
+    if (workspaceId.startsWith("existing-")) return undefined;
+
+    if (!workspaceId.startsWith("ws-")) return undefined;
+
+    const slug = workspaceId.slice(3);
+    const worktreePath = join(this.workspaceRoot, slug);
+
+    if (await this.probeWorktree(worktreePath) !== "worktree") return undefined;
+
+    let branch: string;
+    try {
+      const { stdout } = await this.gitClient.run(worktreePath, ["rev-parse", "--abbrev-ref", "HEAD"]);
+      branch = stdout.trim();
+    } catch {
+      return undefined;
+    }
+
+    const handle: WorkspaceHandle = {
+      workspaceId,
+      mode: "worktree",
+      path: worktreePath,
+      containerPath: worktreePath,
+      branch,
+    };
+    return handle;
+  }
+
   async create(spec: WorkspaceCreateSpec): Promise<WorkspaceHandle> {
     const mode = spec.mode ?? "worktree";
     const wfSlug = slugify(spec.workflowId);

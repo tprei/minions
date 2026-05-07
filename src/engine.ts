@@ -29,6 +29,8 @@ import { GitHubClient } from "./plugins/github/github-client.js";
 import { GitHubScmPlugin } from "./plugins/github/github-scm-plugin.js";
 import { MergeService } from "./application/merge-service.js";
 import { CIBabysitterService } from "./application/ci-babysitter-service.js";
+import { QualityGateService } from "./application/quality-gate-service.js";
+import type { QualityPlugin } from "./plugins/quality-plugin.js";
 import type { WorkflowEvent } from "./domain/events.js";
 
 export interface EngineConfig {
@@ -56,6 +58,8 @@ export interface EngineConfig {
   githubToken?: string;
   githubRepo?: { owner: string; repo: string };
   githubBaseBranch?: string;
+  qualityPlugin?: QualityPlugin;
+  qualityDefaultTimeoutMs?: number;
 }
 
 function resolveVapid(config: EngineConfig): VapidConfig | undefined {
@@ -264,6 +268,24 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     }
   }
 
+  let qualityAbort: AbortController | undefined;
+
+  if (config.qualityPlugin) {
+    qualityAbort = new AbortController();
+    const qualityGateService = new QualityGateService({
+      workflowRepo: repo,
+      workspace,
+      plugin: config.qualityPlugin,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      signal: qualityAbort.signal,
+      now,
+      ...(config.qualityDefaultTimeoutMs !== undefined ? { defaultTimeoutMs: config.qualityDefaultTimeoutMs } : {}),
+    });
+    serverDeps.qualityGateService = qualityGateService;
+    const recoverableWorkflows = await repo.listRecoverable();
+    for (const w of recoverableWorkflows) qualityGateService.attach(w.id);
+  }
+
   const server = createServer(serverDeps);
 
   return {
@@ -273,6 +295,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     async close() {
       pushAbort?.abort();
       ciBabysitterAbort?.abort();
+      qualityAbort?.abort();
       for (const entry of activeOrchestrators) {
         entry.controller.abort();
       }
