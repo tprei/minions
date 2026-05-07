@@ -3,8 +3,6 @@ import { ContinueTaskService } from "../../src/application/continue-task-service
 import { applyCommand } from "../../src/application/commands.js";
 import type { CommandResult } from "../../src/application/commands.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
-import { RunOrchestrator } from "../../src/application/run-orchestrator.js";
-import type { RunOrchestratorDeps } from "../../src/application/run-orchestrator.js";
 import { DomainError } from "../../src/domain/errors.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
 import { getOpenRun } from "../../src/domain/runs.js";
@@ -62,6 +60,7 @@ describe("ContinueTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator: vi.fn(),
     });
 
     const result = await service.run({
@@ -115,6 +114,7 @@ describe("ContinueTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator: vi.fn(),
     });
 
     let caughtErr: unknown;
@@ -159,6 +159,7 @@ describe("ContinueTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator: vi.fn(),
     });
 
     let caughtErr: unknown;
@@ -172,6 +173,44 @@ describe("ContinueTaskService", () => {
     expect((caughtErr as DomainError).message).toContain("ready");
     expect(resumeSpy).not.toHaveBeenCalled();
     expect(startSpy).not.toHaveBeenCalled();
+  });
+
+  it("sad path: task stackStatus is restack-pending → throws invalid_transition, no provider.resume call", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const provider = new StubProviderPlugin({ frames: [] });
+    const resumeSpy = vi.spyOn(provider, "resume");
+
+    await makeNeedsReviewTask(repo, "prior-ref");
+
+    const wfCurrent = await repo.get("wf-1");
+    const task = wfCurrent!.graph["wf-1:task"]!;
+    const patchedWf = {
+      ...wfCurrent!,
+      version: wfCurrent!.version + 1,
+      graph: { "wf-1:task": { ...task, stackStatus: "restack-pending" as const } },
+    };
+    await repo.save(patchedWf, []);
+
+    const service = new ContinueTaskService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      providerFactory: () => provider,
+      runtime,
+      now: () => now,
+      spawnOrchestrator: vi.fn(),
+    });
+
+    let caughtErr: unknown;
+    try {
+      await service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "continue" });
+    } catch (e) {
+      caughtErr = e;
+    }
+    expect(caughtErr).toBeInstanceOf(DomainError);
+    expect((caughtErr as DomainError).code).toBe("invalid_transition");
+    expect((caughtErr as DomainError).message).toContain("restack-pending");
+    expect(resumeSpy).not.toHaveBeenCalled();
   });
 
   it("sad path: provider.resume rejects → error propagates, task stays in needs-review", async () => {
@@ -188,6 +227,7 @@ describe("ContinueTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator: vi.fn(),
     });
 
     await expect(
@@ -213,6 +253,7 @@ describe("ContinueTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator: vi.fn(),
     });
 
     await expect(
@@ -223,7 +264,7 @@ describe("ContinueTaskService", () => {
     expect(wfAfter!.graph["wf-1:task"]!.executionStatus).toBe("needs-review");
   });
 
-  it("orchestrator constructed with runId matching post-mark-running open run", async () => {
+  it("spawnOrchestrator called once with expected deps shape", async () => {
     const repo = new InMemoryWorkflowRepository();
     const runtime = new StubRuntimeBackend();
     const finalEvent: ProviderEvent = { kind: "final", sessionRef: "new-session" };
@@ -231,18 +272,14 @@ describe("ContinueTaskService", () => {
 
     await makeNeedsReviewTask(repo, "prior-session-ref");
 
-    let capturedRunId: string | undefined;
-    const OrigRunOrchestrator = RunOrchestrator;
-    vi.spyOn(OrigRunOrchestrator.prototype, "run").mockImplementation(async function(this: RunOrchestrator) {
-      capturedRunId = (this as unknown as { deps: RunOrchestratorDeps }).deps.runId;
-    });
-
+    const spawnOrchestrator = vi.fn();
     const service = new ContinueTaskService({
       repo,
       applyCommand: (cmd) => applyCommand(repo, cmd),
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator,
     });
 
     await service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "continue" });
@@ -250,10 +287,16 @@ describe("ContinueTaskService", () => {
     const wfPost = await repo.get("wf-1");
     const taskPost = wfPost?.graph["wf-1:task"];
     const openRun = taskPost ? getOpenRun(taskPost.runs) : undefined;
-    expect(capturedRunId).toBeDefined();
-    expect(capturedRunId).toBe(openRun?.id);
 
-    vi.restoreAllMocks();
+    expect(spawnOrchestrator).toHaveBeenCalledOnce();
+    const spawnedDeps = spawnOrchestrator.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(spawnedDeps.workflowId).toBe("wf-1");
+    expect(spawnedDeps.taskId).toBe("wf-1:task");
+    expect(spawnedDeps.runId).toBe(openRun?.id);
+    expect(spawnedDeps.provider).toBe(provider);
+    expect(spawnedDeps.runtime).toBe(runtime);
+    expect(typeof spawnedDeps.publish).toBe("function");
+    expect(typeof spawnedDeps.now).toBe("function");
   });
 
   it("sad path: mark-running rejects → runtime.stop called for cleanup before error propagates", async () => {
@@ -280,6 +323,7 @@ describe("ContinueTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator: vi.fn(),
     });
 
     await expect(

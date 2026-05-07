@@ -3,7 +3,7 @@ import type { ProviderPlugin } from "../plugins/provider-plugin.js";
 import type { RuntimeBackend } from "../plugins/runtime-backend.js";
 import type { Command, CommandResult } from "./commands.js";
 import type { WorkflowRepository } from "./repository.js";
-import { RunOrchestrator } from "./run-orchestrator.js";
+import type { RunOrchestratorDeps } from "./run-orchestrator.js";
 import { getOpenRun } from "../domain/runs.js";
 import { dependencyArtifactsFor } from "./scheduler.js";
 import type { WorkflowEvent } from "../domain/events.js";
@@ -14,6 +14,7 @@ export interface RetryTaskServiceDeps {
   providerFactory: () => ProviderPlugin;
   runtime: RuntimeBackend;
   now: () => string;
+  spawnOrchestrator: (deps: Omit<RunOrchestratorDeps, "signal">) => void;
 }
 
 export interface RetryTaskInput {
@@ -31,7 +32,7 @@ export class RetryTaskService {
 
   async run(input: RetryTaskInput): Promise<CommandResult> {
     const { workflowId, taskId, prompt } = input;
-    const { repo, applyCommand, providerFactory, runtime, now } = this.deps;
+    const { repo, applyCommand, providerFactory, runtime, now, spawnOrchestrator } = this.deps;
 
     const workflow = await repo.get(workflowId);
     if (!workflow) {
@@ -47,6 +48,12 @@ export class RetryTaskService {
       throw new DomainError("invalid_transition",
         `retry-task requires task in needs-review, got ${task.executionStatus}`,
         { taskId, currentStatus: task.executionStatus });
+    }
+
+    if (task.stackStatus !== "clean") {
+      throw new DomainError("invalid_transition",
+        `task stack is ${task.stackStatus}; must be clean before retry`,
+        { taskId, stackStatus: task.stackStatus });
     }
 
     const depArtifacts = dependencyArtifactsFor(workflow, taskId);
@@ -85,7 +92,7 @@ export class RetryTaskService {
     if (!openRun) throw new DomainError("invalid_transition", "no open run after mark-running", { taskId });
     const runId = openRun.id;
 
-    const orchestrator = new RunOrchestrator({
+    spawnOrchestrator({
       workflowId,
       taskId,
       runId,
@@ -105,8 +112,6 @@ export class RetryTaskService {
       },
       now,
     });
-
-    orchestrator.run().catch((err) => console.error("run-orchestrator error:", err));
 
     return runningResult;
   }

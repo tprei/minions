@@ -10,6 +10,7 @@ import { SQLiteWorkflowRepository } from "../src/persistence/sqlite-repo.js";
 import { applyCommand } from "../src/application/commands.js";
 import { createSingleTaskWorkflow } from "../src/domain/workflow.js";
 import { StubProviderPlugin } from "../src/plugins/providers/stub.js";
+import { StubRuntimeBackend } from "../src/plugins/stub-runtime.js";
 
 function makeTempPath(): string {
   const dir = mkdtempSync(join(tmpdir(), "engine-test-"));
@@ -134,5 +135,90 @@ describe("createEngine — close() aborts boot-spawned orchestrators", () => {
     postCloseRepo.close();
     const task = postCloseWf?.graph["wf-close-1:task"];
     expect(task?.executionStatus).toBe("running");
+  });
+});
+
+describe("createEngine — close() aborts service-spawned orchestrators", () => {
+  it("close() aborts orchestrators spawned by continue-task or retry-task via the server", async () => {
+    const dbPath = makeTempPath();
+    const now = "2026-05-06T10:00:00.000Z";
+
+    // Seed a needs-review task so continue-task can proceed
+    const seedRepo = new SQLiteWorkflowRepository(dbPath);
+    const wf = createSingleTaskWorkflow("wf-svc-1", { title: "T", prompt: "P" }, () => now);
+    await seedRepo.save(wf, []);
+    await applyCommand(seedRepo, {
+      kind: "transition-task",
+      workflowId: "wf-svc-1",
+      transition: { kind: "mark-ready", taskId: "wf-svc-1:task", now },
+    });
+    await applyCommand(seedRepo, {
+      kind: "transition-task",
+      workflowId: "wf-svc-1",
+      transition: { kind: "mark-running", taskId: "wf-svc-1:task", sessionId: "s-seed", now },
+    });
+    await applyCommand(seedRepo, {
+      kind: "transition-task",
+      workflowId: "wf-svc-1",
+      transition: { kind: "mark-interrupted", taskId: "wf-svc-1:task", now },
+    });
+    // Patch providerSessionRef so continue-task finds a resumable session
+    const wfCurrent = await seedRepo.get("wf-svc-1");
+    const seedTask = wfCurrent!.graph["wf-svc-1:task"]!;
+    const patchedRun = { ...seedTask.runs[0]!, providerSessionRef: "prior-ref" };
+    await seedRepo.save({
+      ...wfCurrent!,
+      version: wfCurrent!.version + 1,
+      graph: { "wf-svc-1:task": { ...seedTask, runs: [patchedRun] } },
+    }, []);
+    seedRepo.close();
+
+    let capturedSignal: AbortSignal | undefined;
+    const stubRuntime = new StubRuntimeBackend();
+    const origAttach = stubRuntime.attach.bind(stubRuntime);
+    stubRuntime.attach = (_sessionId: string, opts?: RuntimeAttachOptions): AsyncIterable<RuntimeOutputChunk> => {
+      capturedSignal = opts?.signal;
+      return {
+        [Symbol.asyncIterator]: async function* () {
+          await new Promise<void>((_resolve, reject) => {
+            opts?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+          });
+        },
+      };
+    };
+    void origAttach; // suppress unused warning
+
+    const config: EngineConfig = {
+      dbPath,
+      runtime: stubRuntime,
+      now: () => now,
+      providerFactory: () => new StubProviderPlugin({ frames: [] }),
+    };
+
+    const eng = await createEngine(config);
+
+    // Dispatch continue-task via the HTTP server
+    const req = new Request("http://localhost/commands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "continue-task",
+        workflowId: "wf-svc-1",
+        taskId: "wf-svc-1:task",
+        prompt: "continue please",
+      }),
+    });
+    const res = await eng.server.fetch(req);
+    expect(res.status).toBe(200);
+
+    // Give orchestrator a tick to reach runtime.attach
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal?.aborted).toBe(false);
+
+    await eng.close();
+
+    expect(capturedSignal?.aborted).toBe(true);
   });
 });

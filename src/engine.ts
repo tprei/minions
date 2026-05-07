@@ -46,13 +46,27 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   const repo = new SQLiteWorkflowRepository(config.dbPath);
   const recoveryService = createRecoveryService(repo, executor, runtime, now);
 
-  const activeOrchestrators = new Set<{ controller: AbortController; promise: Promise<void> }>();
+  type ActiveOrchestratorEntry = { controller: AbortController; promise: Promise<void> };
+  const activeOrchestrators = new Set<ActiveOrchestratorEntry>();
 
-  const spawnOrchestrator = config.providerFactory
+  const spawnTracked = (deps: Omit<RunOrchestratorDeps, "signal">): void => {
+    const controller = new AbortController();
+    const entry: ActiveOrchestratorEntry = {
+      controller,
+      promise: undefined as unknown as Promise<void>,
+    };
+    activeOrchestrators.add(entry);
+    const orch = new RunOrchestrator({ ...deps, signal: controller.signal });
+    entry.promise = orch
+      .run()
+      .catch((err) => console.error("run-orchestrator error:", err))
+      .finally(() => { activeOrchestrators.delete(entry); });
+  };
+
+  const bootSpawnOrchestrator = config.providerFactory
     ? (ctx: BootRespawnContext) => {
-        const controller = new AbortController();
         const provider = config.providerFactory!();
-        const deps: RunOrchestratorDeps = {
+        const deps: Omit<RunOrchestratorDeps, "signal"> = {
           workflowId: ctx.workflowId,
           taskId: ctx.taskId,
           runId: ctx.runId,
@@ -71,19 +85,9 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
             repo.publishTransient(ctx.workflowId, envelope);
           },
           now,
-          signal: controller.signal,
         };
         if (ctx.fromOffset !== undefined) deps.fromOffset = ctx.fromOffset;
-        const orch = new RunOrchestrator(deps);
-        const entry: { controller: AbortController; promise: Promise<void> } = {
-          controller,
-          promise: undefined as unknown as Promise<void>,
-        };
-        entry.promise = orch
-          .run()
-          .catch((err) => console.error("boot run-orchestrator error:", err))
-          .finally(() => activeOrchestrators.delete(entry));
-        activeOrchestrators.add(entry);
+        spawnTracked(deps);
       }
     : undefined;
 
@@ -92,7 +96,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     staleReadyMs,
     staleGateMs,
   };
-  if (spawnOrchestrator !== undefined) bootRecoveryOpts.spawnOrchestrator = spawnOrchestrator;
+  if (bootSpawnOrchestrator !== undefined) bootRecoveryOpts.spawnOrchestrator = bootSpawnOrchestrator;
 
   const bootReport = await runBootRecovery(repo, recoveryService, runtime, bootRecoveryOpts);
 
@@ -105,6 +109,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       providerFactory: config.providerFactory,
       runtime,
       now,
+      spawnOrchestrator: spawnTracked,
     });
     serverDeps.retryTaskService = new RetryTaskService({
       repo,
@@ -112,6 +117,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       providerFactory: config.providerFactory,
       runtime,
       now,
+      spawnOrchestrator: spawnTracked,
     });
   }
 

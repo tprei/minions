@@ -3,8 +3,6 @@ import { RetryTaskService } from "../../src/application/retry-task-service.js";
 import { applyCommand } from "../../src/application/commands.js";
 import type { CommandResult } from "../../src/application/commands.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
-import { RunOrchestrator } from "../../src/application/run-orchestrator.js";
-import type { RunOrchestratorDeps } from "../../src/application/run-orchestrator.js";
 import { DomainError } from "../../src/domain/errors.js";
 import { createSingleTaskWorkflow, createWorkflow } from "../../src/domain/workflow.js";
 import { getOpenRun } from "../../src/domain/runs.js";
@@ -58,12 +56,14 @@ describe("RetryTaskService", () => {
     };
     await repo.save(patchedWf, []);
 
+    const spawnOrchestrator = vi.fn();
     const service = new RetryTaskService({
       repo,
       applyCommand: (cmd) => applyCommand(repo, cmd),
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator,
     });
 
     const result = await service.run({
@@ -140,6 +140,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator: vi.fn(),
     });
 
     await service.run({ workflowId: "wf-2", taskId: "wf-2:child", prompt: "retry child" });
@@ -174,6 +175,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator: vi.fn(),
     });
 
     const result = await service.run({ workflowId: "wf-3", taskId: "wf-3:task", prompt: "first try" });
@@ -205,6 +207,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator: vi.fn(),
     });
 
     let caughtErr: unknown;
@@ -245,6 +248,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator: vi.fn(),
     });
 
     let caughtErr: unknown;
@@ -255,6 +259,44 @@ describe("RetryTaskService", () => {
     }
     expect(caughtErr).toBeInstanceOf(DomainError);
     expect((caughtErr as DomainError).code).toBe("invalid_transition");
+    expect(prepareSpy).not.toHaveBeenCalled();
+  });
+
+  it("sad path: task stackStatus is restack-pending → throws invalid_transition, prepare not called", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const provider = new StubProviderPlugin({ frames: [] });
+    const prepareSpy = vi.spyOn(provider, "prepare");
+
+    await makeNeedsReviewTask(repo);
+
+    const wfCurrent = await repo.get("wf-1");
+    const task = wfCurrent!.graph["wf-1:task"]!;
+    const patchedWf = {
+      ...wfCurrent!,
+      version: wfCurrent!.version + 1,
+      graph: { "wf-1:task": { ...task, stackStatus: "restack-pending" as const } },
+    };
+    await repo.save(patchedWf, []);
+
+    const service = new RetryTaskService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      providerFactory: () => provider,
+      runtime,
+      now: () => now,
+      spawnOrchestrator: vi.fn(),
+    });
+
+    let caughtErr: unknown;
+    try {
+      await service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "retry" });
+    } catch (e) {
+      caughtErr = e;
+    }
+    expect(caughtErr).toBeInstanceOf(DomainError);
+    expect((caughtErr as DomainError).code).toBe("invalid_transition");
+    expect((caughtErr as DomainError).message).toContain("restack-pending");
     expect(prepareSpy).not.toHaveBeenCalled();
   });
 
@@ -273,6 +315,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator: vi.fn(),
     });
 
     await expect(
@@ -299,6 +342,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator: vi.fn(),
     });
 
     await expect(
@@ -333,6 +377,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator: vi.fn(),
     });
 
     await expect(
@@ -343,7 +388,7 @@ describe("RetryTaskService", () => {
     expect(stopSpy).toHaveBeenCalledOnce();
   });
 
-  it("orchestrator constructed with runId matching post-mark-running open run", async () => {
+  it("spawnOrchestrator called once with expected deps shape", async () => {
     const repo = new InMemoryWorkflowRepository();
     const runtime = new StubRuntimeBackend();
     const finalEvent: ProviderEvent = { kind: "final", sessionRef: "new-session" };
@@ -351,18 +396,14 @@ describe("RetryTaskService", () => {
 
     await makeNeedsReviewTask(repo);
 
-    let capturedRunId: string | undefined;
-    const OrigRunOrchestrator = RunOrchestrator;
-    vi.spyOn(OrigRunOrchestrator.prototype, "run").mockImplementation(async function(this: RunOrchestrator) {
-      capturedRunId = (this as unknown as { deps: RunOrchestratorDeps }).deps.runId;
-    });
-
+    const spawnOrchestrator = vi.fn();
     const service = new RetryTaskService({
       repo,
       applyCommand: (cmd) => applyCommand(repo, cmd),
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      spawnOrchestrator,
     });
 
     await service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "retry" });
@@ -370,9 +411,15 @@ describe("RetryTaskService", () => {
     const wfPost = await repo.get("wf-1");
     const taskPost = wfPost?.graph["wf-1:task"];
     const openRun = taskPost ? getOpenRun(taskPost.runs) : undefined;
-    expect(capturedRunId).toBeDefined();
-    expect(capturedRunId).toBe(openRun?.id);
 
-    vi.restoreAllMocks();
+    expect(spawnOrchestrator).toHaveBeenCalledOnce();
+    const spawnedDeps = spawnOrchestrator.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(spawnedDeps.workflowId).toBe("wf-1");
+    expect(spawnedDeps.taskId).toBe("wf-1:task");
+    expect(spawnedDeps.runId).toBe(openRun?.id);
+    expect(spawnedDeps.provider).toBe(provider);
+    expect(spawnedDeps.runtime).toBe(runtime);
+    expect(typeof spawnedDeps.publish).toBe("function");
+    expect(typeof spawnedDeps.now).toBe("function");
   });
 });
