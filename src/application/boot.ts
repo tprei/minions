@@ -11,6 +11,7 @@ export interface BootRespawnContext {
   runtimeSessionId: string;
   providerType: string;
   runtimeType: string;
+  workspaceId?: string;
   /**
    * Last persisted output offset. May be undefined when the prior orchestrator
    * died mid-run before flushing offset (slice 10 only writes on final/interrupt).
@@ -125,6 +126,7 @@ export async function runBootRecovery(
           providerType: openRun.providerType,
           runtimeType: openRun.runtimeType,
         };
+        if (task.workspaceId !== undefined) ctx.workspaceId = task.workspaceId;
         // skip stored offset when sessionRef hasn't been captured — preserves provider-state-init events at offset 0
         if (openRun.outputOffset !== undefined && openRun.providerSessionRef !== undefined) {
           ctx.fromOffset = openRun.outputOffset;

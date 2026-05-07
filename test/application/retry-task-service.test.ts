@@ -8,6 +8,7 @@ import { createSingleTaskWorkflow, createWorkflow } from "../../src/domain/workf
 import { getOpenRun } from "../../src/domain/runs.js";
 import { StubProviderPlugin } from "../../src/plugins/providers/stub.js";
 import { StubRuntimeBackend } from "../../src/plugins/stub-runtime.js";
+import { StubWorkspaceBackend } from "../../src/plugins/workspace/stub-workspace.js";
 import type { NodeRun } from "../../src/domain/runs.js";
 import type { ProviderEvent } from "../../src/plugins/provider-plugin.js";
 import type { Artifact } from "../../src/domain/types.js";
@@ -63,6 +64,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      workspace: new StubWorkspaceBackend(),
       spawnOrchestrator,
     });
 
@@ -140,6 +142,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      workspace: new StubWorkspaceBackend(),
       spawnOrchestrator: vi.fn(),
     });
 
@@ -175,6 +178,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      workspace: new StubWorkspaceBackend(),
       spawnOrchestrator: vi.fn(),
     });
 
@@ -207,6 +211,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      workspace: new StubWorkspaceBackend(),
       spawnOrchestrator: vi.fn(),
     });
 
@@ -248,6 +253,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      workspace: new StubWorkspaceBackend(),
       spawnOrchestrator: vi.fn(),
     });
 
@@ -285,6 +291,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      workspace: new StubWorkspaceBackend(),
       spawnOrchestrator: vi.fn(),
     });
 
@@ -330,6 +337,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      workspace: new StubWorkspaceBackend(),
       spawnOrchestrator: vi.fn(),
     });
 
@@ -359,6 +367,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      workspace: new StubWorkspaceBackend(),
       spawnOrchestrator: vi.fn(),
     });
 
@@ -386,6 +395,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      workspace: new StubWorkspaceBackend(),
       spawnOrchestrator: vi.fn(),
     });
 
@@ -421,6 +431,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      workspace: new StubWorkspaceBackend(),
       spawnOrchestrator: vi.fn(),
     });
 
@@ -447,6 +458,7 @@ describe("RetryTaskService", () => {
       providerFactory: () => provider,
       runtime,
       now: () => now,
+      workspace: new StubWorkspaceBackend(),
       spawnOrchestrator,
     });
 
@@ -465,5 +477,103 @@ describe("RetryTaskService", () => {
     expect(spawnedDeps.runtime).toBe(runtime);
     expect(typeof spawnedDeps.publish).toBe("function");
     expect(typeof spawnedDeps.now).toBe("function");
+  });
+
+  it("workspace.create failure: no provider.prepare, no runtime.start, no mark-running", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const provider = new StubProviderPlugin({ frames: [] });
+    const prepareSpy = vi.spyOn(provider, "prepare");
+    const startSpy = vi.spyOn(runtime, "start");
+
+    await makeNeedsReviewTask(repo);
+
+    const workspace = new StubWorkspaceBackend();
+    vi.spyOn(workspace, "create").mockRejectedValue(new Error("workspace unavailable"));
+
+    const service = new RetryTaskService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      providerFactory: () => provider,
+      runtime,
+      now: () => now,
+      workspace,
+      spawnOrchestrator: vi.fn(),
+    });
+
+    await expect(
+      service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "retry" }),
+    ).rejects.toThrow("workspace unavailable");
+
+    expect(prepareSpy).not.toHaveBeenCalled();
+    expect(startSpy).not.toHaveBeenCalled();
+
+    const wfAfter = await repo.get("wf-1");
+    expect(wfAfter!.graph["wf-1:task"]!.executionStatus).toBe("needs-review");
+  });
+
+  it("runtime.start failure triggers workspace.cleanup", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    vi.spyOn(runtime, "start").mockRejectedValue(new Error("runtime unavailable"));
+    const provider = new StubProviderPlugin({ frames: [] });
+
+    await makeNeedsReviewTask(repo);
+
+    const workspace = new StubWorkspaceBackend();
+    const cleanupSpy = vi.spyOn(workspace, "cleanup");
+
+    const service = new RetryTaskService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      providerFactory: () => provider,
+      runtime,
+      now: () => now,
+      workspace,
+      spawnOrchestrator: vi.fn(),
+    });
+
+    await expect(
+      service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "retry" }),
+    ).rejects.toThrow("runtime unavailable");
+
+    expect(cleanupSpy).toHaveBeenCalledOnce();
+  });
+
+  it("mark-running failure triggers runtime.stop AND workspace.cleanup", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const stopSpy = vi.spyOn(runtime, "stop");
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "new-session" };
+    const provider = new StubProviderPlugin({ frames: [[finalEvent]] });
+
+    await makeNeedsReviewTask(repo);
+
+    const workspace = new StubWorkspaceBackend();
+    const cleanupSpy = vi.spyOn(workspace, "cleanup");
+
+    const wrappedApply = vi.fn(async (cmd: Parameters<typeof applyCommand>[1]): Promise<CommandResult> => {
+      if (cmd.kind === "transition-task" && cmd.transition.kind === "mark-running") {
+        throw new DomainError("version_conflict", "concurrent update", { taskId: "wf-1:task" });
+      }
+      return applyCommand(repo, cmd);
+    });
+
+    const service = new RetryTaskService({
+      repo,
+      applyCommand: wrappedApply,
+      providerFactory: () => provider,
+      runtime,
+      now: () => now,
+      workspace,
+      spawnOrchestrator: vi.fn(),
+    });
+
+    await expect(
+      service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "retry" }),
+    ).rejects.toThrow();
+
+    expect(stopSpy).toHaveBeenCalledOnce();
+    expect(cleanupSpy).toHaveBeenCalledOnce();
   });
 });

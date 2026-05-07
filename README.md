@@ -108,3 +108,45 @@ If step 4 returns anything other than `"missing"`, the slice is not correctly la
 - The sessions bind mount (`/var/lib/minions/sessions:/sessions`) should live on a local ext4/xfs filesystem. Stat-poll-based `fs.watchFile` works on NFS/SMB but with worse latency.
 - The engine does **not** manage container lifecycle in v1. The operator is responsible for starting, stopping, and restarting `minions-worker`.
 - Cross-host Docker (`DOCKER_HOST=tcp://...`) is not supported in v1.
+
+## Workspace v2 (slice 14)
+
+Slice 14 replaces the named Docker volume `minions-worker-workspace` with a host-bind mount. This allows the host engine to create and tear down git worktrees that the container mounts at the same path.
+
+### New env var: `HOST_WORKSPACE_ROOT`
+
+Before running `docker compose up`, set `HOST_WORKSPACE_ROOT` to the host directory that will be bind-mounted to `/workspace` inside the container:
+
+```sh
+export HOST_WORKSPACE_ROOT=/var/lib/minions/workspaces
+```
+
+The directory must exist and be owned by uid/gid 1001:
+
+```sh
+sudo mkdir -p /var/lib/minions/workspaces
+sudo chown 1001:1001 /var/lib/minions/workspaces
+```
+
+### Migration from named volume
+
+If you previously ran with the named volume, delete it after stopping the container:
+
+```sh
+docker compose down
+docker volume rm minions-worker-workspace
+```
+
+Then set `HOST_WORKSPACE_ROOT` and bring the stack back up.
+
+### How workspace mode is selected
+
+`EngineConfig.repoPath` controls workspace backend selection:
+
+| `repoPath` set? | `workspace` set? | Backend |
+|---|---|---|
+| No | No | `StubWorkspaceBackend` (deterministic stubs, no git ops) |
+| Yes | No | `GitWorktreeWorkspaceBackend` (real git worktrees under `repoPath-worktrees/`) |
+| — | Yes | Provided backend (used as-is) |
+
+`workspaceRoot` defaults to `${dirname(repoPath)}/${basename(repoPath)}-worktrees`. `containerWorkspaceRoot` defaults to `workspaceRoot` for local mode; override it when the host and container see different paths for the workspace root.

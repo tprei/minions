@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { dirname } from "node:path";
+import { dirname, basename, join } from "node:path";
 import { runBootRecovery } from "./application/boot.js";
 import type { BootRecoveryReport, BootRespawnContext } from "./application/boot.js";
 import { applyCommand } from "./application/commands.js";
@@ -14,6 +14,10 @@ import { SQLiteWorkflowRepository } from "./persistence/sqlite-repo.js";
 import type { ProviderPlugin } from "./plugins/provider-plugin.js";
 import type { RuntimeBackend } from "./plugins/runtime-backend.js";
 import { StubRuntimeBackend } from "./plugins/stub-runtime.js";
+import type { WorkspaceBackend } from "./plugins/workspace-backend.js";
+import { GitClient } from "./plugins/git/git-client.js";
+import { GitWorktreeWorkspaceBackend } from "./plugins/workspace/git-worktree-backend.js";
+import { StubWorkspaceBackend } from "./plugins/workspace/stub-workspace.js";
 import { createServer } from "./transport/server.js";
 import type { WorkflowEvent } from "./domain/events.js";
 
@@ -26,6 +30,11 @@ export interface EngineConfig {
   staleReadyMs?: number;
   staleGateMs?: number;
   now?: () => string;
+  workspace?: WorkspaceBackend;
+  repoPath?: string;
+  workspaceRoot?: string;
+  containerWorkspaceRoot?: string;
+  gitCommandPrefix?: readonly string[];
 }
 
 export interface Engine {
@@ -42,6 +51,26 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   const now = config.now ?? (() => new Date().toISOString());
   const staleReadyMs = config.staleReadyMs ?? 5 * 60 * 1000;
   const staleGateMs = config.staleGateMs ?? 30 * 60 * 1000;
+
+  let workspace: WorkspaceBackend;
+  if (config.workspace) {
+    workspace = config.workspace;
+  } else if (config.repoPath) {
+    const gitClientConfig = config.gitCommandPrefix !== undefined
+      ? { commandPrefix: config.gitCommandPrefix }
+      : {};
+    const gitClient = new GitClient(gitClientConfig);
+    const workspaceRoot = config.workspaceRoot ?? join(dirname(config.repoPath), `${basename(config.repoPath)}-worktrees`);
+    const containerWorkspaceRoot = config.containerWorkspaceRoot ?? workspaceRoot;
+    workspace = await GitWorktreeWorkspaceBackend.create({
+      gitClient,
+      repoPath: config.repoPath,
+      workspaceRoot,
+      containerWorkspaceRoot,
+    });
+  } else {
+    workspace = new StubWorkspaceBackend();
+  }
 
   const repo = new SQLiteWorkflowRepository(config.dbPath);
   const recoveryService = createRecoveryService(repo, executor, runtime, now);
@@ -73,6 +102,9 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
           runtimeSessionId: ctx.runtimeSessionId,
           provider,
           runtime,
+          workspace,
+          // workspaceId from task state; if absent the cleanup is a no-op (stub handles it)
+          workspaceId: ctx.workspaceId ?? "",
           applyCommand: (cmd) => applyCommand(repo, cmd),
           publish: (providerEvent) => {
             const envelope: WorkflowEvent = {
@@ -108,6 +140,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       applyCommand: (cmd) => applyCommand(repo, cmd),
       providerFactory: config.providerFactory,
       runtime,
+      workspace,
       now,
       spawnOrchestrator: spawnTracked,
     });
@@ -116,6 +149,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       applyCommand: (cmd) => applyCommand(repo, cmd),
       providerFactory: config.providerFactory,
       runtime,
+      workspace,
       now,
       spawnOrchestrator: spawnTracked,
     });

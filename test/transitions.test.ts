@@ -494,3 +494,51 @@ describe("workflow status derivation", () => {
     expect(next.status).toBe("cancelled");
   });
 });
+
+describe("mark-running workspaceId", () => {
+  it("writes workspaceId when provided in command", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      workspaceId: "ws-wf1_task1",
+      now,
+    });
+
+    expect(workflow.graph["task-1:task"]?.workspaceId).toBe("ws-wf1_task1");
+  });
+
+  it("does not write workspaceId when not provided", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+
+    expect(workflow.graph["task-1:task"]?.workspaceId).toBeUndefined();
+  });
+
+  it("terminal transitions do not clear workspaceId", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      workspaceId: "ws-wf1_task1",
+      now,
+    });
+    workflow = transitionTask(workflow, {
+      kind: "complete-runtime",
+      taskId: "task-1:task",
+      now,
+    });
+
+    expect(workflow.graph["task-1:task"]?.workspaceId).toBe("ws-wf1_task1");
+  });
+});

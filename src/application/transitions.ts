@@ -34,6 +34,7 @@ export interface TransitionCommand {
   artifacts?: Artifact[];
   passed?: boolean;
   reason?: string;
+  workspaceId?: string;
   now: string;
 }
 
@@ -85,8 +86,10 @@ const TRANSITIONS: Record<TransitionKind, TransitionRule> = {
         ...(command.providerSessionRef ? { providerSessionRef: command.providerSessionRef } : {}),
         startedAt: command.now,
       };
+      const patch: Partial<TaskNode> = { executionStatus: "running", sessionId: command.sessionId };
+      if (command.workspaceId !== undefined) patch.workspaceId = command.workspaceId;
       return {
-        patch: { executionStatus: "running", sessionId: command.sessionId },
+        patch,
         runEffect: { kind: "append", run },
       };
     },

@@ -7,6 +7,7 @@ import { NoopRestackExecutor } from "../../src/application/restack-executor.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
 import { StubRuntimeBackend } from "../../src/plugins/stub-runtime.js";
 import { StubProviderPlugin } from "../../src/plugins/providers/stub.js";
+import { StubWorkspaceBackend } from "../../src/plugins/workspace/stub-workspace.js";
 import { RunOrchestrator } from "../../src/application/run-orchestrator.js";
 import type { RunOrchestratorDeps } from "../../src/application/run-orchestrator.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
@@ -578,6 +579,8 @@ describe("runBootRecovery — spawnOrchestrator", () => {
           runtimeSessionId: ctx.runtimeSessionId,
           provider,
           runtime,
+          workspace: new StubWorkspaceBackend(),
+          workspaceId: ctx.workspaceId ?? "",
           applyCommand: (cmd) => applyCommand(repo, cmd),
           publish: () => {},
           now: () => staleNow,

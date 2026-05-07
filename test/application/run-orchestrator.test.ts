@@ -4,6 +4,7 @@ import { DomainError } from "../../src/domain/errors.js";
 import type { Command, CommandResult } from "../../src/application/commands.js";
 import type { RuntimeBackend, RuntimeAttachOptions, RuntimeOutputChunk } from "../../src/plugins/runtime-backend.js";
 import { StubProviderPlugin } from "../../src/plugins/providers/stub.js";
+import { StubWorkspaceBackend } from "../../src/plugins/workspace/stub-workspace.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
 import type { ProviderEvent } from "../../src/plugins/provider-plugin.js";
 import type { RuntimeProbeState } from "../../src/application/recovery.js";
@@ -60,6 +61,8 @@ function makeOrchestrator(
     runtimeSessionId: "session-1",
     provider,
     runtime,
+    workspace: new StubWorkspaceBackend(),
+    workspaceId: "stub-wf1_task1",
     applyCommand,
     publish: publish ?? (() => {}),
     now: () => now,
@@ -226,6 +229,8 @@ describe("RunOrchestrator", () => {
       runtimeSessionId: "session-1",
       provider,
       runtime,
+      workspace: new StubWorkspaceBackend(),
+      workspaceId: "stub-wf1_task1",
       applyCommand,
       publish: () => {},
       now: () => now,
@@ -292,6 +297,8 @@ describe("RunOrchestrator", () => {
       runtimeSessionId: "session-1",
       provider,
       runtime,
+      workspace: new StubWorkspaceBackend(),
+      workspaceId: "stub-wf1_task1",
       applyCommand,
       publish: () => {},
       now: () => now,
@@ -495,5 +502,126 @@ describe("RunOrchestrator", () => {
     expect(completeRuntimeAttempts).toBe(2);
     expect(calls.filter((k) => k === "complete-runtime")).toHaveLength(2);
     expect(calls).not.toContain("mark-interrupted");
+  });
+
+  it("post complete-runtime: workspace.cleanup called with the correct workspaceId", async () => {
+    const applyCommand = vi.fn(async (_cmd: Command): Promise<CommandResult> => makeCommandResult());
+    const workspace = new StubWorkspaceBackend();
+    const cleanupSpy = vi.spyOn(workspace, "cleanup");
+
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "ref-x" };
+    const chunks = makeChunks(["line-1"], 0);
+    const provider = new StubProviderPlugin({ frames: [[finalEvent]] });
+    const runtime = makeRuntime(chunks);
+
+    const orch = new RunOrchestrator({
+      workflowId: "wf-1",
+      taskId: "task-1",
+      runId: "run-1",
+      runtimeSessionId: "session-1",
+      provider,
+      runtime,
+      workspace,
+      workspaceId: "ws-wf1_task1",
+      applyCommand,
+      publish: () => {},
+      now: () => now,
+    });
+    await orch.run();
+
+    expect(cleanupSpy).toHaveBeenCalledOnce();
+    expect(cleanupSpy).toHaveBeenCalledWith("ws-wf1_task1");
+  });
+
+  it("post mark-interrupted: workspace.cleanup called", async () => {
+    const applyCommand = vi.fn(async (_cmd: Command): Promise<CommandResult> => makeCommandResult());
+    const workspace = new StubWorkspaceBackend();
+    const cleanupSpy = vi.spyOn(workspace, "cleanup");
+
+    const chunks = makeChunks(["line-1"], 0);
+    const provider = new StubProviderPlugin({ frames: [] });
+    const runtime = makeRuntime(chunks, new Error("stream exploded"));
+
+    const orch = new RunOrchestrator({
+      workflowId: "wf-1",
+      taskId: "task-1",
+      runId: "run-1",
+      runtimeSessionId: "session-1",
+      provider,
+      runtime,
+      workspace,
+      workspaceId: "ws-wf1_task1",
+      applyCommand,
+      publish: () => {},
+      now: () => now,
+    });
+    await orch.run();
+
+    expect(cleanupSpy).toHaveBeenCalledOnce();
+    expect(cleanupSpy).toHaveBeenCalledWith("ws-wf1_task1");
+  });
+
+  it("workspace.cleanup throw is swallowed; orchestrator exits cleanly", async () => {
+    const applyCommand = vi.fn(async (_cmd: Command): Promise<CommandResult> => makeCommandResult());
+    const workspace = new StubWorkspaceBackend();
+    vi.spyOn(workspace, "cleanup").mockRejectedValue(new Error("cleanup failed hard"));
+
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "ref-x" };
+    const chunks = makeChunks(["line-1"], 0);
+    const provider = new StubProviderPlugin({ frames: [[finalEvent]] });
+    const runtime = makeRuntime(chunks);
+
+    const orch = new RunOrchestrator({
+      workflowId: "wf-1",
+      taskId: "task-1",
+      runId: "run-1",
+      runtimeSessionId: "session-1",
+      provider,
+      runtime,
+      workspace,
+      workspaceId: "ws-wf1_task1",
+      applyCommand,
+      publish: () => {},
+      now: () => now,
+    });
+    await expect(orch.run()).resolves.toBeUndefined();
+  });
+
+  it("signal-abort path does NOT call workspace.cleanup", async () => {
+    const applyCommand = vi.fn(async (_cmd: Command): Promise<CommandResult> => makeCommandResult());
+    const workspace = new StubWorkspaceBackend();
+    const cleanupSpy = vi.spyOn(workspace, "cleanup");
+
+    const controller = new AbortController();
+    controller.abort();
+
+    const runtime: RuntimeBackend = {
+      start: vi.fn(),
+      stop: vi.fn(),
+      probe: vi.fn().mockResolvedValue("live" as RuntimeProbeState),
+      attach(_sessionId: string, _opts?: RuntimeAttachOptions): AsyncIterable<RuntimeOutputChunk> {
+        return { [Symbol.asyncIterator]: async function* () {} };
+      },
+    };
+
+    const provider = new StubProviderPlugin({ frames: [] });
+    const orch = new RunOrchestrator({
+      workflowId: "wf-1",
+      taskId: "task-1",
+      runId: "run-1",
+      runtimeSessionId: "session-1",
+      provider,
+      runtime,
+      workspace,
+      workspaceId: "ws-wf1_task1",
+      applyCommand,
+      publish: () => {},
+      now: () => now,
+      signal: controller.signal,
+    });
+
+    await orch.run();
+
+    expect(cleanupSpy).not.toHaveBeenCalled();
   });
 });

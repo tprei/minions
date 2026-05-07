@@ -6,11 +6,10 @@ services:
     user: "1001:1001"
     volumes:
       - minions-worker-home:/home/minions
-      - minions-worker-workspace:/workspace
+      - ${HOST_WORKSPACE_ROOT:?HOST_WORKSPACE_ROOT must be set}:/workspace
       - minions-worker-cache:/cache
       - /var/lib/minions/sessions:/sessions
 
 volumes:
   minions-worker-home:
-  minions-worker-workspace:
   minions-worker-cache:
