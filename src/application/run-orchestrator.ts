@@ -71,13 +71,13 @@ export class RunOrchestrator {
 
         const effectiveSessionRef = event.sessionRef || latestSessionRef;
 
-        if (effectiveSessionRef !== undefined || latestOffset !== undefined) {
-          const patch: { providerSessionRef?: string; outputOffset?: number } = {};
-          if (effectiveSessionRef) patch.providerSessionRef = effectiveSessionRef;
-          if (latestOffset !== undefined) patch.outputOffset = latestOffset;
-
+        // Only persist providerSessionRef on the success path — never outputOffset.
+        // outputOffset is for resume on interrupted runs; writing it here would advance
+        // the offset past final before complete-runtime is durable, causing a
+        // crash-between-update-run-and-complete-runtime to miss the final on re-spawn.
+        if (effectiveSessionRef !== undefined) {
           try {
-            await dispatch({ kind: "update-run", taskId, ...patch, now: now() });
+            await dispatch({ kind: "update-run", taskId, providerSessionRef: effectiveSessionRef, now: now() });
           } catch (err) {
             if (isStale(err)) {
               console.error("run-orchestrator stale session on update-run, exiting:", (err as DomainError).message);

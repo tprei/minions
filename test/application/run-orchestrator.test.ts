@@ -86,7 +86,8 @@ describe("RunOrchestrator", () => {
     expect(updateCall).toBeDefined();
     const t = (updateCall![0] as Extract<Command, { kind: "transition-task" }>).transition;
     expect(t.providerSessionRef).toBe("abc-ref");
-    expect(typeof t.outputOffset).toBe("number");
+    // outputOffset must NOT be written on the success path — prevents offset-after-final race
+    expect(t.outputOffset).toBeUndefined();
   });
 
   it("stream throws mid-iteration → best-effort update-run with offset then mark-interrupted", async () => {
@@ -109,7 +110,7 @@ describe("RunOrchestrator", () => {
     expect(typeof t.outputOffset).toBe("number");
   });
 
-  it("empty final.sessionRef with prior offset → update-run only writes outputOffset, complete-runtime fires", async () => {
+  it("empty final.sessionRef with no prior sessionRef → no update-run dispatched, complete-runtime fires", async () => {
     const calls: string[] = [];
     const applyCommand = vi.fn(async (cmd: Command): Promise<CommandResult> => {
       if (cmd.kind === "transition-task") calls.push(cmd.transition.kind);
@@ -123,14 +124,7 @@ describe("RunOrchestrator", () => {
     const orchestrator = makeOrchestrator([[assistantEvent], [finalEvent]], chunks, applyCommand);
     await orchestrator.run();
 
-    expect(calls).toEqual(["update-run", "complete-runtime"]);
-
-    const updateCall = applyCommand.mock.calls.find(
-      ([cmd]) => cmd.kind === "transition-task" && cmd.transition.kind === "update-run",
-    );
-    const t = (updateCall![0] as Extract<Command, { kind: "transition-task" }>).transition;
-    expect(t.providerSessionRef).toBeUndefined();
-    expect(typeof t.outputOffset).toBe("number");
+    expect(calls).toEqual(["complete-runtime"]);
   });
 
   it("stream completes without final and without offset → mark-interrupted only, no update-run", async () => {
@@ -235,5 +229,60 @@ describe("RunOrchestrator", () => {
     await orch.run();
 
     expect(capturedAttachOpts?.fromOffset).toBe(42);
+  });
+
+  it("complete-runtime crash: success-path update-run carried only providerSessionRef (no outputOffset)", async () => {
+    // Simulates: crash between update-run and complete-runtime on the success path.
+    // On re-spawn the orchestrator replays from the prior (un-advanced) offset and
+    // re-emits final, so the run eventually closes correctly.
+    const updateRunTransitions: Array<Record<string, unknown>> = [];
+    const calls: string[] = [];
+    const applyCommand = vi.fn(async (cmd: Command): Promise<CommandResult> => {
+      if (cmd.kind === "transition-task") {
+        calls.push(cmd.transition.kind);
+        if (cmd.transition.kind === "update-run") {
+          updateRunTransitions.push(cmd.transition as unknown as Record<string, unknown>);
+          return makeCommandResult();
+        }
+        if (cmd.transition.kind === "complete-runtime") {
+          throw new Error("simulated crash before complete-runtime persisted");
+        }
+      }
+      return makeCommandResult();
+    });
+
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "abc" };
+    const chunks = makeChunks(["line-1", "line-2"], 50);
+
+    const orchestrator = makeOrchestrator([[finalEvent]], chunks, applyCommand);
+    // complete-runtime throw is caught by the outer catch → orchestrator calls mark-interrupted
+    await orchestrator.run();
+
+    // The success-path update-run must have carried providerSessionRef but NOT outputOffset
+    const successPathPatch = updateRunTransitions.find((t) => t["providerSessionRef"] === "abc");
+    expect(successPathPatch).toBeDefined();
+    expect(successPathPatch!["outputOffset"]).toBeUndefined();
+  });
+
+  it("failure path (stream throws): update-run writes outputOffset for resume, then mark-interrupted", async () => {
+    const updateRunTransitions: Array<Record<string, unknown>> = [];
+    const calls: string[] = [];
+    const applyCommand = vi.fn(async (cmd: Command): Promise<CommandResult> => {
+      if (cmd.kind === "transition-task") {
+        calls.push(cmd.transition.kind);
+        if (cmd.transition.kind === "update-run") {
+          updateRunTransitions.push(cmd.transition as unknown as Record<string, unknown>);
+        }
+      }
+      return makeCommandResult();
+    });
+
+    const chunks = makeChunks(["line-1"], 0);
+    const orchestrator = makeOrchestrator([], chunks, applyCommand, new Error("stream exploded"));
+    await orchestrator.run();
+
+    expect(calls).toEqual(["update-run", "mark-interrupted"]);
+    expect(updateRunTransitions).toHaveLength(1);
+    expect(typeof updateRunTransitions[0]!["outputOffset"]).toBe("number");
   });
 });

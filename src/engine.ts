@@ -44,8 +44,11 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   const repo = new SQLiteWorkflowRepository(config.dbPath);
   const recoveryService = createRecoveryService(repo, executor, runtime, now);
 
+  const activeOrchestrators = new Set<{ controller: AbortController; promise: Promise<void> }>();
+
   const spawnOrchestrator = config.providerFactory
     ? (ctx: BootRespawnContext) => {
+        const controller = new AbortController();
         const provider = config.providerFactory!();
         const deps: RunOrchestratorDeps = {
           workflowId: ctx.workflowId,
@@ -55,10 +58,19 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
           runtime,
           applyCommand: (cmd) => applyCommand(repo, cmd),
           now,
+          signal: controller.signal,
         };
         if (ctx.fromOffset !== undefined) deps.fromOffset = ctx.fromOffset;
         const orch = new RunOrchestrator(deps);
-        orch.run().catch((err) => console.error("boot run-orchestrator error:", err));
+        const entry: { controller: AbortController; promise: Promise<void> } = {
+          controller,
+          promise: undefined as unknown as Promise<void>,
+        };
+        entry.promise = orch
+          .run()
+          .catch((err) => console.error("boot run-orchestrator error:", err))
+          .finally(() => activeOrchestrators.delete(entry));
+        activeOrchestrators.add(entry);
       }
     : undefined;
 
@@ -90,6 +102,10 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     bootReport,
     dataDir,
     async close() {
+      for (const entry of activeOrchestrators) {
+        entry.controller.abort();
+      }
+      await Promise.all([...activeOrchestrators].map((e) => e.promise));
       repo.close();
     },
   };
