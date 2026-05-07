@@ -2,6 +2,8 @@ import type { Hono } from "hono";
 import { dirname, basename, join, isAbsolute, resolve, relative } from "node:path";
 import { runBootRecovery } from "./application/boot.js";
 import type { BootRecoveryReport, BootRespawnContext } from "./application/boot.js";
+import type { SCMPlugin } from "./plugins/scm-plugin.js";
+import type { PollCadence } from "./application/ci-babysitter-service.js";
 import { applyCommand } from "./application/commands.js";
 import { ContinueTaskService } from "./application/continue-task-service.js";
 import { RetryTaskService } from "./application/retry-task-service.js";
@@ -68,6 +70,12 @@ export interface EngineConfig {
   log?: Logger;
   logLevel?: Level;
   logSinks?: Sink[];
+  /** integration-test seam: bypass GitHubScmPlugin construction. */
+  scm?: SCMPlugin;
+  /** integration-test seam: bypass default GitHubClient construction. */
+  githubClient?: GitHubClient;
+  /** integration-test seam: override CIBabysitter polling cadence. */
+  ciBabysitterCadence?: PollCadence;
 }
 
 function resolveVapid(config: EngineConfig): VapidConfig | undefined {
@@ -251,14 +259,28 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   let ciBabysitterAbort: AbortController | undefined;
 
   const githubToken = config.githubToken ?? process.env["MWF_GITHUB_TOKEN"];
-  if (githubToken && config.githubRepo) {
+  const scmOverride = config.scm;
+  const ghClientOverride = config.githubClient;
+  const githubEnabled = (githubToken && config.githubRepo) ||
+                        (config.githubRepo && (scmOverride !== undefined || ghClientOverride !== undefined));
+
+  if (githubEnabled && config.githubRepo) {
     if (workspace instanceof StubWorkspaceBackend) {
-      throw new Error("githubToken + githubRepo requires a real workspace backend (set repoPath)");
+      throw new Error("github integration requires a real workspace backend (set repoPath)");
     }
     const gitClient = sharedGitClient ?? new GitClient();
-    const bucket = new TokenBucket({ capacity: 20, refillPerSec: 10 });
-    const ghClient = new GitHubClient({ token: githubToken, bucket, log: log.child({ component: "github-client" }) });
-    const scm = new GitHubScmPlugin({ github: ghClient, git: gitClient, token: githubToken });
+
+    let ghClient: GitHubClient | undefined;
+    if (ghClientOverride !== undefined) {
+      ghClient = ghClientOverride;
+    } else if (githubToken) {
+      const bucket = new TokenBucket({ capacity: 20, refillPerSec: 10 });
+      ghClient = new GitHubClient({ token: githubToken, bucket, log: log.child({ component: "github-client" }) });
+    }
+
+    const scm: SCMPlugin = scmOverride
+      ?? new GitHubScmPlugin({ github: ghClient!, git: gitClient, token: githubToken! });
+
     serverDeps.mergeService = new MergeService({
       repo,
       applyCommand: (cmd) => applyCommand(repo, cmd),
@@ -270,9 +292,9 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       log: log.child({ component: "merge" }),
     });
 
-    if (config.providerFactory && serverDeps.continueTaskService) {
+    if (config.providerFactory && serverDeps.continueTaskService && ghClient) {
       ciBabysitterAbort = new AbortController();
-      const babysitter = new CIBabysitterService({
+      const babysitterDeps: ConstructorParameters<typeof CIBabysitterService>[0] = {
         workflowRepo: repo,
         github: ghClient,
         repoCoords: config.githubRepo,
@@ -282,7 +304,11 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
         signal: ciBabysitterAbort.signal,
         now,
         log: log.child({ component: "ci-babysitter" }),
-      });
+      };
+      if (config.ciBabysitterCadence !== undefined) {
+        babysitterDeps.cadence = config.ciBabysitterCadence;
+      }
+      const babysitter = new CIBabysitterService(babysitterDeps);
       serverDeps.ciBabysitter = babysitter;
       const recoverableWorkflows = await repo.listRecoverable();
       for (const w of recoverableWorkflows) babysitter.attach(w.id);
