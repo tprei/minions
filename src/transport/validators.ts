@@ -191,5 +191,22 @@ export function validateWorkflowSpec(body: unknown): ValidationResult {
     }
   }
 
+  const policy = (body as Record<string, unknown>)["policy"];
+  if (policy !== undefined) {
+    if (!isObject(policy)) {
+      return { ok: false, failure: { field: "policy", expected: "object", message: 'field "policy" must be object' } };
+    }
+    const obj = policy as Record<string, unknown>;
+    if (obj["maxConcurrent"] !== undefined && typeof obj["maxConcurrent"] !== "number") {
+      return { ok: false, failure: { field: "policy.maxConcurrent", expected: "number or undefined", message: 'field "policy.maxConcurrent" must be number or undefined' } };
+    }
+    if (obj["autoLand"] !== undefined && typeof obj["autoLand"] !== "boolean") {
+      return { ok: false, failure: { field: "policy.autoLand", expected: "boolean or undefined", message: 'field "policy.autoLand" must be boolean or undefined' } };
+    }
+    if (obj["autoMergeOnGreen"] !== undefined && typeof obj["autoMergeOnGreen"] !== "boolean") {
+      return { ok: false, failure: { field: "policy.autoMergeOnGreen", expected: "boolean or undefined", message: 'field "policy.autoMergeOnGreen" must be boolean or undefined' } };
+    }
+  }
+
   return { ok: true };
 }

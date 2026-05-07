@@ -119,9 +119,11 @@ export interface GraphOperation {
   updatedAt: string;
 }
 
-// Per-workflow scheduling constraints. Currently just runtime concurrency.
+// Per-workflow scheduling constraints.
 export interface WorkflowPolicy {
   maxConcurrent: number;
+  autoLand: boolean;
+  autoMergeOnGreen: boolean;
 }
 
 // Aggregate root. Owns its task graph and its in-flight graph operations.

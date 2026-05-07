@@ -140,7 +140,7 @@ describe.skipIf(process.env["MWF_HAS_DOCKER"] !== "1")("TmuxRuntimeBackend docke
         },
       },
       operations: {},
-      policy: { maxConcurrent: 1 },
+      policy: { maxConcurrent: 1, autoLand: false, autoMergeOnGreen: false },
       version: 1,
       createdAt: new Date(now - 5000).toISOString(),
       updatedAt: new Date(now - 5000).toISOString(),

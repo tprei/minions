@@ -44,6 +44,8 @@ export interface GhPRDetail {
   mergeable: boolean | null;
   mergeableState: string | null;
   state: string;
+  merged: boolean;
+  mergeCommitSha?: string;
 }
 
 export interface GhMergeResult {
@@ -176,6 +178,8 @@ export class GitHubClient {
       mergeable: boolean | null;
       mergeable_state: string | null;
       state: string;
+      merged: boolean;
+      merge_commit_sha: string | null;
     };
     return {
       number: pr.number,
@@ -186,6 +190,8 @@ export class GitHubClient {
       mergeable: pr.mergeable,
       mergeableState: pr.mergeable_state,
       state: pr.state,
+      merged: pr.merged,
+      ...(pr.merge_commit_sha !== null ? { mergeCommitSha: pr.merge_commit_sha } : {}),
     };
   }
 

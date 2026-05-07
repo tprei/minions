@@ -21,6 +21,8 @@ export interface PullRequestDetail {
   baseRef: string;
   mergeable: boolean | null;
   mergeableState: string | null;
+  merged: boolean;
+  mergeCommitSha?: string;
 }
 
 export interface OpenPullRequestInput {

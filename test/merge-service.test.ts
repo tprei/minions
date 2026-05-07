@@ -24,7 +24,7 @@ function makeScm(overrides: Partial<SCMPlugin> = {}): SCMPlugin {
     pushBranch: vi.fn().mockResolvedValue(undefined),
     openPullRequest: vi.fn().mockResolvedValue({ number: 42, url: "https://github.com/o/r/pull/42", headRef: "branch", baseRef: "main" }),
     findPullRequest: vi.fn().mockResolvedValue(null),
-    getPullRequest: vi.fn().mockResolvedValue({ number: 42, url: "https://github.com/o/r/pull/42", headSha: "sha123", headRef: "branch", baseRef: "main", mergeable: true, mergeableState: "clean" }),
+    getPullRequest: vi.fn().mockResolvedValue({ number: 42, url: "https://github.com/o/r/pull/42", headSha: "sha123", headRef: "branch", baseRef: "main", mergeable: true, mergeableState: "clean", merged: false }),
     mergePullRequest: vi.fn().mockResolvedValue({ merged: true, sha: "merged-sha" } satisfies MergeOutcome),
     ...overrides,
   };
@@ -231,9 +231,9 @@ describe("MergeService", () => {
       getPullRequest: vi.fn().mockImplementation(async () => {
         getPRCallCount++;
         if (getPRCallCount === 1) {
-          return { number: 42, url: "https://github.com/o/r/pull/42", headSha: "sha123", headRef: "branch", baseRef: "main", mergeable: null, mergeableState: null };
+          return { number: 42, url: "https://github.com/o/r/pull/42", headSha: "sha123", headRef: "branch", baseRef: "main", mergeable: null, mergeableState: null, merged: false };
         }
-        return { number: 42, url: "https://github.com/o/r/pull/42", headSha: "sha123", headRef: "branch", baseRef: "main", mergeable: true, mergeableState: "clean" };
+        return { number: 42, url: "https://github.com/o/r/pull/42", headSha: "sha123", headRef: "branch", baseRef: "main", mergeable: true, mergeableState: "clean", merged: false };
       }),
     });
     const workspace = makeWorkspace();
@@ -258,7 +258,7 @@ describe("MergeService", () => {
     const scm = makeScm({
       getPullRequest: vi.fn().mockResolvedValue({
         number: 42, url: "https://github.com/o/r/pull/42", headSha: "sha123", headRef: "branch", baseRef: "main",
-        mergeable: null, mergeableState: null,
+        mergeable: null, mergeableState: null, merged: false,
       }),
     });
     const workspace = makeWorkspace();
@@ -392,5 +392,183 @@ describe("MergeService", () => {
 
     await expect(service.merge({ workflowId: "wf-1", taskId: "wf-1:task" })).rejects.toBeDefined();
     expect(workspace.cleanup).not.toHaveBeenCalled();
+  });
+
+  it("openOnly happy path: phases 1–5 (openPR portion), task in pr-open, returns open-review CommandResult", async () => {
+    const { repo } = await buildWorkflow();
+    const scm = makeScm();
+    const workspace = makeWorkspace();
+
+    const service = new MergeService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      scm,
+      workspace,
+      repoCoords: { owner: "o", repo: "r" },
+      baseBranch: "main",
+      now: () => now,
+    });
+
+    const result = await service.openOnly({ workflowId: "wf-1", taskId: "wf-1:task" });
+
+    expect(result.workflow.graph["wf-1:task"]?.executionStatus).toBe("pr-open");
+    expect(scm.openPullRequest).toHaveBeenCalledOnce();
+    expect(scm.mergePullRequest).not.toHaveBeenCalled();
+    expect(workspace.cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("openOnly rebase conflict → merge-conflict transition, task in needs-review", async () => {
+    const { repo } = await buildWorkflow();
+    const scm = makeScm({
+      rebase: vi.fn().mockResolvedValue({ kind: "conflict", conflictPaths: ["src/foo.ts"] } satisfies MergeResult),
+    });
+    const workspace = makeWorkspace();
+
+    const service = new MergeService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      scm,
+      workspace,
+      repoCoords: { owner: "o", repo: "r" },
+      baseBranch: "main",
+      now: () => now,
+    });
+
+    const result = await service.openOnly({ workflowId: "wf-1", taskId: "wf-1:task" });
+
+    expect(result.workflow.graph["wf-1:task"]?.executionStatus).toBe("needs-review");
+    expect(scm.mergePullRequest).not.toHaveBeenCalled();
+    expect(workspace.cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("openOnly idempotent: second call against pr-open task returns without re-opening", async () => {
+    const { repo } = await buildWorkflow();
+    const prRef = { number: 42, url: "https://github.com/o/r/pull/42", headRef: "branch", baseRef: "main" };
+    let findPRCallCount = 0;
+    const scm = makeScm({
+      findPullRequest: vi.fn().mockImplementation(async () => {
+        findPRCallCount++;
+        return findPRCallCount === 1 ? null : prRef;
+      }),
+    });
+    const workspace = makeWorkspace();
+
+    const service = new MergeService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      scm,
+      workspace,
+      repoCoords: { owner: "o", repo: "r" },
+      baseBranch: "main",
+      now: () => now,
+    });
+
+    await service.openOnly({ workflowId: "wf-1", taskId: "wf-1:task" });
+    expect(scm.openPullRequest).toHaveBeenCalledOnce();
+
+    const secondResult = await service.openOnly({ workflowId: "wf-1", taskId: "wf-1:task" });
+
+    expect(scm.openPullRequest).toHaveBeenCalledOnce();
+    expect(secondResult.workflow.graph["wf-1:task"]?.executionStatus).toBe("pr-open");
+  });
+
+  it("merge on pr-open task with prDetail.merged === true → skips mergePullRequest, fires merge-task", async () => {
+    const { repo } = await buildWorkflow();
+    const scm = makeScm({
+      getPullRequest: vi.fn().mockResolvedValue({
+        number: 42,
+        url: "https://github.com/o/r/pull/42",
+        headSha: "sha123",
+        headRef: "branch",
+        baseRef: "main",
+        mergeable: true,
+        mergeableState: "clean",
+        merged: true,
+        mergeCommitSha: "merged-sha-abc",
+      }),
+    });
+    const workspace = makeWorkspace();
+
+    const service = new MergeService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      scm,
+      workspace,
+      repoCoords: { owner: "o", repo: "r" },
+      baseBranch: "main",
+      now: () => now,
+    });
+
+    const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
+
+    expect(scm.mergePullRequest).not.toHaveBeenCalled();
+    expect(result.workflow.graph["wf-1:task"]?.executionStatus).toBe("merged");
+  });
+
+  it("merge happy path still works after refactor", async () => {
+    const { repo } = await buildWorkflow();
+    const scm = makeScm();
+    const workspace = makeWorkspace();
+
+    const service = new MergeService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      scm,
+      workspace,
+      repoCoords: { owner: "o", repo: "r" },
+      baseBranch: "main",
+      now: () => now,
+    });
+
+    const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
+    expect(result.workflow.graph["wf-1:task"]?.executionStatus).toBe("merged");
+  });
+
+  it("merge rebase conflict still fires merge-conflict after refactor", async () => {
+    const { repo } = await buildWorkflow();
+    const scm = makeScm({
+      rebase: vi.fn().mockResolvedValue({ kind: "conflict", conflictPaths: ["a.ts"] } satisfies MergeResult),
+    });
+    const workspace = makeWorkspace();
+
+    const service = new MergeService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      scm,
+      workspace,
+      repoCoords: { owner: "o", repo: "r" },
+      baseBranch: "main",
+      now: () => now,
+    });
+
+    const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
+    expect(result.workflow.graph["wf-1:task"]?.executionStatus).toBe("needs-review");
+  });
+
+  it("merge GitHub merged but internal transition fails 3x → throws MergeServiceError", async () => {
+    const { repo } = await buildWorkflow();
+    const scm = makeScm();
+    const workspace = makeWorkspace();
+    let mergeTaskAttempts = 0;
+    const applyCommandSpy = vi.fn().mockImplementation(async (cmd: Command) => {
+      if (cmd.kind === "transition-task" && "transition" in cmd && cmd.transition.kind === "merge-task") {
+        mergeTaskAttempts++;
+        throw new Error("simulated failure");
+      }
+      return applyCommand(repo, cmd);
+    });
+
+    const service = new MergeService({
+      repo,
+      applyCommand: applyCommandSpy,
+      scm,
+      workspace,
+      repoCoords: { owner: "o", repo: "r" },
+      baseBranch: "main",
+      now: () => now,
+    });
+
+    await expect(service.merge({ workflowId: "wf-1", taskId: "wf-1:task" })).rejects.toBeInstanceOf(MergeServiceError);
+    expect(mergeTaskAttempts).toBe(3);
   });
 });

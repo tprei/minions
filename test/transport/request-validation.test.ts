@@ -202,4 +202,75 @@ describe("request shape validation", () => {
     expect(body.details.field).toBe("prompt");
     expect(body.details.expected).toBe("non-empty string");
   });
+
+  it("POST /workflows with valid policy.autoLand:true accepted", async () => {
+    const { app } = makeApp();
+
+    const res = await postWorkflow(app, {
+      id: "wf-1",
+      kind: "single-task",
+      tasks: [{ id: "t1", title: "T", prompt: "P" }],
+      policy: { autoLand: true },
+    });
+
+    expect(res.status).toBe(201);
+  });
+
+  it("POST /workflows with valid policy.autoMergeOnGreen:true accepted", async () => {
+    const { app } = makeApp();
+
+    const res = await postWorkflow(app, {
+      id: "wf-1",
+      kind: "single-task",
+      tasks: [{ id: "t1", title: "T", prompt: "P" }],
+      policy: { autoMergeOnGreen: true },
+    });
+
+    expect(res.status).toBe(201);
+  });
+
+  it("POST /workflows with invalid policy.autoLand (string) rejected", async () => {
+    const { app } = makeApp();
+
+    const res = await postWorkflow(app, {
+      id: "wf-1",
+      kind: "single-task",
+      tasks: [{ id: "t1", title: "T", prompt: "P" }],
+      policy: { autoLand: "yes" },
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { code: string; details: { field: string } };
+    expect(body.code).toBe("invalid_request");
+    expect(body.details.field).toBe("policy.autoLand");
+  });
+
+  it("POST /workflows with invalid policy.autoMergeOnGreen (number) rejected", async () => {
+    const { app } = makeApp();
+
+    const res = await postWorkflow(app, {
+      id: "wf-1",
+      kind: "single-task",
+      tasks: [{ id: "t1", title: "T", prompt: "P" }],
+      policy: { autoMergeOnGreen: 1 },
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { code: string; details: { field: string } };
+    expect(body.code).toBe("invalid_request");
+    expect(body.details.field).toBe("policy.autoMergeOnGreen");
+  });
+
+  it("POST /workflows with policy:{} accepted (all defaults)", async () => {
+    const { app } = makeApp();
+
+    const res = await postWorkflow(app, {
+      id: "wf-1",
+      kind: "single-task",
+      tasks: [{ id: "t1", title: "T", prompt: "P" }],
+      policy: {},
+    });
+
+    expect(res.status).toBe(201);
+  });
 });

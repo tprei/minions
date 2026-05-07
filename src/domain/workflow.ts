@@ -55,6 +55,8 @@ export function createWorkflow(spec: WorkflowSpec, clock: Clock = systemClock): 
     operations: {},
     policy: {
       maxConcurrent: spec.policy?.maxConcurrent ?? 3,
+      autoLand: spec.policy?.autoLand ?? false,
+      autoMergeOnGreen: spec.policy?.autoMergeOnGreen ?? false,
     },
     version: 1,
     createdAt: now,

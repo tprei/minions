@@ -100,7 +100,17 @@ export class GitHubScmPlugin implements SCMPlugin {
 
   async getPullRequest(input: GetPullRequestInput): Promise<PullRequestDetail> {
     const detail = await this.github.getPR(input.owner, input.repo, input.number);
-    return detail;
+    return {
+      number: detail.number,
+      url: detail.url,
+      headSha: detail.headSha,
+      headRef: detail.headRef,
+      baseRef: detail.baseRef,
+      mergeable: detail.mergeable,
+      mergeableState: detail.mergeableState,
+      merged: detail.merged,
+      ...(detail.mergeCommitSha !== undefined ? { mergeCommitSha: detail.mergeCommitSha } : {}),
+    };
   }
 
   async mergePullRequest(input: MergePullRequestInput): Promise<MergeOutcome> {

@@ -30,6 +30,7 @@ import { GitHubScmPlugin } from "./plugins/github/github-scm-plugin.js";
 import { MergeService } from "./application/merge-service.js";
 import { CIBabysitterService } from "./application/ci-babysitter-service.js";
 import { QualityGateService } from "./application/quality-gate-service.js";
+import { CompletionDispatcher } from "./application/completion-dispatcher.js";
 import type { QualityPlugin } from "./plugins/quality-plugin.js";
 import type { WorkflowEvent } from "./domain/events.js";
 
@@ -259,6 +260,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
         repoCoords: config.githubRepo,
         applyCommand: (cmd) => applyCommand(repo, cmd),
         continueTaskService: serverDeps.continueTaskService,
+        mergeService: serverDeps.mergeService,
         signal: ciBabysitterAbort.signal,
         now,
       });
@@ -296,6 +298,22 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     }
   }
 
+  let completionDispatcherAbort: AbortController | undefined;
+
+  if (serverDeps.mergeService) {
+    completionDispatcherAbort = new AbortController();
+    const completionDispatcher = new CompletionDispatcher({
+      workflowRepo: repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      mergeService: serverDeps.mergeService,
+      signal: completionDispatcherAbort.signal,
+      now,
+    });
+    serverDeps.completionDispatcher = completionDispatcher;
+    const recoverableWorkflows = await repo.listRecoverable();
+    for (const w of recoverableWorkflows) completionDispatcher.attach(w.id);
+  }
+
   const server = createServer(serverDeps);
 
   return {
@@ -306,6 +324,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       pushAbort?.abort();
       ciBabysitterAbort?.abort();
       qualityAbort?.abort();
+      completionDispatcherAbort?.abort();
       for (const entry of activeOrchestrators) {
         entry.controller.abort();
       }

@@ -5,6 +5,7 @@ import type { GitHubClient } from "../plugins/github/github-client.js";
 import type { Command, CommandResult } from "./commands.js";
 import type { WorkflowRepository } from "./repository.js";
 import type { ContinueTaskService } from "./continue-task-service.js";
+import { MergeConflictError, MergeService, MergeServiceError } from "./merge-service.js";
 
 export interface PollCadenceInterval {
   afterMs: number;
@@ -47,6 +48,7 @@ export interface CIBabysitterServiceDeps {
   repoCoords: { owner: string; repo: string };
   applyCommand: (cmd: Command) => Promise<CommandResult>;
   continueTaskService: ContinueTaskService;
+  mergeService?: MergeService;
   signal: AbortSignal;
   now: () => string;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -299,7 +301,26 @@ export class CIBabysitterService {
       const failed = runs.filter((r) => r.conclusion !== undefined && FAILED_CONCLUSIONS.has(r.conclusion));
       if (failed.length === 0) {
         console.info(`ci-babysitter: all checks passed for task ${taskId}`);
-        return;
+
+        const refreshed = await workflowRepo.get(workflowId);
+        const refreshedTask = refreshed?.graph[taskId];
+        if (!refreshed || !refreshedTask || refreshedTask.executionStatus !== "pr-open") return;
+
+        if (!refreshed.policy.autoMergeOnGreen) return;
+        if (!this.deps.mergeService) return;
+
+        try {
+          await this.deps.mergeService.merge({ workflowId, taskId });
+          return;
+        } catch (err) {
+          if (err instanceof MergeConflictError) return;
+          if (err instanceof MergeServiceError) {
+            console.error(`ci-babysitter: catastrophic merge failure for ${workflowId}:${taskId}:`, err);
+            return;
+          }
+          console.error(`ci-babysitter: mergeService.merge threw for ${workflowId}:${taskId}, will not retry:`, err);
+          return;
+        }
       }
 
       const failureMessage = buildFailureMessage(prNumber, prUrl, failed);

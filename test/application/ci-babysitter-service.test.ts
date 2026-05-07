@@ -577,3 +577,307 @@ describe("CIBabysitterService", () => {
     infoSpy.mockRestore();
   });
 });
+
+import { MergeConflictError, MergeService, MergeServiceError } from "../../src/application/merge-service.js";
+import { createWorkflow } from "../../src/domain/workflow.js";
+
+function makeMergeService(overrides: Partial<MergeService> = {}): MergeService {
+  return {
+    openOnly: vi.fn().mockResolvedValue({ workflow: null, events: [] } as unknown as CommandResult),
+    merge: vi.fn().mockResolvedValue({ workflow: null, events: [] } as unknown as CommandResult),
+    ...overrides,
+  } as unknown as MergeService;
+}
+
+async function makeWorkflowWithAutoMergeOnGreen(repo: InMemoryWorkflowRepository, autoMergeOnGreen: boolean) {
+  const wf = createWorkflow({
+    id: WORKFLOW_ID,
+    kind: "single-task",
+    tasks: [{ id: TASK_ID, title: "T", prompt: "P" }],
+    policy: { maxConcurrent: 1, autoLand: true, autoMergeOnGreen },
+  }, now);
+  await repo.save(wf, []);
+  await applyCommand(repo, {
+    kind: "transition-task",
+    workflowId: WORKFLOW_ID,
+    transition: { kind: "mark-ready", taskId: TASK_ID, now: NOW },
+  });
+  await applyCommand(repo, {
+    kind: "transition-task",
+    workflowId: WORKFLOW_ID,
+    transition: { kind: "mark-running", taskId: TASK_ID, sessionId: "s1", now: NOW },
+  });
+  await applyCommand(repo, {
+    kind: "transition-task",
+    workflowId: WORKFLOW_ID,
+    transition: { kind: "complete-runtime", taskId: TASK_ID, now: NOW },
+  });
+  await applyCommand(repo, {
+    kind: "transition-task",
+    workflowId: WORKFLOW_ID,
+    transition: { kind: "start-finalization", taskId: TASK_ID, now: NOW },
+  });
+}
+
+describe("CIBabysitterService autoMerge", () => {
+  it("green CI + autoMergeOnGreen:false → no-op", async () => {
+    const repo = makeRepo();
+    await makeWorkflowWithAutoMergeOnGreen(repo, false);
+
+    const ctrl = new AbortController();
+    const listCheckRuns = vi.fn().mockResolvedValue([
+      { name: "ci", status: "completed", conclusion: "success" } satisfies GhCheckRun,
+    ]);
+    const github = makeGithub({ listCheckRuns });
+    const continueTaskService = makeContinueTaskService();
+    const mergeService = makeMergeService();
+
+    const service = new CIBabysitterService({
+      workflowRepo: repo,
+      github,
+      repoCoords: { owner: OWNER, repo: REPO },
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      continueTaskService,
+      mergeService,
+      signal: ctrl.signal,
+      now,
+      sleep: immediateSleep,
+      cadence: FAST_CADENCE,
+    });
+
+    service.attach(WORKFLOW_ID);
+    await new Promise((r) => setImmediate(r));
+
+    await openPR(repo);
+    await new Promise((r) => setTimeout(r, 100));
+    ctrl.abort();
+
+    expect(mergeService.merge).not.toHaveBeenCalled();
+  });
+
+  it("green CI + autoMergeOnGreen:true → calls mergeService.merge", async () => {
+    const repo = makeRepo();
+    await makeWorkflowWithAutoMergeOnGreen(repo, true);
+
+    const ctrl = new AbortController();
+    const listCheckRuns = vi.fn().mockResolvedValue([
+      { name: "ci", status: "completed", conclusion: "success" } satisfies GhCheckRun,
+    ]);
+    const github = makeGithub({ listCheckRuns });
+    const continueTaskService = makeContinueTaskService();
+    const mergeService = makeMergeService();
+
+    const service = new CIBabysitterService({
+      workflowRepo: repo,
+      github,
+      repoCoords: { owner: OWNER, repo: REPO },
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      continueTaskService,
+      mergeService,
+      signal: ctrl.signal,
+      now,
+      sleep: immediateSleep,
+      cadence: FAST_CADENCE,
+    });
+
+    service.attach(WORKFLOW_ID);
+    await new Promise((r) => setImmediate(r));
+
+    await openPR(repo);
+    await new Promise((r) => setTimeout(r, 100));
+    ctrl.abort();
+
+    expect(mergeService.merge).toHaveBeenCalledWith({ workflowId: WORKFLOW_ID, taskId: TASK_ID });
+  });
+
+  it("green CI + autoMergeOnGreen:true + MergeConflictError → bail", async () => {
+    const repo = makeRepo();
+    await makeWorkflowWithAutoMergeOnGreen(repo, true);
+
+    const ctrl = new AbortController();
+    const listCheckRuns = vi.fn().mockResolvedValue([
+      { name: "ci", status: "completed", conclusion: "success" } satisfies GhCheckRun,
+    ]);
+    const github = makeGithub({ listCheckRuns });
+    const continueTaskService = makeContinueTaskService();
+    const mergeService = makeMergeService({
+      merge: vi.fn().mockRejectedValue(new MergeConflictError("rebase_conflict", "conflict")),
+    });
+
+    const service = new CIBabysitterService({
+      workflowRepo: repo,
+      github,
+      repoCoords: { owner: OWNER, repo: REPO },
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      continueTaskService,
+      mergeService,
+      signal: ctrl.signal,
+      now,
+      sleep: immediateSleep,
+      cadence: FAST_CADENCE,
+    });
+
+    service.attach(WORKFLOW_ID);
+    await new Promise((r) => setImmediate(r));
+
+    await openPR(repo);
+    await new Promise((r) => setTimeout(r, 100));
+    ctrl.abort();
+
+    expect(mergeService.merge).toHaveBeenCalledOnce();
+    expect(continueTaskService.run).not.toHaveBeenCalled();
+  });
+
+  it("green CI + autoMergeOnGreen:true + MergeServiceError → log + bail", async () => {
+    const repo = makeRepo();
+    await makeWorkflowWithAutoMergeOnGreen(repo, true);
+
+    const ctrl = new AbortController();
+    const listCheckRuns = vi.fn().mockResolvedValue([
+      { name: "ci", status: "completed", conclusion: "success" } satisfies GhCheckRun,
+    ]);
+    const github = makeGithub({ listCheckRuns });
+    const continueTaskService = makeContinueTaskService();
+    const mergeService = makeMergeService({
+      merge: vi.fn().mockRejectedValue(new MergeServiceError("merge_state_inconsistent", {})),
+    });
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const service = new CIBabysitterService({
+      workflowRepo: repo,
+      github,
+      repoCoords: { owner: OWNER, repo: REPO },
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      continueTaskService,
+      mergeService,
+      signal: ctrl.signal,
+      now,
+      sleep: immediateSleep,
+      cadence: FAST_CADENCE,
+    });
+
+    service.attach(WORKFLOW_ID);
+    await new Promise((r) => setImmediate(r));
+
+    await openPR(repo);
+    await new Promise((r) => setTimeout(r, 100));
+    ctrl.abort();
+    consoleSpy.mockRestore();
+
+    expect(mergeService.merge).toHaveBeenCalledOnce();
+  });
+
+  it("green CI + autoMergeOnGreen:true + transient error → log + bail", async () => {
+    const repo = makeRepo();
+    await makeWorkflowWithAutoMergeOnGreen(repo, true);
+
+    const ctrl = new AbortController();
+    const listCheckRuns = vi.fn().mockResolvedValue([
+      { name: "ci", status: "completed", conclusion: "success" } satisfies GhCheckRun,
+    ]);
+    const github = makeGithub({ listCheckRuns });
+    const continueTaskService = makeContinueTaskService();
+    const mergeService = makeMergeService({
+      merge: vi.fn().mockRejectedValue(new Error("network timeout")),
+    });
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const service = new CIBabysitterService({
+      workflowRepo: repo,
+      github,
+      repoCoords: { owner: OWNER, repo: REPO },
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      continueTaskService,
+      mergeService,
+      signal: ctrl.signal,
+      now,
+      sleep: immediateSleep,
+      cadence: FAST_CADENCE,
+    });
+
+    service.attach(WORKFLOW_ID);
+    await new Promise((r) => setImmediate(r));
+
+    await openPR(repo);
+    await new Promise((r) => setTimeout(r, 100));
+    ctrl.abort();
+    consoleSpy.mockRestore();
+
+    expect(mergeService.merge).toHaveBeenCalledOnce();
+  });
+
+  it("green CI + autoMergeOnGreen:true + task no longer pr-open after re-read → bail", async () => {
+    const repo = makeRepo();
+    await makeWorkflowWithAutoMergeOnGreen(repo, true);
+
+    const ctrl = new AbortController();
+    const listCheckRuns = vi.fn().mockResolvedValue([
+      { name: "ci", status: "completed", conclusion: "success" } satisfies GhCheckRun,
+    ]);
+    const github = makeGithub({ listCheckRuns });
+    const continueTaskService = makeContinueTaskService();
+    const mergeService = makeMergeService();
+
+    const service = new CIBabysitterService({
+      workflowRepo: repo,
+      github,
+      repoCoords: { owner: OWNER, repo: REPO },
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      continueTaskService,
+      mergeService,
+      signal: ctrl.signal,
+      now,
+      sleep: immediateSleep,
+      cadence: FAST_CADENCE,
+    });
+
+    service.attach(WORKFLOW_ID);
+    await new Promise((r) => setImmediate(r));
+
+    await openPR(repo);
+
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: WORKFLOW_ID,
+      transition: { kind: "merge-task", taskId: TASK_ID, now: NOW },
+    });
+
+    await new Promise((r) => setTimeout(r, 100));
+    ctrl.abort();
+
+    expect(mergeService.merge).not.toHaveBeenCalled();
+  });
+
+  it("mergeService omitted from deps + autoMergeOnGreen:true → no-op", async () => {
+    const repo = makeRepo();
+    await makeWorkflowWithAutoMergeOnGreen(repo, true);
+
+    const ctrl = new AbortController();
+    const listCheckRuns = vi.fn().mockResolvedValue([
+      { name: "ci", status: "completed", conclusion: "success" } satisfies GhCheckRun,
+    ]);
+    const github = makeGithub({ listCheckRuns });
+    const continueTaskService = makeContinueTaskService();
+
+    const service = new CIBabysitterService({
+      workflowRepo: repo,
+      github,
+      repoCoords: { owner: OWNER, repo: REPO },
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      continueTaskService,
+      signal: ctrl.signal,
+      now,
+      sleep: immediateSleep,
+      cadence: FAST_CADENCE,
+    });
+
+    service.attach(WORKFLOW_ID);
+    await new Promise((r) => setImmediate(r));
+
+    await openPR(repo);
+    await new Promise((r) => setTimeout(r, 100));
+    ctrl.abort();
+
+    expect(continueTaskService.run).not.toHaveBeenCalled();
+  });
+});
