@@ -192,6 +192,32 @@ describe("mark-ready from needs-review", () => {
 
     expect(workflow.graph["task-1:task"]?.executionStatus).toBe("ready");
   });
+
+  it("clears stale sessionId when moving from needs-review to ready", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "stale-session",
+      now,
+    });
+    workflow = transitionTask(workflow, { kind: "mark-interrupted", taskId: "task-1:task", now });
+    expect(workflow.graph["task-1:task"]?.executionStatus).toBe("needs-review");
+
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+
+    expect(workflow.graph["task-1:task"]?.executionStatus).toBe("ready");
+    expect(workflow.graph["task-1:task"]?.sessionId).toBeUndefined();
+  });
+
+  it("mark-ready from pending leaves no sessionId (pending tasks never have one)", () => {
+    const workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    const after = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+
+    expect(after.graph["task-1:task"]?.executionStatus).toBe("ready");
+    expect(after.graph["task-1:task"]?.sessionId).toBeUndefined();
+  });
 });
 
 describe("mark-running with providerSessionRef", () => {

@@ -150,6 +150,32 @@ describe("ContinueTaskService", () => {
     expect(wfAfter!.graph["wf-1:task"]!.executionStatus).toBe("ready");
   });
 
+  it("sad path: provider.resume rejects → stale sessionId cleared, task recoverable by stale-ready-no-session rule", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const provider = new StubProviderPlugin({ frames: [] });
+    vi.spyOn(provider, "resume").mockRejectedValue(new Error("provider unavailable"));
+
+    await makeNeedsReviewTask(repo, "stale-ref");
+
+    const service = new ContinueTaskService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      providerFactory: () => provider,
+      runtime,
+      now: () => now,
+    });
+
+    await expect(
+      service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "continue" }),
+    ).rejects.toThrow("provider unavailable");
+
+    const wfAfter = await repo.get("wf-1");
+    const task = wfAfter!.graph["wf-1:task"]!;
+    expect(task.executionStatus).toBe("ready");
+    expect(task.sessionId).toBeUndefined();
+  });
+
   it("sad path: mark-running rejects → runtime.stop called for cleanup before error propagates", async () => {
     const repo = new InMemoryWorkflowRepository();
     const runtime = new StubRuntimeBackend();

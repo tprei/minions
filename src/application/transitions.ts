@@ -59,7 +59,7 @@ const appendArtifacts = (task: TaskNode, command: TransitionCommand): Artifact[]
 const TRANSITIONS: Record<TransitionKind, TransitionRule> = {
   "mark-ready": {
     from: ["pending", "needs-review"],
-    apply: () => ({ patch: { executionStatus: "ready" } }),
+    apply: () => ({ patch: { executionStatus: "ready" }, clearSession: true }),
   },
   "mark-running": {
     from: ["ready"],
