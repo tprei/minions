@@ -1,8 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { transcriptNode } from "../../pwa/assets/app-v1.js";
+import { describe, it, expect, beforeEach } from "vitest";
+import { transcriptNode, renderReply } from "../../pwa/assets/app-v1.js";
 
 function payload(kind: string, extra: Record<string, unknown> = {}) {
-  return { providerEvent: { kind, ...extra } };
+  return { taskId: "t", runId: "r", providerEvent: { kind, ...extra } };
 }
 
 describe("transcriptNode", () => {
@@ -12,31 +12,31 @@ describe("transcriptNode", () => {
     expect(node.textContent).toBe("hello");
   });
 
-  it("thinking → .msg.thinking with thinking text", () => {
-    const node = transcriptNode(payload("thinking", { thinking: "pondering" }));
+  it("thinking → .msg.thinking with text", () => {
+    const node = transcriptNode(payload("thinking", { text: "pondering" }));
     expect(node.className).toBe("msg thinking");
     expect(node.textContent).toBe("pondering");
   });
 
-  it("tool_call → .msg.tool-call with name and args", () => {
-    const node = transcriptNode(payload("tool_call", { name: "bash", args: { cmd: "ls" } }));
+  it("tool_call → .msg.tool-call with name and input", () => {
+    const node = transcriptNode(payload("tool_call", { id: "c1", name: "bash", input: { cmd: "ls" } }));
     expect(node.className).toBe("msg tool-call");
     expect(node.textContent).toContain("bash");
   });
 
-  it("tool_result → .msg.tool-result", () => {
-    const node = transcriptNode(payload("tool_result", { content: "ok", isError: false }));
+  it("tool_result → .msg.tool-result with output", () => {
+    const node = transcriptNode(payload("tool_result", { id: "c1", output: "ok", isError: false }));
     expect(node.className).toBe("msg tool-result");
-    expect(node.textContent).toBe("ok");
+    expect(node.textContent).toContain("ok");
   });
 
   it("tool_result with isError → .msg.tool-result.err", () => {
-    const node = transcriptNode(payload("tool_result", { content: "fail", isError: true }));
+    const node = transcriptNode(payload("tool_result", { id: "c1", output: "fail", isError: true }));
     expect(node.className).toBe("msg tool-result err");
   });
 
-  it("permission_request → .msg.perm", () => {
-    const node = transcriptNode(payload("permission_request", { permission: "read_file" }));
+  it("permission_request → .msg.perm with tool name", () => {
+    const node = transcriptNode(payload("permission_request", { id: "p1", tool: "read_file", input: {} }));
     expect(node.className).toBe("msg perm");
     expect(node.textContent).toContain("read_file");
   });
@@ -49,14 +49,52 @@ describe("transcriptNode", () => {
   });
 
   it("error → .msg.error with message", () => {
-    const node = transcriptNode(payload("error", { message: "something broke" }));
+    const node = transcriptNode(payload("error", { recoverable: false, message: "something broke" }));
     expect(node.className).toBe("msg error");
     expect(node.textContent).toBe("something broke");
   });
 
-  it("final → .msg.final with result", () => {
-    const node = transcriptNode(payload("final", { result: "task complete" }));
+  it("final → .msg.final with sessionRef", () => {
+    const node = transcriptNode(payload("final", { sessionRef: "sess-abc" }));
     expect(node.className).toBe("msg final");
-    expect(node.textContent).toBe("task complete");
+    expect(node.textContent).toContain("sess-abc");
+  });
+});
+
+describe("renderReply", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("shows textarea and buttons when a needs-review task exists", () => {
+    const container = document.createElement("div");
+    const workflow = {
+      graph: {
+        t1: { id: "t1", executionStatus: "needs-review", title: "Fix bug" },
+      },
+    };
+    renderReply(container, workflow);
+    expect(container.querySelector("input")).not.toBeNull();
+    expect(container.querySelector(".btn-continue")).not.toBeNull();
+    expect(container.querySelector(".btn-fresh")).not.toBeNull();
+    expect(container.querySelector(".reply-placeholder")).toBeNull();
+  });
+
+  it("shows placeholder when no needs-review task exists", () => {
+    const container = document.createElement("div");
+    const workflow = {
+      graph: {
+        t1: { id: "t1", executionStatus: "running", title: "Running task" },
+      },
+    };
+    renderReply(container, workflow);
+    expect(container.querySelector(".reply-placeholder")).not.toBeNull();
+    expect(container.querySelector("input")).toBeNull();
+  });
+
+  it("shows placeholder when workflow is null", () => {
+    const container = document.createElement("div");
+    renderReply(container, null);
+    expect(container.querySelector(".reply-placeholder")).not.toBeNull();
   });
 });

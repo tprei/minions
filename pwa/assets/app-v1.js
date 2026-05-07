@@ -3,7 +3,7 @@ const state = {
   currentId: null,
   currentWorkflow: null,
   transcript: [],
-  pushStatus: "idle",
+  pushStatusByWorkflow: {},
   error: null,
 };
 
@@ -140,24 +140,21 @@ export function transcriptNode(payload) {
       break;
     case "thinking":
       el.classList.add("thinking");
-      el.textContent = ev.thinking ?? "";
+      el.textContent = ev.text ?? "";
       break;
     case "tool_call": {
       el.classList.add("tool-call");
-      const args = JSON.stringify(ev.args ?? ev.input ?? {});
-      el.textContent = `${ev.name ?? ev.toolName ?? "tool"}(${args})`;
+      el.textContent = `${ev.name}(${JSON.stringify(ev.input)})`;
       break;
     }
     case "tool_result":
       el.classList.add("tool-result");
       if (ev.isError) el.classList.add("err");
-      el.textContent = typeof ev.content === "string"
-        ? ev.content
-        : JSON.stringify(ev.content ?? "");
+      el.textContent = JSON.stringify(ev.output);
       break;
     case "permission_request":
       el.classList.add("perm");
-      el.textContent = `Permission requested: ${ev.permission ?? ev.tool ?? JSON.stringify(ev)}`;
+      el.textContent = `permission: ${ev.tool}`;
       break;
     case "usage":
       el.classList.add("usage");
@@ -165,11 +162,11 @@ export function transcriptNode(payload) {
       break;
     case "error":
       el.classList.add("error");
-      el.textContent = ev.message ?? ev.error ?? JSON.stringify(ev);
+      el.textContent = ev.message;
       break;
     case "final":
       el.classList.add("final");
-      el.textContent = ev.result ?? ev.summary ?? "Done";
+      el.textContent = `final ${ev.sessionRef}`;
       break;
     default:
       el.classList.add("assistant");
@@ -204,7 +201,7 @@ function setupPush(workflowId) {
     )
     .then(({ reg, key, permission }) => {
       if (permission !== "granted") {
-        state.pushStatus = "denied";
+        state.pushStatusByWorkflow[workflowId] = "denied";
         renderPushBanner();
         return;
       }
@@ -218,12 +215,12 @@ function setupPush(workflowId) {
           })
         )
         .then(() => {
-          state.pushStatus = "subscribed";
+          state.pushStatusByWorkflow[workflowId] = "subscribed";
           renderPushBanner();
         });
     })
     .catch(() => {
-      state.pushStatus = "denied";
+      state.pushStatusByWorkflow[workflowId] = "denied";
       renderPushBanner();
     });
 }
@@ -276,8 +273,9 @@ function renderPushBanner() {
   if (!app) return;
 
   let banner = app.querySelector(".banner");
+  const pushStatus = state.pushStatusByWorkflow[state.currentId] ?? "idle";
 
-  if (state.pushStatus === "subscribed") {
+  if (pushStatus === "subscribed") {
     if (banner) banner.remove();
     return;
   }
@@ -295,7 +293,7 @@ function renderPushBanner() {
 
   banner.innerHTML = "";
 
-  if (state.pushStatus === "denied") {
+  if (pushStatus === "denied") {
     const span = document.createElement("span");
     span.textContent = "Notifications blocked. Enable in browser settings to receive updates.";
     banner.appendChild(span);
@@ -404,7 +402,7 @@ function renderKanban(container) {
     for (const task of tasks) {
       const card = document.createElement("div");
       card.className = "task-card";
-      card.textContent = task.label ?? task.id;
+      card.textContent = task.title || task.id;
       card.dataset.taskId = task.id;
       col.appendChild(card);
     }
@@ -427,7 +425,9 @@ function renderTranscript(container) {
   transcript.replaceChildren(...state.transcript.map(transcriptNode));
 }
 
-function renderReply(container) {
+export function renderReply(container, workflow) {
+  const wf = workflow !== undefined ? workflow : state.currentWorkflow;
+
   let reply = container ? null : document.querySelector(".reply");
 
   if (!reply) {
@@ -438,23 +438,31 @@ function renderReply(container) {
 
   reply.innerHTML = "";
 
+  const reviewTask = wf
+    ? Object.values(wf.graph).find((n) => n.executionStatus === "needs-review")
+    : undefined;
+
+  if (!reviewTask) {
+    const placeholder = document.createElement("div");
+    placeholder.className = "reply-placeholder";
+    placeholder.textContent = "No tasks awaiting review.";
+    reply.appendChild(placeholder);
+    return;
+  }
+
+  const taskId = reviewTask.id;
+
   const input = document.createElement("input");
   input.type = "text";
   input.placeholder = "Reply to agent…";
   reply.appendChild(input);
 
-  const runningTask = state.currentWorkflow
-    ? Object.values(state.currentWorkflow.graph).find((n) => n.executionStatus === "running")
-    : undefined;
-  const taskId = runningTask?.id ?? null;
-
   const btnContinue = document.createElement("button");
   btnContinue.className = "btn-continue";
   btnContinue.textContent = "Continue";
-  btnContinue.disabled = !taskId;
   btnContinue.addEventListener("click", () => {
     const prompt = input.value.trim();
-    if (!prompt || !taskId) return;
+    if (!prompt) return;
     submitReply(taskId, prompt, false);
     input.value = "";
   });
@@ -463,10 +471,9 @@ function renderReply(container) {
   const btnFresh = document.createElement("button");
   btnFresh.className = "btn-fresh";
   btnFresh.textContent = "Start fresh";
-  btnFresh.disabled = !taskId;
   btnFresh.addEventListener("click", () => {
     const prompt = input.value.trim();
-    if (!prompt || !taskId) return;
+    if (!prompt) return;
     submitReply(taskId, prompt, true);
     input.value = "";
   });
