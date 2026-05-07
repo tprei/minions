@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { requestRestack, startRestackOperation, markRestackConflict } from "../src/application/restack.js";
 import { planDispatch } from "../src/application/scheduler.js";
 import { transitionTask } from "../src/application/transitions.js";
 import { createWorkflow } from "../src/domain/workflow.js";
@@ -145,6 +146,80 @@ describe("dispatch planning", () => {
     const plan = planDispatch(workflow);
 
     expect(plan).toHaveLength(0);
+  });
+
+  it("excludes pending tasks with stackStatus restack-pending", () => {
+    let workflow = makeThreeNodeWorkflow();
+    workflow = completeTask(workflow, "backend", "feature/backend");
+    workflow = completeTask(workflow, "frontend", "feature/frontend");
+    ({ workflow } = requestRestack(workflow, {
+      operationId: "restack-1",
+      ancestorId: "backend",
+      idempotencyKey: "k1",
+      now: fixedNow,
+    }));
+
+    expect(workflow.graph.tests?.executionStatus).toBe("pending");
+    expect(workflow.graph.tests?.stackStatus).toBe("restack-pending");
+
+    expect(planDispatch(workflow)).toHaveLength(0);
+  });
+
+  it("excludes pending tasks with stackStatus restacking", () => {
+    let workflow = makeThreeNodeWorkflow();
+    workflow = completeTask(workflow, "backend", "feature/backend");
+    workflow = completeTask(workflow, "frontend", "feature/frontend");
+    ({ workflow } = requestRestack(workflow, {
+      operationId: "restack-1",
+      ancestorId: "backend",
+      idempotencyKey: "k1",
+      now: fixedNow,
+    }));
+    workflow = startRestackOperation(workflow, "restack-1", fixedNow);
+
+    expect(workflow.graph.tests?.executionStatus).toBe("pending");
+    expect(workflow.graph.tests?.stackStatus).toBe("restacking");
+
+    expect(planDispatch(workflow)).toHaveLength(0);
+  });
+
+  it("excludes pending tasks with stackStatus restack-conflict", () => {
+    let workflow = makeThreeNodeWorkflow();
+    workflow = completeTask(workflow, "backend", "feature/backend");
+    workflow = completeTask(workflow, "frontend", "feature/frontend");
+    ({ workflow } = requestRestack(workflow, {
+      operationId: "restack-1",
+      ancestorId: "backend",
+      idempotencyKey: "k1",
+      now: fixedNow,
+    }));
+    workflow = startRestackOperation(workflow, "restack-1", fixedNow);
+    workflow = markRestackConflict(workflow, "restack-1", "merge conflict", fixedNow);
+
+    expect(workflow.graph.tests?.executionStatus).toBe("pending");
+    expect(workflow.graph.tests?.stackStatus).toBe("restack-conflict");
+
+    expect(planDispatch(workflow)).toHaveLength(0);
+  });
+
+  it("excludes pending tasks with stackStatus stale-artifacts", () => {
+    let workflow = makeThreeNodeWorkflow();
+    workflow = completeTask(workflow, "backend", "feature/backend");
+    workflow = completeTask(workflow, "frontend", "feature/frontend");
+    const testsTask = workflow.graph.tests;
+    if (!testsTask) throw new Error("tests task missing");
+    workflow = {
+      ...workflow,
+      graph: {
+        ...workflow.graph,
+        tests: { ...testsTask, stackStatus: "stale-artifacts" },
+      },
+    };
+
+    expect(workflow.graph.tests?.executionStatus).toBe("pending");
+    expect(workflow.graph.tests?.stackStatus).toBe("stale-artifacts");
+
+    expect(planDispatch(workflow)).toHaveLength(0);
   });
 
   it("does not count gate-blocked tasks against runtime concurrency", () => {

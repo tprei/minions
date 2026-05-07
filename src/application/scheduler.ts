@@ -22,7 +22,7 @@ export function planDispatch(workflow: Workflow): DispatchCandidate[] {
 
   const candidates = Object.values(workflow.graph)
     .filter((task) => task.executionStatus === "pending")
-    .filter((task) => task.stackStatus !== "restacking" && task.stackStatus !== "restack-conflict")
+    .filter((task) => task.stackStatus === "clean")
     .filter((task) => dependenciesSucceeded(workflow, task))
     .filter((task) => claimsAvailable(task, claimHolders))
     .sort(compareDispatchPriority);
