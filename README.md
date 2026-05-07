@@ -184,3 +184,44 @@ Then set `HOST_WORKSPACE_ROOT` and bring the stack back up.
 | — | — | Yes | Provided backend (used as-is) |
 
 `workspaceRoot` defaults to `${dirname(repoPath)}/${basename(repoPath)}-worktrees`.
+
+## PWA usage
+
+The engine serves the PWA shell from `pwa/` when `MWF_PWA_DIR` is set:
+
+```sh
+MWF_PWA_DIR=./pwa node dist/index.js
+```
+
+Then open `http://localhost:<port>/` in a browser (or on a phone on the same network). The shell lists active workflows at `GET /workflows`, lets you click into one to see the live transcript stream, and submit replies via the continue/fresh buttons.
+
+### Icons
+
+`pwa/icons/icon-192.png` and `pwa/icons/icon-512.png` are placeholders — a dark `#0f172a` background with a white "M" outline. Replace them with real branded assets before shipping to production. The manifest entries (`purpose: "any maskable"`) are correct; only the artwork needs replacement.
+
+### Push notifications
+
+When browsing a workflow, a banner prompts "Enable notifications". Clicking it:
+
+1. Fetches the VAPID public key from `GET /push/vapid-public-key`.
+2. Calls `Notification.requestPermission()`.
+3. Subscribes via `pushManager.subscribe(...)`.
+4. Posts the subscription to `POST /push/subscribe` alongside the workflow ID.
+
+The service worker (`pwa/sw.js`) handles incoming `push` events and `notificationclick` events. Tapping a notification navigates the open PWA tab (via `postMessage`) or opens a new window at `/#/workflow/<id>`.
+
+### Service worker caching
+
+- **Hashed assets** (`/assets/`, `/icons/`): cache-first.
+- **Navigation** (HTML): network-first, falls back to cached `/` on offline.
+- **API routes** (`/workflows`, `/commands`, `/push`, `/sw.js`): pass-through (no caching).
+
+Bump the `CACHE` constant in `pwa/sw.js` and the `app-v1.js` / `styles-v1.css` filename suffixes on deploy to force cache invalidation.
+
+### What's deferred
+
+- Real branded icons.
+- PWA install prompt customization.
+- Offline POST queue (replies drop when offline).
+- Service worker unit tests (manual smoke only).
+- E2E phone testing.
