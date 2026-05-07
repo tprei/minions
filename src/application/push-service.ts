@@ -150,7 +150,7 @@ export class PushService {
         this.deps.log.info("push: removing stale subscription", { endpoint: sub.endpoint, statusCode: result.statusCode });
         await this.deps.subscriptions.remove(sub.endpoint, workflowId);
       } else {
-        this.deps.log.error("push: send failed", { endpoint: sub.endpoint, statusCode: result.statusCode, error: result.error });
+        this.deps.log.error("push: send failed", { kind: "push-send-failed", workflowId, endpoint: sub.endpoint, statusCode: result.statusCode, error: result.error });
       }
     }
   }

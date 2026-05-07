@@ -198,7 +198,7 @@ export class CIBabysitterService {
 
     const ciReportCount = task.artifacts.filter((a) => a.kind === "ci-report").length;
     if (ciReportCount >= 1) {
-      this.deps.log.info(`ci-babysitter: ci attempt cap reached for task ${taskId}`, { taskId, workflowId });
+      this.deps.log.info(`ci-babysitter: ci attempt cap reached for task ${taskId}`, { kind: "ci-attempt-cap", taskId, workflowId });
       return;
     }
 

@@ -168,6 +168,26 @@ export function validatePushUnsubscribe(body: unknown): ValidationResult {
   return runChecks(body, PUSH_UNSUBSCRIBE_CHECKS);
 }
 
+const ALERT_SUBSCRIBE_CHECKS: FieldCheck[] = [
+  { path: "subscription", check: isObject, expected: "object" },
+  { path: "subscription.endpoint", check: isNonEmptyString, expected: "non-empty string" },
+  { path: "subscription.keys", check: isObject, expected: "object" },
+  { path: "subscription.keys.p256dh", check: isNonEmptyString, expected: "non-empty string" },
+  { path: "subscription.keys.auth", check: isNonEmptyString, expected: "non-empty string" },
+];
+
+const ALERT_UNSUBSCRIBE_CHECKS: FieldCheck[] = [
+  { path: "endpoint", check: isNonEmptyString, expected: "non-empty string" },
+];
+
+export function validateAlertSubscribe(body: unknown): ValidationResult {
+  return runChecks(body, ALERT_SUBSCRIBE_CHECKS);
+}
+
+export function validateAlertUnsubscribe(body: unknown): ValidationResult {
+  return runChecks(body, ALERT_UNSUBSCRIBE_CHECKS);
+}
+
 export function validateWorkflowSpec(body: unknown): ValidationResult {
   const topLevel = runChecks(body, WORKFLOW_SPEC_CHECKS);
   if (!topLevel.ok) return topLevel;

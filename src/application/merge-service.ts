@@ -164,7 +164,7 @@ export class MergeService {
         if (attempt + 1 >= maxAttempts) {
           this.deps.log.error(
             `MERGE INCONSISTENCY: github merged sha=${mergedSha} but internal merge-task transition failed after ${maxAttempts} attempts. Operator must reconcile.`,
-            { workflowId, taskId, sha: mergedSha, error: (err as Error).message },
+            { kind: "merge-inconsistent", workflowId, taskId, sha: mergedSha, error: (err as Error).message },
           );
           throw new MergeServiceError("merge_state_inconsistent", {
             sha: mergedSha,

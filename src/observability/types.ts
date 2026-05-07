@@ -12,4 +12,9 @@ export type ObservabilityKind =
   | "recovery-action"
   | "service-attached"
   | "http-request"
-  | "sink-degraded";
+  | "sink-degraded"
+  | "merge-inconsistent"
+  | "push-send-failed"
+  | "ci-attempt-cap"
+  | "alert"
+  | "audit";

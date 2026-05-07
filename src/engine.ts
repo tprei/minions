@@ -40,6 +40,8 @@ import { buildSinksFromEnv, type Sink } from "./observability/sinks.js";
 import { createLogger, parseLevel, type Logger } from "./observability/logger.js";
 import type { Level } from "./observability/types.js";
 import { ObservabilityService } from "./observability/observability-service.js";
+import { createSupervisor } from "./supervisor/supervisor.js";
+import type { SupervisorWithRepos } from "./supervisor/supervisor.js";
 
 export interface EngineConfig {
   dbPath: string;
@@ -77,6 +79,8 @@ export interface EngineConfig {
   githubClient?: GitHubClient;
   /** integration-test seam: override CIBabysitter polling cadence. */
   ciBabysitterCadence?: PollCadence;
+  supervisor?: SupervisorWithRepos;
+  scanIntervalMs?: number;
 }
 
 function resolveVapid(config: EngineConfig): VapidConfig | undefined {
@@ -100,12 +104,32 @@ export interface Engine {
 
 export async function createEngine(config: EngineConfig): Promise<Engine> {
   const ownsSinks = config.log === undefined;
-  const sinks: Sink[] = ownsSinks ? (config.logSinks ?? buildSinksFromEnv()) : [];
+  const baseSinks: Sink[] = ownsSinks ? (config.logSinks ?? buildSinksFromEnv()) : [];
+
+  const vapidEarly = resolveVapid(config);
+  const repoEarly = new SQLiteWorkflowRepository(config.dbPath);
+  const senderEarly: PushSender | undefined = vapidEarly
+    ? (config.pushSender ?? new WebPushSender(vapidEarly))
+    : undefined;
+
+  const supervisor = config.supervisor ?? createSupervisor({
+    db: repoEarly.getDatabase(),
+    ...(senderEarly !== undefined ? { sender: senderEarly } : {}),
+    ...(config.scanIntervalMs !== undefined ? { scanIntervalMs: config.scanIntervalMs } : {}),
+  });
+
+  const sinks: Sink[] = ownsSinks ? [...baseSinks, supervisor.sink] : baseSinks;
+
   const log: Logger = config.log ?? createLogger(
     config.logLevel ?? parseLevel(process.env["MWF_LOG_LEVEL"]),
     sinks,
     { service: "engine" },
   );
+
+  supervisor.attachLogger(log.child({ component: "supervisor" }));
+  supervisor.attachRepo(repoEarly);
+  supervisor.start();
+
   log.info("engine started", { kind: "engine-lifecycle", phase: "started", dbPath: config.dbPath });
 
   const dataDir = config.dataDir ?? `${dirname(config.dbPath)}/sessions`;
@@ -133,9 +157,8 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     workspace = new StubWorkspaceBackend();
   }
 
-  const vapid = resolveVapid(config);
-
-  const repo = new SQLiteWorkflowRepository(config.dbPath);
+  const vapid = vapidEarly;
+  const repo = repoEarly;
   const recoveryService = createRecoveryService(repo, executor, runtime, now, log.child({ component: "recovery" }));
 
   type ActiveOrchestratorEntry = { controller: AbortController; promise: Promise<void> };
@@ -204,7 +227,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     pushAbort = new AbortController();
     const db = repo.getDatabase();
     subscriptions = new SQLiteSubscriptionRepository(db);
-    const sender: PushSender = config.pushSender ?? new WebPushSender(vapid);
+    const sender: PushSender = senderEarly!;
     pushService = new PushService({ workflowRepo: repo, subscriptions, sender, signal: pushAbort.signal, log: log.child({ component: "push" }) });
 
     const recoverableWorkflows = await repo.listRecoverable();
@@ -373,6 +396,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   for (const w of allWorkflows) observability.attach(w.id);
   serverDeps.observability = observability;
   serverDeps.log = log.child({ component: "transport" });
+  serverDeps.supervisor = supervisor;
 
   const server = createServer(serverDeps);
 
@@ -392,6 +416,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
         entry.controller.abort();
       }
       await Promise.all([...activeOrchestrators].map((e) => e.promise));
+      await supervisor.stop();
       repo.close();
       if (ownsSinks) await Promise.all(sinks.map((s) => s.close?.() ?? Promise.resolve()));
     },

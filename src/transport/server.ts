@@ -19,9 +19,10 @@ import { DomainError } from "../domain/errors.js";
 import { createWorkflow } from "../domain/workflow.js";
 import type { WorkflowSpec } from "../domain/types.js";
 import { domainErrorToHttp } from "./errors.js";
-import { validateCommand, validatePushSubscribe, validatePushUnsubscribe, validateWorkflowSpec } from "./validators.js";
+import { validateCommand, validatePushSubscribe, validatePushUnsubscribe, validateWorkflowSpec, validateAlertSubscribe, validateAlertUnsubscribe } from "./validators.js";
 import type { ObservabilityService } from "../observability/observability-service.js";
 import type { Logger } from "../observability/logger.js";
+import type { SupervisorWithRepos } from "../supervisor/supervisor.js";
 
 export interface ServerDeps {
   repo: WorkflowRepository;
@@ -39,6 +40,7 @@ export interface ServerDeps {
   pwaRoot?: string;
   observability?: ObservabilityService;
   log?: Logger;
+  supervisor?: SupervisorWithRepos;
 }
 
 type AcceptedCommandKind = CommandKind | "continue-task" | "retry-task";
@@ -338,6 +340,110 @@ export function createServer(deps: ServerDeps): Hono {
         await iterator.return?.();
       }
     });
+  });
+
+  app.get("/audit/events", (c) => {
+    if (!deps.supervisor) {
+      return c.json({ code: "supervisor_disabled", message: "supervisor not configured" }, 503);
+    }
+    const limitParam = c.req.query("limit");
+    const limit = limitParam !== undefined ? Math.min(Math.max(parseInt(limitParam, 10) || 100, 1), 500) : 100;
+    const beforeTs = c.req.query("beforeTs");
+    const action = c.req.query("action");
+    const workflowId = c.req.query("workflowId");
+    const events = deps.supervisor.auditRepo.list({
+      limit,
+      ...(beforeTs !== undefined ? { beforeTs } : {}),
+      ...(action !== undefined ? { action } : {}),
+      ...(workflowId !== undefined ? { workflowId } : {}),
+    });
+    return c.json({ events });
+  });
+
+  app.get("/audit/workflows/:id", (c) => {
+    if (!deps.supervisor) {
+      return c.json({ code: "supervisor_disabled", message: "supervisor not configured" }, 503);
+    }
+    const workflowId = c.req.param("id");
+    const limitParam = c.req.query("limit");
+    const limit = limitParam !== undefined ? Math.min(Math.max(parseInt(limitParam, 10) || 100, 1), 500) : 100;
+    const beforeTs = c.req.query("beforeTs");
+    const events = deps.supervisor.auditRepo.listByWorkflow(workflowId, {
+      limit,
+      ...(beforeTs !== undefined ? { beforeTs } : {}),
+    });
+    return c.json({ events });
+  });
+
+  app.get("/alerts", (c) => {
+    if (!deps.supervisor) {
+      return c.json({ code: "supervisor_disabled", message: "supervisor not configured" }, 503);
+    }
+    const limitParam = c.req.query("limit");
+    const limit = limitParam !== undefined ? Math.min(Math.max(parseInt(limitParam, 10) || 100, 1), 500) : 100;
+    const beforeTs = c.req.query("beforeTs");
+    const alerts = deps.supervisor.alertRepo.list({
+      limit,
+      ...(beforeTs !== undefined ? { beforeTs } : {}),
+    });
+    return c.json({ alerts });
+  });
+
+  app.post("/alerts/subscribe", async (c) => {
+    if (!deps.supervisor) {
+      return c.json({ code: "supervisor_disabled", message: "supervisor not configured" }, 503);
+    }
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ code: "invalid_body", message: "request body is not valid JSON" }, 400);
+    }
+    const validation = validateAlertSubscribe(body);
+    if (!validation.ok) {
+      return c.json(
+        {
+          code: "invalid_request",
+          message: validation.failure.message,
+          details: { field: validation.failure.field, expected: validation.failure.expected },
+        },
+        400,
+      );
+    }
+    const b = body as Record<string, unknown>;
+    const sub = b["subscription"] as Record<string, unknown>;
+    const keys = sub["keys"] as Record<string, string>;
+    deps.supervisor.subRepo.upsert({
+      endpoint: sub["endpoint"] as string,
+      keys: { p256dh: keys["p256dh"] as string, auth: keys["auth"] as string },
+    });
+    return c.json({ ok: true }, 201);
+  });
+
+  app.delete("/alerts/subscribe", async (c) => {
+    if (!deps.supervisor) {
+      return c.json({ code: "supervisor_disabled", message: "supervisor not configured" }, 503);
+    }
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ code: "invalid_body", message: "request body is not valid JSON" }, 400);
+    }
+    const validation = validateAlertUnsubscribe(body);
+    if (!validation.ok) {
+      return c.json(
+        {
+          code: "invalid_request",
+          message: validation.failure.message,
+          details: { field: validation.failure.field, expected: validation.failure.expected },
+        },
+        400,
+      );
+    }
+    const b = body as Record<string, unknown>;
+    deps.supervisor.subRepo.remove(b["endpoint"] as string);
+    return c.json({ ok: true });
   });
 
   if (deps.pwaRoot !== undefined) {
