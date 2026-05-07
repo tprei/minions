@@ -135,4 +135,38 @@ describe("request shape validation", () => {
     const body = await res.json() as { code: string };
     expect(body.code).toBe("invalid_workflow");
   });
+
+  it("continue-task with missing taskId returns 400 invalid_request", async () => {
+    const { app } = makeApp();
+
+    const res = await postCommand(app, {
+      kind: "continue-task",
+      workflowId: "wf-1",
+      prompt: "continue please",
+      now,
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { code: string; details: { field: string; expected: string } };
+    expect(body.code).toBe("invalid_request");
+    expect(body.details.field).toBe("taskId");
+  });
+
+  it("continue-task with empty prompt returns 400 invalid_request", async () => {
+    const { app } = makeApp();
+
+    const res = await postCommand(app, {
+      kind: "continue-task",
+      workflowId: "wf-1",
+      taskId: "task-1",
+      prompt: "   ",
+      now,
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { code: string; details: { field: string; expected: string } };
+    expect(body.code).toBe("invalid_request");
+    expect(body.details.field).toBe("prompt");
+    expect(body.details.expected).toBe("non-empty string");
+  });
 });

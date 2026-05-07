@@ -1,5 +1,5 @@
 import { DomainError } from "../domain/errors.js";
-import { appendRun, closeLatestRun } from "../domain/runs.js";
+import { appendRun, closeLatestRun, patchOpenRun } from "../domain/runs.js";
 import type { NodeRun, NodeRunTerminalReason } from "../domain/runs.js";
 import type { Artifact, TaskExecutionStatus, TaskNode, Workflow } from "../domain/types.js";
 import { TASK_WORKFLOW_COMPLETING_STATUSES } from "../domain/types.js";
@@ -7,6 +7,7 @@ import { TASK_WORKFLOW_COMPLETING_STATUSES } from "../domain/types.js";
 export type TransitionKind =
   | "mark-ready"
   | "mark-running"
+  | "update-run"
   | "complete-runtime"
   | "start-finalization"
   | "open-review"
@@ -28,6 +29,8 @@ export interface TransitionCommand {
   sessionId?: string;
   providerType?: string;
   runtimeType?: string;
+  providerSessionRef?: string;
+  outputOffset?: number;
   artifacts?: Artifact[];
   passed?: boolean;
   reason?: string;
@@ -37,7 +40,10 @@ export interface TransitionCommand {
 interface TransitionEffect {
   patch: Partial<TaskNode>;
   clearSession?: boolean;
-  runEffect?: { kind: "append"; run: NodeRun } | { kind: "close"; reason: NodeRunTerminalReason };
+  runEffect?:
+    | { kind: "append"; run: NodeRun }
+    | { kind: "close"; reason: NodeRunTerminalReason }
+    | { kind: "patch-open-run"; patch: { providerSessionRef?: string; outputOffset?: number } };
 }
 
 interface TransitionRule {
@@ -52,7 +58,7 @@ const appendArtifacts = (task: TaskNode, command: TransitionCommand): Artifact[]
 
 const TRANSITIONS: Record<TransitionKind, TransitionRule> = {
   "mark-ready": {
-    from: ["pending"],
+    from: ["pending", "needs-review"],
     apply: () => ({ patch: { executionStatus: "ready" } }),
   },
   "mark-running": {
@@ -71,11 +77,31 @@ const TRANSITIONS: Record<TransitionKind, TransitionRule> = {
         providerType: command.providerType ?? "unknown",
         runtimeType: command.runtimeType ?? "unknown",
         runtimeSessionId: command.sessionId,
+        ...(command.providerSessionRef ? { providerSessionRef: command.providerSessionRef } : {}),
         startedAt: command.now,
       };
       return {
         patch: { executionStatus: "running", sessionId: command.sessionId },
         runEffect: { kind: "append", run },
+      };
+    },
+  },
+  "update-run": {
+    from: ["running"],
+    apply: (task, command) => {
+      const hasRef = command.providerSessionRef !== undefined;
+      const hasOffset = command.outputOffset !== undefined;
+      if (!hasRef && !hasOffset) {
+        throw new DomainError("invalid_transition", "update-run requires providerSessionRef or outputOffset", {
+          taskId: task.id,
+        });
+      }
+      const patch: { providerSessionRef?: string; outputOffset?: number } = {};
+      if (hasRef) patch.providerSessionRef = command.providerSessionRef!;
+      if (hasOffset) patch.outputOffset = command.outputOffset!;
+      return {
+        patch: {},
+        runEffect: { kind: "patch-open-run", patch },
       };
     },
   },
@@ -213,8 +239,10 @@ function updateTask(task: TaskNode, command: TransitionCommand, effect: Transiti
   if (effect.runEffect) {
     if (effect.runEffect.kind === "append") {
       updated.runs = appendRun(task.runs, effect.runEffect.run);
-    } else {
+    } else if (effect.runEffect.kind === "close") {
       updated.runs = closeLatestRun(task.runs, effect.runEffect.reason, command.now);
+    } else {
+      updated.runs = patchOpenRun(task.runs, effect.runEffect.patch);
     }
   }
 

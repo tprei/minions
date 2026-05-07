@@ -2,10 +2,13 @@ import type { Hono } from "hono";
 import { dirname } from "node:path";
 import { runBootRecovery } from "./application/boot.js";
 import type { BootRecoveryReport } from "./application/boot.js";
+import { applyCommand } from "./application/commands.js";
+import { ContinueTaskService } from "./application/continue-task-service.js";
 import { createRecoveryService } from "./application/recovery-service.js";
 import { NoopRestackExecutor } from "./application/restack-executor.js";
 import type { RestackExecutor } from "./application/restack-executor.js";
 import { SQLiteWorkflowRepository } from "./persistence/sqlite-repo.js";
+import type { ProviderPlugin } from "./plugins/provider-plugin.js";
 import type { RuntimeBackend } from "./plugins/runtime-backend.js";
 import { StubRuntimeBackend } from "./plugins/stub-runtime.js";
 import { createServer } from "./transport/server.js";
@@ -15,6 +18,7 @@ export interface EngineConfig {
   dataDir?: string;
   runtime?: RuntimeBackend;
   executor?: RestackExecutor;
+  provider?: ProviderPlugin;
   staleReadyMs?: number;
   staleGateMs?: number;
   now?: () => string;
@@ -44,7 +48,19 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     staleGateMs,
   });
 
-  const server = createServer({ repo, recoveryService, executor });
+  const serverDeps: Parameters<typeof createServer>[0] = { repo, recoveryService, executor };
+
+  if (config.provider) {
+    serverDeps.continueTaskService = new ContinueTaskService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      provider: config.provider,
+      runtime,
+      now,
+    });
+  }
+
+  const server = createServer(serverDeps);
 
   return {
     server,

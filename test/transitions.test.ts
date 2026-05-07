@@ -175,6 +175,118 @@ describe("quality gate", () => {
   });
 });
 
+describe("mark-ready from needs-review", () => {
+  it("moves a needs-review task back to ready", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+    workflow = transitionTask(workflow, { kind: "mark-interrupted", taskId: "task-1:task", now });
+    expect(workflow.graph["task-1:task"]?.executionStatus).toBe("needs-review");
+
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+
+    expect(workflow.graph["task-1:task"]?.executionStatus).toBe("ready");
+  });
+});
+
+describe("mark-running with providerSessionRef", () => {
+  it("new run carries providerSessionRef when provided", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      providerSessionRef: "ref-abc",
+      now,
+    });
+
+    const task = workflow.graph["task-1:task"]!;
+    expect(task.runs[0]?.providerSessionRef).toBe("ref-abc");
+  });
+
+  it("new run has no providerSessionRef when not provided", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+
+    const task = workflow.graph["task-1:task"]!;
+    expect(task.runs[0]?.providerSessionRef).toBeUndefined();
+  });
+});
+
+describe("update-run transition", () => {
+  it("patches open run with providerSessionRef and outputOffset; status stays running", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+    workflow = transitionTask(workflow, {
+      kind: "update-run",
+      taskId: "task-1:task",
+      providerSessionRef: "new-ref",
+      outputOffset: 42,
+      now,
+    });
+
+    const task = workflow.graph["task-1:task"]!;
+    expect(task.executionStatus).toBe("running");
+    expect(task.runs[0]?.providerSessionRef).toBe("new-ref");
+    expect(task.runs[0]?.outputOffset).toBe(42);
+    expect(task.runs[0]?.endedAt).toBeUndefined();
+  });
+
+  it("rejects empty patch (no providerSessionRef, no outputOffset)", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+
+    expect(() =>
+      transitionTask(workflow, { kind: "update-run", taskId: "task-1:task", now }),
+    ).toThrow(DomainError);
+  });
+
+  it("rejects update-run from completed status", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "task-1:task",
+      sessionId: "session-1",
+      now,
+    });
+    workflow = transitionTask(workflow, { kind: "complete-runtime", taskId: "task-1:task", now });
+
+    expect(() =>
+      transitionTask(workflow, {
+        kind: "update-run",
+        taskId: "task-1:task",
+        providerSessionRef: "ref",
+        now,
+      }),
+    ).toThrow(DomainError);
+  });
+});
+
 describe("mark-interrupted transition", () => {
   it("moves a running task to needs-review, clears session, closes run with interrupted", () => {
     let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);

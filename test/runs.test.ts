@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { transitionTask } from "../src/application/transitions.js";
+import { patchOpenRun } from "../src/domain/runs.js";
 import { createSingleTaskWorkflow } from "../src/domain/workflow.js";
 
 const now = "2026-05-04T11:19:00.000Z";
@@ -119,6 +120,79 @@ describe("NodeRun lifecycle", () => {
     workflow = transitionTask(workflow, { kind: "cancel-task", taskId: "wf-1:task", now });
 
     expect(workflow.graph["wf-1:task"]!.runs).toHaveLength(0);
+  });
+
+  it("patchOpenRun patches the open run and leaves closed runs untouched", () => {
+    let workflow = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "wf-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "wf-1:task",
+      sessionId: "s1",
+      now,
+    });
+    workflow = transitionTask(workflow, { kind: "complete-runtime", taskId: "wf-1:task", now: later });
+    workflow = transitionTask(workflow, { kind: "start-quality-gate", taskId: "wf-1:task", now: later });
+    workflow = transitionTask(workflow, { kind: "recover-task", taskId: "wf-1:task", now: later });
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "wf-1:task", now: later });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "wf-1:task",
+      sessionId: "s2",
+      now: later,
+    });
+
+    const task = workflow.graph["wf-1:task"]!;
+    expect(task.runs).toHaveLength(2);
+
+    const patched = patchOpenRun(task.runs, { providerSessionRef: "ref-new", outputOffset: 77 });
+
+    expect(patched[0]?.providerSessionRef).toBeUndefined();
+    expect(patched[1]?.providerSessionRef).toBe("ref-new");
+    expect(patched[1]?.outputOffset).toBe(77);
+    expect(patched[1]?.endedAt).toBeUndefined();
+  });
+
+  it("patchOpenRun throws when no open run", () => {
+    let workflow = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "wf-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "wf-1:task",
+      sessionId: "s1",
+      now,
+    });
+    workflow = transitionTask(workflow, { kind: "complete-runtime", taskId: "wf-1:task", now: later });
+
+    const task = workflow.graph["wf-1:task"]!;
+    expect(() => patchOpenRun(task.runs, { outputOffset: 10 })).toThrow("no open run to patch");
+  });
+
+  it("closeLatestRun after patchOpenRun preserves patched fields", () => {
+    let workflow = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "wf-1:task", now });
+    workflow = transitionTask(workflow, {
+      kind: "mark-running",
+      taskId: "wf-1:task",
+      sessionId: "s1",
+      now,
+    });
+
+    workflow = transitionTask(workflow, {
+      kind: "update-run",
+      taskId: "wf-1:task",
+      providerSessionRef: "patched-ref",
+      outputOffset: 55,
+      now,
+    });
+
+    workflow = transitionTask(workflow, { kind: "complete-runtime", taskId: "wf-1:task", now: later });
+
+    const run = workflow.graph["wf-1:task"]!.runs[0]!;
+    expect(run.providerSessionRef).toBe("patched-ref");
+    expect(run.outputOffset).toBe(55);
+    expect(run.terminalReason).toBe("completed");
+    expect(run.endedAt).toBe(later);
   });
 
   it("closing a run preserves providerSessionRef and outputOffset", () => {

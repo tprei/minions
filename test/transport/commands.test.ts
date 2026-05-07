@@ -4,17 +4,21 @@ import { InMemoryWorkflowRepository } from "../../src/application/repository.js"
 import { createRecoveryService } from "../../src/application/recovery-service.js";
 import { StubRuntimeBackend } from "../../src/plugins/stub-runtime.js";
 import { createServer } from "../../src/transport/server.js";
+import type { ContinueTaskService } from "../../src/application/continue-task-service.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
 import type { WorkflowEvent } from "../../src/domain/events.js";
 
 const now = "2026-05-04T11:19:00.000Z";
 
-function makeApp() {
+function makeApp(continueTaskService?: ContinueTaskService) {
   const repo = new InMemoryWorkflowRepository();
   const executor = new NoopRestackExecutor();
   const runtime = new StubRuntimeBackend();
   const recoveryService = createRecoveryService(repo, executor, runtime, () => now);
-  const app = createServer({ repo, recoveryService, executor });
+  const deps = continueTaskService
+    ? { repo, recoveryService, executor, continueTaskService }
+    : { repo, recoveryService, executor };
+  const app = createServer(deps);
   return { app, repo };
 }
 
@@ -167,6 +171,58 @@ describe("POST /commands", () => {
     expect(res.status).toBe(400);
     const body = await res.json() as { code: string };
     expect(body.code).toBe("invalid_body");
+  });
+
+  it("continue-task routes to continueTaskService stub", async () => {
+    const workflow = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    const serviceStub = {
+      run: vi.fn().mockResolvedValue({ workflow, events: [] }),
+    } as unknown as ContinueTaskService;
+
+    const { app, repo } = makeApp(serviceStub);
+    await repo.save(workflow, []);
+
+    const res = await app.request("/commands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "continue-task",
+        workflowId: "wf-1",
+        taskId: "wf-1:task",
+        prompt: "please continue",
+        now,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(serviceStub.run).toHaveBeenCalledOnce();
+    expect(serviceStub.run).toHaveBeenCalledWith({
+      workflowId: "wf-1",
+      taskId: "wf-1:task",
+      prompt: "please continue",
+    });
+  });
+
+  it("continue-task without service returns 500", async () => {
+    const { app, repo } = makeApp();
+    const workflow = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(workflow, []);
+
+    const res = await app.request("/commands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "continue-task",
+        workflowId: "wf-1",
+        taskId: "wf-1:task",
+        prompt: "please continue",
+        now,
+      }),
+    });
+
+    expect(res.status).toBe(500);
+    const body = await res.json() as { code: string };
+    expect(body.code).toBe("internal_error");
   });
 
   it("returns 409 on version_conflict when expectedVersion does not match", async () => {

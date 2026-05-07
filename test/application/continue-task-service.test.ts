@@ -1,0 +1,153 @@
+import { describe, expect, it, vi } from "vitest";
+import { ContinueTaskService } from "../../src/application/continue-task-service.js";
+import { applyCommand } from "../../src/application/commands.js";
+import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
+import { DomainError } from "../../src/domain/errors.js";
+import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
+import { StubProviderPlugin } from "../../src/plugins/providers/stub.js";
+import { StubRuntimeBackend } from "../../src/plugins/stub-runtime.js";
+import type { NodeRun } from "../../src/domain/runs.js";
+import type { ProviderEvent } from "../../src/plugins/provider-plugin.js";
+
+const now = "2026-05-04T11:19:00.000Z";
+
+async function makeNeedsReviewTask(repo: InMemoryWorkflowRepository, providerSessionRef: string) {
+  const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+  await repo.save(wf, []);
+
+  await applyCommand(repo, {
+    kind: "transition-task",
+    workflowId: "wf-1",
+    transition: { kind: "mark-ready", taskId: "wf-1:task", now },
+  });
+  await applyCommand(repo, {
+    kind: "transition-task",
+    workflowId: "wf-1",
+    transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s1", now },
+  });
+  await applyCommand(repo, {
+    kind: "transition-task",
+    workflowId: "wf-1",
+    transition: { kind: "mark-interrupted", taskId: "wf-1:task", now },
+  });
+
+  const wfCurrent = await repo.get("wf-1");
+  const task = wfCurrent!.graph["wf-1:task"]!;
+  const patchedRun: NodeRun = { ...task.runs[0]!, providerSessionRef };
+  const patchedWf = {
+    ...wfCurrent!,
+    version: wfCurrent!.version + 1,
+    graph: { "wf-1:task": { ...task, runs: [patchedRun] } },
+  };
+  await repo.save(patchedWf, []);
+}
+
+describe("ContinueTaskService", () => {
+  it("happy path: needs-review task with prior providerSessionRef → running, attempt 2, run carries sessionRef", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "new-session" };
+    const provider = new StubProviderPlugin({ frames: [[finalEvent]] });
+    const resumeSpy = vi.spyOn(provider, "resume");
+
+    await makeNeedsReviewTask(repo, "prior-session-ref");
+
+    const service = new ContinueTaskService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      provider,
+      runtime,
+      now: () => now,
+    });
+
+    const result = await service.run({
+      workflowId: "wf-1",
+      taskId: "wf-1:task",
+      prompt: "please continue",
+    });
+
+    expect(resumeSpy).toHaveBeenCalledOnce();
+    expect(resumeSpy).toHaveBeenCalledWith({
+      sessionRef: "prior-session-ref",
+      prompt: "please continue",
+      taskId: "wf-1:task",
+      workflowId: "wf-1",
+    });
+
+    const task = result.workflow.graph["wf-1:task"]!;
+    expect(task.executionStatus).toBe("running");
+    expect(task.runs).toHaveLength(2);
+    expect(task.runs[1]?.attempt).toBe(2);
+    expect(task.runs[1]?.providerSessionRef).toBe("prior-session-ref");
+  });
+
+  it("sad path: no closed run with providerSessionRef → throws invalid_transition, no provider.resume call", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const provider = new StubProviderPlugin({ frames: [] });
+    const resumeSpy = vi.spyOn(provider, "resume");
+
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(wf, []);
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-ready", taskId: "wf-1:task", now },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s1", now },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-interrupted", taskId: "wf-1:task", now },
+    });
+
+    const service = new ContinueTaskService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      provider,
+      runtime,
+      now: () => now,
+    });
+
+    let caughtErr: unknown;
+    try {
+      await service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "continue" });
+    } catch (e) {
+      caughtErr = e;
+    }
+    expect(caughtErr).toBeInstanceOf(DomainError);
+    expect((caughtErr as DomainError).code).toBe("invalid_transition");
+    expect(resumeSpy).not.toHaveBeenCalled();
+  });
+
+  it("sad path: provider.resume rejects → error propagates, no transitions applied", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const provider = new StubProviderPlugin({ frames: [] });
+    vi.spyOn(provider, "resume").mockRejectedValue(new Error("provider unavailable"));
+
+    await makeNeedsReviewTask(repo, "existing-ref");
+
+    const wfBefore = await repo.get("wf-1");
+    const versionBefore = wfBefore!.version;
+
+    const service = new ContinueTaskService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      provider,
+      runtime,
+      now: () => now,
+    });
+
+    await expect(
+      service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "continue" }),
+    ).rejects.toThrow("provider unavailable");
+
+    const wfAfter = await repo.get("wf-1");
+    expect(wfAfter!.version).toBe(versionBefore);
+  });
+});

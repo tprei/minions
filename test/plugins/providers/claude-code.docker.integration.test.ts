@@ -35,8 +35,8 @@ describe.skipIf(process.env["MWF_HAS_DOCKER"] !== "1")("ClaudeCodeProvider docke
     });
 
     const events: ProviderEvent[] = [];
-    for await (const event of runProvider(runtime, sessionId, provider)) {
-      events.push(event);
+    for await (const item of runProvider(runtime, sessionId, provider)) {
+      if (item.kind === "provider") events.push(item.event);
     }
 
     const assistantTextEvents = events.filter((e) => e.kind === "assistant_text");

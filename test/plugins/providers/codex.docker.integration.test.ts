@@ -4,6 +4,7 @@ import { CodexProvider } from "../../../src/plugins/providers/codex.js";
 import { runProvider } from "../../../src/plugins/providers/run-provider.js";
 import type { ProviderEvent } from "../../../src/plugins/provider-plugin.js";
 
+
 const WORKER_SESSIONS_DIR = process.env["MWF_DOCKER_WORKER_SESSIONS_DIR"] ?? "/sessions";
 const CONTAINER = process.env["MWF_DOCKER_CONTAINER"] ?? "minions-worker";
 const HOST_DATA_DIR = process.env["MWF_DOCKER_HOST_DATA_DIR"] ?? "/var/lib/minions";
@@ -35,8 +36,8 @@ describe.skipIf(process.env["MWF_HAS_DOCKER"] !== "1")("CodexProvider docker int
     });
 
     const events: ProviderEvent[] = [];
-    for await (const event of runProvider(runtime, sessionId, provider)) {
-      events.push(event);
+    for await (const item of runProvider(runtime, sessionId, provider)) {
+      if (item.kind === "provider") events.push(item.event);
     }
 
     const assistantTextEvents = events.filter((e) => e.kind === "assistant_text");

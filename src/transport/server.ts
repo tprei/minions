@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { applyCommand } from "../application/commands.js";
 import type { Command, CommandKind } from "../application/commands.js";
+import type { ContinueTaskService } from "../application/continue-task-service.js";
 import type { RecoveryService } from "../application/recovery-service.js";
 import type { WorkflowRepository } from "../application/repository.js";
 import type { RestackExecutor } from "../application/restack-executor.js";
@@ -15,14 +16,18 @@ export interface ServerDeps {
   repo: WorkflowRepository;
   recoveryService: RecoveryService;
   executor: RestackExecutor;
+  continueTaskService?: ContinueTaskService;
 }
 
-const VALID_COMMAND_KINDS = new Set<CommandKind>([
+type AcceptedCommandKind = CommandKind | "continue-task";
+
+const VALID_COMMAND_KINDS = new Set<AcceptedCommandKind>([
   "transition-task",
   "request-restack",
   "start-restack",
   "complete-restack",
   "mark-restack-conflict",
+  "continue-task",
 ]);
 
 export function createServer(deps: ServerDeps): Hono {
@@ -98,7 +103,7 @@ export function createServer(deps: ServerDeps): Hono {
     }
 
     const kind = body["kind"];
-    if (typeof kind !== "string" || !VALID_COMMAND_KINDS.has(kind as CommandKind)) {
+    if (typeof kind !== "string" || !VALID_COMMAND_KINDS.has(kind as AcceptedCommandKind)) {
       return c.json({ code: "invalid_kind", message: `unknown command kind: ${String(kind)}` }, 400);
     }
 
@@ -112,6 +117,18 @@ export function createServer(deps: ServerDeps): Hono {
         },
         400,
       );
+    }
+
+    if (kind === "continue-task") {
+      if (!deps.continueTaskService) {
+        return c.json({ code: "internal_error", message: "continue-task service not available", details: {} }, 500);
+      }
+      const result = await deps.continueTaskService.run({
+        workflowId: body["workflowId"] as string,
+        taskId: body["taskId"] as string,
+        prompt: body["prompt"] as string,
+      });
+      return c.json(result);
     }
 
     const result = await applyCommand(repo, body as unknown as Command);

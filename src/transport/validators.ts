@@ -1,5 +1,7 @@
 import type { CommandKind } from "../application/commands.js";
 
+type AllCommandKind = CommandKind | "continue-task";
+
 export interface ValidationFailure {
   field: string;
   expected: string;
@@ -26,6 +28,10 @@ function get(obj: unknown, path: string): unknown {
 
 function isString(v: unknown): boolean {
   return typeof v === "string";
+}
+
+function isNonEmptyString(v: unknown): boolean {
+  return typeof v === "string" && v.trim().length > 0;
 }
 
 function isObject(v: unknown): boolean {
@@ -59,7 +65,7 @@ function runChecks(body: unknown, checks: FieldCheck[]): ValidationResult {
 
 const BASE_WORKFLOW_ID: FieldCheck = { path: "workflowId", check: isString, expected: "string" };
 
-const COMMAND_CHECKS: { [K in CommandKind]: FieldCheck[] } = {
+const COMMAND_CHECKS: { [K in AllCommandKind]: FieldCheck[] } = {
   "transition-task": [
     BASE_WORKFLOW_ID,
     { path: "transition", check: isObject, expected: "object" },
@@ -93,6 +99,12 @@ const COMMAND_CHECKS: { [K in CommandKind]: FieldCheck[] } = {
     { path: "error", check: isString, expected: "string" },
     { path: "now", check: isString, expected: "string" },
   ],
+  "continue-task": [
+    BASE_WORKFLOW_ID,
+    { path: "taskId", check: isString, expected: "string" },
+    { path: "prompt", check: isNonEmptyString, expected: "non-empty string" },
+    { path: "now", check: isString, expected: "string" },
+  ],
 };
 
 const TASK_SPEC_CHECKS: FieldCheck[] = [
@@ -113,7 +125,7 @@ export function validateCommand(body: unknown): ValidationResult {
   }
   const kind = (body as Record<string, unknown>)["kind"];
   if (typeof kind !== "string" || !(kind in COMMAND_CHECKS)) return { ok: true };
-  return runChecks(body, COMMAND_CHECKS[kind as CommandKind]);
+  return runChecks(body, COMMAND_CHECKS[kind as AllCommandKind]);
 }
 
 export function validateWorkflowSpec(body: unknown): ValidationResult {
