@@ -3,8 +3,11 @@ import { ContinueTaskService } from "../../src/application/continue-task-service
 import { applyCommand } from "../../src/application/commands.js";
 import type { CommandResult } from "../../src/application/commands.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
+import { RunOrchestrator } from "../../src/application/run-orchestrator.js";
+import type { RunOrchestratorDeps } from "../../src/application/run-orchestrator.js";
 import { DomainError } from "../../src/domain/errors.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
+import { getOpenRun } from "../../src/domain/runs.js";
 import { StubProviderPlugin } from "../../src/plugins/providers/stub.js";
 import { StubRuntimeBackend } from "../../src/plugins/stub-runtime.js";
 import type { NodeRun } from "../../src/domain/runs.js";
@@ -218,6 +221,39 @@ describe("ContinueTaskService", () => {
 
     const wfAfter = await repo.get("wf-1");
     expect(wfAfter!.graph["wf-1:task"]!.executionStatus).toBe("needs-review");
+  });
+
+  it("orchestrator constructed with runId matching post-mark-running open run", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "new-session" };
+    const provider = new StubProviderPlugin({ frames: [[finalEvent]] });
+
+    await makeNeedsReviewTask(repo, "prior-session-ref");
+
+    let capturedRunId: string | undefined;
+    const OrigRunOrchestrator = RunOrchestrator;
+    vi.spyOn(OrigRunOrchestrator.prototype, "run").mockImplementation(async function(this: RunOrchestrator) {
+      capturedRunId = (this as unknown as { deps: RunOrchestratorDeps }).deps.runId;
+    });
+
+    const service = new ContinueTaskService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      providerFactory: () => provider,
+      runtime,
+      now: () => now,
+    });
+
+    await service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "continue" });
+
+    const wfPost = await repo.get("wf-1");
+    const taskPost = wfPost?.graph["wf-1:task"];
+    const openRun = taskPost ? getOpenRun(taskPost.runs) : undefined;
+    expect(capturedRunId).toBeDefined();
+    expect(capturedRunId).toBe(openRun?.id);
+
+    vi.restoreAllMocks();
   });
 
   it("sad path: mark-running rejects → runtime.stop called for cleanup before error propagates", async () => {

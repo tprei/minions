@@ -57,6 +57,11 @@ export class SubscriberHub {
             while (!sub.aborted) {
               while (sub.buffer.length > 0) {
                 const event = sub.buffer.shift()!;
+                // transient frames bypass cursor dedup; durable backbone is the resume truth
+                if (event.kind === "provider-event") {
+                  yield event;
+                  continue;
+                }
                 if (event.cursor <= lastYielded) continue;
                 if (sub.aborted) return;
                 yield event;
@@ -108,6 +113,19 @@ export class SubscriberHub {
       for (const event of events) {
         sub.buffer.push(event);
       }
+      if (sub.resolve) {
+        const resolve = sub.resolve;
+        sub.resolve = undefined;
+        resolve();
+      }
+    }
+  }
+
+  notifyTransient(workflowId: string, event: WorkflowEvent): void {
+    const subs = this.subscribers.get(workflowId);
+    if (!subs) return;
+    for (const sub of Array.from(subs)) {
+      sub.buffer.push(event);
       if (sub.resolve) {
         const resolve = sub.resolve;
         sub.resolve = undefined;

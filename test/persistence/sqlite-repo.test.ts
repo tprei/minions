@@ -229,6 +229,26 @@ describe("SQLiteWorkflowRepository", () => {
     await iter.return?.();
   });
 
+  it("publishTransient: DB events row count unchanged after call", async () => {
+    const workflow = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(workflow, [makeEvent("wf-1")]);
+
+    const before = await repo.eventsSince("wf-1", 0);
+    expect(before).toHaveLength(1);
+
+    const transient: WorkflowEvent = {
+      cursor: 0,
+      workflowId: "wf-1",
+      kind: "provider-event",
+      occurredAt: now,
+      payload: { taskId: "t", runId: "run-1", providerEvent: { kind: "assistant_text", text: "hi" } },
+    };
+    repo.publishTransient("wf-1", transient);
+
+    const after = await repo.eventsSince("wf-1", 0);
+    expect(after).toHaveLength(1);
+  });
+
   it("subscribe: fromCursor filters replay events", async () => {
     const workflow = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
     await repo.save(workflow, [makeEvent("wf-1"), makeEvent("wf-1"), makeEvent("wf-1")]);

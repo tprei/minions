@@ -4,6 +4,8 @@ import type { RuntimeBackend } from "../plugins/runtime-backend.js";
 import type { Command, CommandResult } from "./commands.js";
 import type { WorkflowRepository } from "./repository.js";
 import { RunOrchestrator } from "./run-orchestrator.js";
+import { getOpenRun } from "../domain/runs.js";
+import type { WorkflowEvent } from "../domain/events.js";
 
 export interface ContinueTaskServiceDeps {
   repo: WorkflowRepository;
@@ -89,13 +91,30 @@ export class ContinueTaskService {
       throw err;
     }
 
+    const post = await repo.get(workflowId);
+    const postTask = post?.graph[taskId];
+    const openRun = postTask ? getOpenRun(postTask.runs) : undefined;
+    if (!openRun) throw new DomainError("invalid_transition", "no open run after mark-running", { taskId });
+    const runId = openRun.id;
+
     const orchestrator = new RunOrchestrator({
       workflowId,
       taskId,
+      runId,
       runtimeSessionId,
       provider,
       runtime,
       applyCommand,
+      publish: (providerEvent) => {
+        const envelope: WorkflowEvent = {
+          cursor: 0,
+          workflowId,
+          occurredAt: now(),
+          kind: "provider-event",
+          payload: { taskId, runId, providerEvent },
+        };
+        repo.publishTransient(workflowId, envelope);
+      },
       now,
     });
 

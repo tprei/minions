@@ -121,6 +121,54 @@ describe("InMemoryWorkflowRepository", () => {
     expect(recoverable).toHaveLength(0);
   });
 
+  it("publishTransient does not write to event log; eventsSince excludes transient", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const workflow = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(workflow, [makeEvent("wf-1")]);
+
+    const before = await repo.eventsSince("wf-1", 0);
+    expect(before).toHaveLength(1);
+
+    const transient: WorkflowEvent = {
+      cursor: 0,
+      workflowId: "wf-1",
+      kind: "provider-event",
+      occurredAt: now,
+      payload: { taskId: "t", runId: "run-1", providerEvent: { kind: "assistant_text", text: "hi" } },
+    };
+    repo.publishTransient("wf-1", transient);
+
+    const after = await repo.eventsSince("wf-1", 0);
+    expect(after).toHaveLength(1);
+    expect(after[0]?.kind).toBe("task-transitioned");
+  });
+
+  it("publishTransient: live subscriber receives the transient frame", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const workflow = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(workflow, []);
+
+    const iter = repo.subscribe("wf-1", 0)[Symbol.asyncIterator]();
+
+    // Start waiting for first event, then publish transient
+    const nextPromise = iter.next();
+    await Promise.resolve();
+
+    const transient: WorkflowEvent = {
+      cursor: 0,
+      workflowId: "wf-1",
+      kind: "provider-event",
+      occurredAt: now,
+      payload: { taskId: "t", runId: "run-1", providerEvent: { kind: "thinking", text: "reasoning" } },
+    };
+    repo.publishTransient("wf-1", transient);
+
+    const result = await nextPromise;
+    expect(result.value?.kind).toBe("provider-event");
+
+    await iter.return?.();
+  });
+
   it("listRecoverable INCLUDES completed workflows that hold a pending or running graph operation", async () => {
     const repo = new InMemoryWorkflowRepository();
     const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);

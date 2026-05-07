@@ -166,11 +166,12 @@ export function createServer(deps: ServerDeps): Hono {
           const result = await iterator.next();
           if (result.done) break;
           const event = result.value;
-          await stream.writeSSE({
-            event: event.kind,
-            data: JSON.stringify(event),
-            id: String(event.cursor),
-          });
+          if (event.kind === "provider-event") {
+            // omit id: so browser EventSource doesn't advance Last-Event-ID past the durable cursor
+            await stream.writeSSE({ event: event.kind, data: JSON.stringify(event) });
+          } else {
+            await stream.writeSSE({ event: event.kind, data: JSON.stringify(event), id: String(event.cursor) });
+          }
         }
       } finally {
         await iterator.return?.();

@@ -10,13 +10,15 @@ import type {
   Workflow,
   WorkflowStatus,
 } from "./types.js";
+import type { ProviderEvent } from "../plugins/provider-plugin.js";
 
 export type WorkflowEventKind =
   | "task-transitioned"
   | "graph-operation-changed"
   | "run-started"
   | "run-ended"
-  | "workflow-status-changed";
+  | "workflow-status-changed"
+  | "provider-event";
 
 export interface TaskTransitionedPayload {
   taskId: string;
@@ -58,6 +60,12 @@ export interface WorkflowStatusChangedPayload {
   toStatus: WorkflowStatus;
 }
 
+export interface ProviderEventPayload {
+  taskId: string;
+  runId: string;
+  providerEvent: ProviderEvent;
+}
+
 interface EventBase {
   cursor: number;
   workflowId: string;
@@ -71,6 +79,7 @@ export type WorkflowEvent = EventBase &
     | { kind: "run-started"; payload: RunStartedPayload }
     | { kind: "run-ended"; payload: RunEndedPayload }
     | { kind: "workflow-status-changed"; payload: WorkflowStatusChangedPayload }
+    | { kind: "provider-event"; payload: ProviderEventPayload }
   );
 
 export function deriveEvents(

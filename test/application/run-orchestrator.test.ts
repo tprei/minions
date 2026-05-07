@@ -48,6 +48,7 @@ function makeOrchestrator(
   chunks: RuntimeOutputChunk[],
   applyCommand: (cmd: Command) => Promise<CommandResult>,
   shouldThrow?: Error,
+  publish?: (event: ProviderEvent) => void,
 ) {
   const provider = new StubProviderPlugin({ frames: providerFrames });
   const runtime = makeRuntime(chunks, shouldThrow);
@@ -55,10 +56,12 @@ function makeOrchestrator(
   return new RunOrchestrator({
     workflowId: "wf-1",
     taskId: "task-1",
+    runId: "run-1",
     runtimeSessionId: "session-1",
     provider,
     runtime,
     applyCommand,
+    publish: publish ?? (() => {}),
     now: () => now,
   });
 }
@@ -219,10 +222,12 @@ describe("RunOrchestrator", () => {
     const orch = new RunOrchestrator({
       workflowId: "wf-1",
       taskId: "task-1",
+      runId: "run-1",
       runtimeSessionId: "session-1",
       provider,
       runtime,
       applyCommand,
+      publish: () => {},
       now: () => now,
       fromOffset: 42,
     });
@@ -283,10 +288,12 @@ describe("RunOrchestrator", () => {
     const orch = new RunOrchestrator({
       workflowId: "wf-1",
       taskId: "task-1",
+      runId: "run-1",
       runtimeSessionId: "session-1",
       provider,
       runtime,
       applyCommand,
+      publish: () => {},
       now: () => now,
       signal: controller.signal,
     });
@@ -348,6 +355,87 @@ describe("RunOrchestrator", () => {
     expect(calls).toEqual(["update-run", "mark-interrupted"]);
     expect(updateRunTransitions).toHaveLength(1);
     expect(typeof updateRunTransitions[0]!["outputOffset"]).toBe("number");
+  });
+
+  it("publish called for all provider events in order", async () => {
+    const published: ProviderEvent[] = [];
+    const applyCommand = vi.fn(async (_cmd: Command): Promise<CommandResult> => makeCommandResult());
+
+    const events: ProviderEvent[] = [
+      { kind: "assistant_text", text: "hello" },
+      { kind: "thinking", text: "hmm" },
+      { kind: "tool_call", id: "tc-1", name: "bash", input: { cmd: "ls" } },
+      { kind: "tool_result", id: "tc-1", output: "file.txt" },
+      { kind: "usage", inputTokens: 10, outputTokens: 5 },
+      { kind: "final", sessionRef: "ref-x" },
+    ];
+    // One chunk per frame so each line triggers a parseFrame call
+    const chunks = makeChunks(["l1", "l2", "l3", "l4", "l5", "l6"], 0);
+
+    const orchestrator = makeOrchestrator(
+      events.map((e) => [e]),
+      chunks,
+      applyCommand,
+      undefined,
+      (e) => published.push(e),
+    );
+    await orchestrator.run();
+
+    expect(published).toHaveLength(6);
+    expect(published.map((e) => e.kind)).toEqual([
+      "assistant_text", "thinking", "tool_call", "tool_result", "usage", "final",
+    ]);
+  });
+
+  it("publish throws sync: orchestrator completes anyway", async () => {
+    const calls: string[] = [];
+    const applyCommand = vi.fn(async (cmd: Command): Promise<CommandResult> => {
+      if (cmd.kind === "transition-task") calls.push(cmd.transition.kind);
+      return makeCommandResult();
+    });
+
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "ref-y" };
+    const chunks = makeChunks(["line-1"], 0);
+
+    const orchestrator = makeOrchestrator(
+      [[finalEvent]],
+      chunks,
+      applyCommand,
+      undefined,
+      () => { throw new Error("publish exploded"); },
+    );
+    await expect(orchestrator.run()).resolves.toBeUndefined();
+    expect(calls).toContain("complete-runtime");
+  });
+
+  it("error{recoverable:false} then final: both published, then mark-interrupted fires", async () => {
+    const published: ProviderEvent[] = [];
+    const calls: string[] = [];
+    const applyCommand = vi.fn(async (cmd: Command): Promise<CommandResult> => {
+      if (cmd.kind === "transition-task") calls.push(cmd.transition.kind);
+      return makeCommandResult();
+    });
+
+    const errorEvent: ProviderEvent = { kind: "error", recoverable: false, message: "failed" };
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "ref-z" };
+    const chunks = makeChunks(["line-1", "line-2"], 0);
+
+    const orchestrator = makeOrchestrator(
+      [[errorEvent], [finalEvent]],
+      chunks,
+      applyCommand,
+      undefined,
+      (e) => published.push(e),
+    );
+    await orchestrator.run();
+
+    expect(published.map((e) => e.kind)).toContain("error");
+    expect(published.map((e) => e.kind)).toContain("final");
+    const errorIdx = published.findIndex((e) => e.kind === "error");
+    const finalIdx = published.findIndex((e) => e.kind === "final");
+    expect(errorIdx).toBeLessThan(finalIdx);
+    expect(calls).toContain("mark-interrupted");
+    expect(calls).not.toContain("complete-runtime");
   });
 
   it("version_conflict on complete-runtime: retries and succeeds, mark-interrupted not dispatched", async () => {

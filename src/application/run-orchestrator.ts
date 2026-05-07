@@ -9,10 +9,12 @@ import type { TransitionCommand } from "./transitions.js";
 export interface RunOrchestratorDeps {
   workflowId: string;
   taskId: string;
+  runId: string;
   runtimeSessionId: string;
   provider: ProviderPlugin;
   runtime: RuntimeBackend;
   applyCommand: (cmd: Command) => Promise<CommandResult>;
+  publish: (event: ProviderEvent) => void;
   now: () => string;
   signal?: AbortSignal;
   fromOffset?: number;
@@ -83,6 +85,12 @@ export class RunOrchestrator {
         }
 
         const event = item.event;
+
+        try {
+          this.deps.publish(event);
+        } catch (err) {
+          console.error("run-orchestrator transient publish failed:", err);
+        }
 
         if (event.kind === "error" && !event.recoverable) {
           lastNonRecoverableError = event;

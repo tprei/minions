@@ -14,6 +14,7 @@ import type { ProviderPlugin } from "./plugins/provider-plugin.js";
 import type { RuntimeBackend } from "./plugins/runtime-backend.js";
 import { StubRuntimeBackend } from "./plugins/stub-runtime.js";
 import { createServer } from "./transport/server.js";
+import type { WorkflowEvent } from "./domain/events.js";
 
 export interface EngineConfig {
   dbPath: string;
@@ -53,10 +54,21 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
         const deps: RunOrchestratorDeps = {
           workflowId: ctx.workflowId,
           taskId: ctx.taskId,
+          runId: ctx.runId,
           runtimeSessionId: ctx.runtimeSessionId,
           provider,
           runtime,
           applyCommand: (cmd) => applyCommand(repo, cmd),
+          publish: (providerEvent) => {
+            const envelope: WorkflowEvent = {
+              cursor: 0,
+              workflowId: ctx.workflowId,
+              occurredAt: now(),
+              kind: "provider-event",
+              payload: { taskId: ctx.taskId, runId: ctx.runId, providerEvent },
+            };
+            repo.publishTransient(ctx.workflowId, envelope);
+          },
           now,
           signal: controller.signal,
         };

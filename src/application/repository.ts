@@ -20,6 +20,7 @@ export interface WorkflowRepository {
   ): Promise<void>;
   eventsSince(workflowId: string, cursor: number): Promise<WorkflowEvent[]>;
   subscribe(workflowId: string, fromCursor: number): AsyncIterable<WorkflowEvent>;
+  publishTransient(workflowId: string, event: WorkflowEvent): void;
   lookupIdempotency(workflowId: string, key: string): Promise<string | undefined>;
   listRecoverable(): Promise<Workflow[]>;
 }
@@ -84,6 +85,10 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     return this.hub.subscribe(workflowId, fromCursor, () =>
       this.eventsSince(workflowId, fromCursor),
     );
+  }
+
+  publishTransient(workflowId: string, event: WorkflowEvent): void {
+    this.hub.notifyTransient(workflowId, event);
   }
 
   subscriberCount(workflowId: string): number {

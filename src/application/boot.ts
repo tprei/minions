@@ -7,6 +7,7 @@ import { getOpenRun } from "../domain/runs.js";
 export interface BootRespawnContext {
   workflowId: string;
   taskId: string;
+  runId: string;
   runtimeSessionId: string;
   providerType: string;
   runtimeType: string;
@@ -119,6 +120,7 @@ export async function runBootRecovery(
         const ctx: BootRespawnContext = {
           workflowId: workflow.id,
           taskId: task.id,
+          runId: openRun.id,
           runtimeSessionId: task.sessionId,
           providerType: openRun.providerType,
           runtimeType: openRun.runtimeType,

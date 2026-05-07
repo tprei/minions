@@ -344,6 +344,40 @@ describe("runBootRecovery — spawnOrchestrator", () => {
     expect(report.orchestratorsSpawned).toBe(0);
   });
 
+  it("ctx populated with runId === openRun.id", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const { sessionId } = await runtime.start({ taskId: "wf-1:task", workflowId: "wf-1", command: ["echo"] });
+
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => started);
+    const openRunId = "run-wf-1:task-1";
+    const taskRunning = {
+      ...wf.graph["wf-1:task"]!,
+      executionStatus: "running" as const,
+      sessionId,
+      runs: [{
+        id: openRunId,
+        taskId: "wf-1:task",
+        attempt: 1,
+        providerType: "stub",
+        runtimeType: "stub",
+        runtimeSessionId: sessionId,
+        startedAt: started,
+      }],
+    };
+    await repo.save({ ...wf, graph: { "wf-1:task": taskRunning } }, []);
+
+    const spawned: BootRespawnContext[] = [];
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    await runBootRecovery(repo, service, runtime, {
+      ...bootOptions,
+      spawnOrchestrator: (ctx) => spawned.push(ctx),
+    });
+
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]?.runId).toBe(openRunId);
+  });
+
   it("spawnOrchestrator invoked once per live task with correct ctx fields", async () => {
     const repo = new InMemoryWorkflowRepository();
     const runtime = new StubRuntimeBackend();
@@ -540,10 +574,12 @@ describe("runBootRecovery — spawnOrchestrator", () => {
         const deps: RunOrchestratorDeps = {
           workflowId: ctx.workflowId,
           taskId: ctx.taskId,
+          runId: ctx.runId,
           runtimeSessionId: ctx.runtimeSessionId,
           provider,
           runtime,
           applyCommand: (cmd) => applyCommand(repo, cmd),
+          publish: () => {},
           now: () => staleNow,
         };
         if (ctx.fromOffset !== undefined) deps.fromOffset = ctx.fromOffset;

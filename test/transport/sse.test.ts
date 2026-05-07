@@ -144,6 +144,55 @@ describe("GET /workflows/:id/events (SSE)", () => {
     }
   });
 
+  it("provider-event frame has no id field; surrounding durable frames have id", async () => {
+    const { app, repo } = makeApp();
+    await seedWorkflow(repo);
+
+    // Seed one durable event at cursor 1
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-ready", taskId, now },
+    });
+
+    const res = await app.request("/workflows/wf-1/events?since=0");
+    expect(res.status).toBe(200);
+
+    // Read the first durable frame (cursor 1)
+    const frames1 = await collectSSEFrames(res, 1);
+    expect(frames1[0]?.id).toBeDefined();
+
+    // Now publish a transient frame via hub — need repo direct access
+    const transient: WorkflowEvent = {
+      cursor: 0,
+      workflowId: "wf-1",
+      kind: "provider-event",
+      occurredAt: now,
+      payload: {
+        taskId,
+        runId: "run-1",
+        providerEvent: { kind: "assistant_text", text: "hello" },
+      },
+    };
+
+    // Open a new SSE connection from cursor 0 to get replay + transient
+    const res2 = await app.request("/workflows/wf-1/events?since=0");
+    expect(res2.status).toBe(200);
+
+    // Publish transient after stream opens
+    const transientPromise = collectSSEFrames(res2, 2);
+    repo.publishTransient("wf-1", transient);
+
+    const frames2 = await transientPromise;
+    // First frame is durable (cursor 1), second is transient (no id)
+    const durableFrame = frames2.find((f) => f.event !== "provider-event" && f.id !== undefined) ?? frames2[0];
+    const transientFrame = frames2.find((f) => f.event === "provider-event");
+
+    expect(durableFrame?.id).toBeDefined();
+    expect(transientFrame).toBeDefined();
+    expect(transientFrame?.id).toBeUndefined();
+  });
+
   it("live: applyCommand events arrive via SSE after stream opens", async () => {
     const { app, repo } = makeApp();
     await seedWorkflow(repo);

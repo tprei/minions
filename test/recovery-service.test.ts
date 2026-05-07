@@ -214,6 +214,7 @@ describe("RecoveryService.scan", () => {
       save: (w, e, i) => inner.save(w, e, i),
       eventsSince: (id, cursor) => inner.eventsSince(id, cursor),
       subscribe: (id, cursor) => inner.subscribe(id, cursor),
+      publishTransient: (id, event) => inner.publishTransient(id, event),
       lookupIdempotency: (id, key) => inner.lookupIdempotency(id, key),
       listRecoverable: () => inner.listRecoverable(),
     };
@@ -308,6 +309,7 @@ describe("RecoveryService.scan", () => {
       save: (w, e, i) => inner.save(w, e, i),
       eventsSince: (id, cursor) => inner.eventsSince(id, cursor),
       subscribe: (id, cursor) => inner.subscribe(id, cursor),
+      publishTransient: (id, event) => inner.publishTransient(id, event),
       lookupIdempotency: (id, key) => inner.lookupIdempotency(id, key),
       listRecoverable: () => inner.listRecoverable(),
     };

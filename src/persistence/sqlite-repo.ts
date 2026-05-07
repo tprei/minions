@@ -174,6 +174,10 @@ export class SQLiteWorkflowRepository implements WorkflowRepository {
     );
   }
 
+  publishTransient(workflowId: string, event: WorkflowEvent): void {
+    this.hub.notifyTransient(workflowId, event);
+  }
+
   async lookupIdempotency(workflowId: string, key: string): Promise<string | undefined> {
     const row = this.stmtLookupIdempotency.get(workflowId, key);
     return row?.result_ref;
