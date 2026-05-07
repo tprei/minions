@@ -53,6 +53,12 @@ export class ContinueTaskService {
       throw new DomainError("invalid_transition", "no resumable session on prior run", { taskId });
     }
 
+    if (task.executionStatus !== "needs-review") {
+      throw new DomainError("invalid_transition",
+        `continue-task requires task in needs-review, got ${task.executionStatus}`,
+        { taskId, currentStatus: task.executionStatus });
+    }
+
     const provider = providerFactory();
     const invocation = await provider.resume({ sessionRef: priorSessionRef, prompt, taskId, workflowId });
     const startSpec: { taskId: string; workflowId: string; command: string[]; env?: Record<string, string> } = {

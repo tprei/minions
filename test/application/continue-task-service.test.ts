@@ -125,6 +125,52 @@ describe("ContinueTaskService", () => {
     expect(resumeSpy).not.toHaveBeenCalled();
   });
 
+  it("sad path: task in ready with prior providerSessionRef → throws invalid_transition, no provider.resume or runtime.start call", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const provider = new StubProviderPlugin({ frames: [] });
+    const resumeSpy = vi.spyOn(provider, "resume");
+    const startSpy = vi.spyOn(runtime, "start");
+
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(wf, []);
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-ready", taskId: "wf-1:task", now },
+    });
+
+    const wfCurrent = await repo.get("wf-1");
+    const task = wfCurrent!.graph["wf-1:task"]!;
+    const patchedRun: NodeRun = { ...task.runs[0]!, endedAt: now, providerSessionRef: "prior-ref" };
+    const patchedWf = {
+      ...wfCurrent!,
+      version: wfCurrent!.version + 1,
+      graph: { "wf-1:task": { ...task, runs: [patchedRun] } },
+    };
+    await repo.save(patchedWf, []);
+
+    const service = new ContinueTaskService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      providerFactory: () => provider,
+      runtime,
+      now: () => now,
+    });
+
+    let caughtErr: unknown;
+    try {
+      await service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "continue" });
+    } catch (e) {
+      caughtErr = e;
+    }
+    expect(caughtErr).toBeInstanceOf(DomainError);
+    expect((caughtErr as DomainError).code).toBe("invalid_transition");
+    expect((caughtErr as DomainError).message).toContain("ready");
+    expect(resumeSpy).not.toHaveBeenCalled();
+    expect(startSpy).not.toHaveBeenCalled();
+  });
+
   it("sad path: provider.resume rejects → error propagates, task stays in needs-review", async () => {
     const repo = new InMemoryWorkflowRepository();
     const runtime = new StubRuntimeBackend();
