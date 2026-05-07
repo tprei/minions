@@ -170,9 +170,6 @@ describe("RecoveryService.scan", () => {
   });
 
   it("stale-session interrupt-task does not close a task whose session has changed", async () => {
-    // Simulate the race: scan reads a snapshot with sessionId "s-old" and plans an interrupt-task
-    // action. Between planning and applyCommand, the task's session is replaced with "s-new".
-    // The expectedSessionId guard on the transition layer must reject the stale command.
     const inner = new InMemoryWorkflowRepository();
     const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => started);
     await inner.save(wf, []);
@@ -187,12 +184,8 @@ describe("RecoveryService.scan", () => {
       transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s-old", now: started },
     });
 
-    // After the snapshot is taken by scan, the task restarts with a new session.
-    // We model this by wrapping the repo: the first get() returns the old snapshot (s-old),
-    // but the underlying store already has s-new by the time applyCommand fetches it.
     const snapshotWithOldSession = await inner.get("wf-1");
 
-    // Transition the live store to s-new (simulating a restart between planning and dispatch).
     await applyCommand(inner, {
       kind: "transition-task",
       workflowId: "wf-1",
@@ -209,8 +202,6 @@ describe("RecoveryService.scan", () => {
       transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s-new", now: started },
     });
 
-    // Wrap the repo so scan sees the old snapshot (triggering interrupt-task with sessionId "s-old"),
-    // while applyCommand reads the live state (sessionId "s-new").
     let firstGet = true;
     const staleScanRepo: WorkflowRepository = {
       get: async (id) => {
@@ -234,16 +225,112 @@ describe("RecoveryService.scan", () => {
       () => started,
     );
 
-    await expect(
-      service.scan("wf-1", {
-        ...defaultOptions,
-        runtimeProbes: { "s-old": "missing" as RuntimeProbeState },
-      }),
-    ).rejects.toMatchObject({ code: "invalid_transition" });
+    const results = await service.scan("wf-1", {
+      ...defaultOptions,
+      runtimeProbes: { "s-old": "missing" as RuntimeProbeState },
+    });
 
-    // The task must remain running with s-new — the stale interrupt did not close it.
+    expect(results).toHaveLength(0);
     const saved = await inner.get("wf-1");
     expect(saved?.graph["wf-1:task"]?.executionStatus).toBe("running");
     expect(saved?.graph["wf-1:task"]?.sessionId).toBe("s-new");
+  });
+
+  it("stale-session action is a no-op; subsequent valid action in same scan still executes", async () => {
+    // Two workflows: wf-1 has a stale-session interrupt-task (no-op), wf-2 has a stale-ready recover.
+    // We exercise both actions in a single scan call by using a two-task workflow where task-a
+    // has a stale session and task-b is independently stale-ready.
+    const inner = new InMemoryWorkflowRepository();
+
+    // Build a two-task workflow with no dependencies.
+    const { createWorkflow } = await import("../src/domain/workflow.js");
+    const wfSpec = createWorkflow(
+      {
+        id: "wf-x",
+        kind: "manual-dag",
+        tasks: [
+          { id: "wf-x:a", title: "A", prompt: "A" },
+          { id: "wf-x:b", title: "B", prompt: "B" },
+        ],
+        policy: { maxConcurrent: 2 },
+      },
+      () => started,
+    );
+    await inner.save(wfSpec, []);
+
+    // task-a: running with s-old (will be stale when scan fires interrupt-task).
+    await applyCommand(inner, {
+      kind: "transition-task",
+      workflowId: "wf-x",
+      transition: { kind: "mark-ready", taskId: "wf-x:a", now: started },
+    });
+    await applyCommand(inner, {
+      kind: "transition-task",
+      workflowId: "wf-x",
+      transition: { kind: "mark-running", taskId: "wf-x:a", sessionId: "s-old-a", now: started },
+    });
+
+    // task-b: ready (stale-ready — will be recovered to pending).
+    await applyCommand(inner, {
+      kind: "transition-task",
+      workflowId: "wf-x",
+      transition: { kind: "mark-ready", taskId: "wf-x:b", now: started },
+    });
+
+    const snapshotOld = await inner.get("wf-x");
+
+    // Advance the live store: task-a gets a new session (session changed since snapshot).
+    await applyCommand(inner, {
+      kind: "transition-task",
+      workflowId: "wf-x",
+      transition: { kind: "recover-task", taskId: "wf-x:a", now: started },
+    });
+    await applyCommand(inner, {
+      kind: "transition-task",
+      workflowId: "wf-x",
+      transition: { kind: "mark-ready", taskId: "wf-x:a", now: started },
+    });
+    await applyCommand(inner, {
+      kind: "transition-task",
+      workflowId: "wf-x",
+      transition: { kind: "mark-running", taskId: "wf-x:a", sessionId: "s-new-a", now: started },
+    });
+
+    let firstGet = true;
+    const staleScanRepo: WorkflowRepository = {
+      get: async (id) => {
+        if (firstGet) {
+          firstGet = false;
+          return snapshotOld;
+        }
+        return inner.get(id);
+      },
+      save: (w, e, i) => inner.save(w, e, i),
+      eventsSince: (id, cursor) => inner.eventsSince(id, cursor),
+      subscribe: (id, cursor) => inner.subscribe(id, cursor),
+      lookupIdempotency: (id, key) => inner.lookupIdempotency(id, key),
+      listRecoverable: () => inner.listRecoverable(),
+    };
+
+    const service = createRecoveryService(
+      staleScanRepo,
+      new NoopRestackExecutor(),
+      new StubRuntimeBackend(),
+      () => started,
+    );
+
+    const results = await service.scan("wf-x", {
+      ...defaultOptions,
+      runtimeProbes: { "s-old-a": "missing" as RuntimeProbeState },
+    });
+
+    // task-a: stale interrupt was a no-op — still running with s-new-a.
+    const saved = await inner.get("wf-x");
+    expect(saved?.graph["wf-x:a"]?.executionStatus).toBe("running");
+    expect(saved?.graph["wf-x:a"]?.sessionId).toBe("s-new-a");
+
+    // task-b: stale-ready recover DID execute — back to pending.
+    expect(saved?.graph["wf-x:b"]?.executionStatus).toBe("pending");
+    expect(results).toHaveLength(1);
   });
 });

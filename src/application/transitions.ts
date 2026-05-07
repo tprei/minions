@@ -170,7 +170,7 @@ export function transitionTask(workflow: Workflow, command: TransitionCommand): 
   }
 
   if (command.expectedSessionId !== undefined && command.expectedSessionId !== task.sessionId) {
-    throw new DomainError("invalid_transition", "task session does not match", {
+    throw new DomainError("session_mismatch", "task session does not match", {
       taskId: task.id,
       expectedSessionId: command.expectedSessionId,
       actualSessionId: task.sessionId,

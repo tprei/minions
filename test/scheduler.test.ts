@@ -109,6 +109,44 @@ describe("dispatch planning", () => {
     expect(planDispatch(workflow)).toHaveLength(0);
   });
 
+  it("does not dispatch a pending task whose write claims overlap a needs-review task", () => {
+    let workflow = createWorkflow(
+      {
+        id: "wf-needs-review-claims",
+        kind: "manual-dag",
+        policy: { maxConcurrent: 2 },
+        tasks: [
+          {
+            id: "a",
+            title: "A",
+            prompt: "A",
+            claims: [{ scope: "src/shared/**", mode: "write" }],
+          },
+          {
+            id: "b",
+            title: "B",
+            prompt: "B",
+            claims: [{ scope: "src/shared/button.ts", mode: "write" }],
+          },
+        ],
+      },
+      () => fixedNow,
+    );
+
+    // Drive task-a to needs-review via the quality gate path.
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "a", now: fixedNow });
+    workflow = transitionTask(workflow, { kind: "mark-running", taskId: "a", sessionId: "s1", now: fixedNow });
+    workflow = transitionTask(workflow, { kind: "complete-runtime", taskId: "a", now: fixedNow });
+    workflow = transitionTask(workflow, { kind: "start-quality-gate", taskId: "a", now: fixedNow });
+    workflow = transitionTask(workflow, { kind: "complete-quality-gate", taskId: "a", passed: false, now: fixedNow });
+
+    expect(workflow.graph.a?.executionStatus).toBe("needs-review");
+
+    const plan = planDispatch(workflow);
+
+    expect(plan).toHaveLength(0);
+  });
+
   it("does not count gate-blocked tasks against runtime concurrency", () => {
     const workflow = createWorkflow(
       {

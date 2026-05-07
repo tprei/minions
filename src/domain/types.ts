@@ -154,6 +154,7 @@ export const TASK_CLAIM_HOLDING_STATUSES: ReadonlySet<TaskExecutionStatus> = new
   "finalizing",
   "quality-pending",
   "ci-pending",
+  "needs-review",
 ]);
 
 // Tasks in these statuses occupy a runtime/agent slot and count toward

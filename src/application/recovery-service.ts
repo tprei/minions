@@ -163,8 +163,13 @@ export function createRecoveryService(
       const results: CommandResult[] = [];
 
       for (const action of planRecovery(workflow, options)) {
-        const result = await dispatchAction(deps, workflow, action);
-        if (result !== null) results.push(result);
+        try {
+          const result = await dispatchAction(deps, workflow, action);
+          if (result !== null) results.push(result);
+        } catch (err) {
+          if (err instanceof DomainError && err.code === "session_mismatch") continue;
+          throw err;
+        }
       }
 
       return results;
