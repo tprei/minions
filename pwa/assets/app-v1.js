@@ -9,7 +9,7 @@ const state = {
 
 let es = null;
 
-bootstrap();
+document.addEventListener("DOMContentLoaded", bootstrap);
 
 function bootstrap() {
   registerSW();
@@ -87,23 +87,26 @@ function openStream(id) {
   es = new EventSource(`/workflows/${id}/events`);
 
   es.addEventListener("task-transitioned", (e) => {
-    const data = JSON.parse(e.data);
+    const event = JSON.parse(e.data);
+    const payload = event.payload;
     if (!state.currentWorkflow) return;
     const nodes = state.currentWorkflow.graph;
-    const idx = nodes.findIndex((n) => n.id === data.taskId);
-    if (idx !== -1) nodes[idx] = { ...nodes[idx], executionStatus: data.to };
+    const task = nodes[payload.taskId];
+    if (task) nodes[payload.taskId] = { ...task, executionStatus: payload.toExecutionStatus };
     renderKanban();
   });
 
   es.addEventListener("workflow-status-changed", (e) => {
-    const data = JSON.parse(e.data);
+    const event = JSON.parse(e.data);
+    const payload = event.payload;
     if (!state.currentWorkflow) return;
-    state.currentWorkflow = { ...state.currentWorkflow, status: data.status };
+    state.currentWorkflow = { ...state.currentWorkflow, status: payload.toStatus };
     renderKanban();
   });
 
   es.addEventListener("provider-event", (e) => {
-    const payload = JSON.parse(e.data);
+    const event = JSON.parse(e.data);
+    const payload = event.payload;
     const node = transcriptNode(payload);
     state.transcript.push(payload);
     const container = document.querySelector(".transcript");
@@ -177,9 +180,12 @@ export function transcriptNode(payload) {
 }
 
 function submitReply(taskId, prompt, fresh) {
-  const body = fresh
-    ? { type: "retry-task", taskId, prompt }
-    : { type: "continue-task", taskId, prompt };
+  const body = {
+    kind: fresh ? "retry-task" : "continue-task",
+    workflowId: state.currentId,
+    taskId,
+    prompt,
+  };
 
   fetch("/commands", {
     method: "POST",
@@ -357,21 +363,36 @@ function renderKanban(container) {
     if (container) container.appendChild(kanban);
   }
 
-  const columns = {
-    pending: [],
-    running: [],
-    "needs-review": [],
-    done: [],
-    cancelled: [],
+  const BUCKET = {
+    pending: "Pending",
+    ready: "Pending",
+    running: "Running",
+    finalizing: "Running",
+    "quality-pending": "Running",
+    "ci-pending": "Running",
+    "needs-review": "Review",
+    "pr-open": "Review",
+    completed: "Done",
+    merged: "Done",
+    failed: "Failed",
+    cancelled: "Failed",
   };
 
-  for (const node of wf.graph ?? []) {
-    const col = columns[node.executionStatus] ?? columns.pending;
-    col.push(node);
+  const columns = {
+    Pending: [],
+    Running: [],
+    Review: [],
+    Done: [],
+    Failed: [],
+  };
+
+  for (const node of Object.values(wf.graph)) {
+    const bucket = BUCKET[node.executionStatus] ?? "Pending";
+    columns[bucket].push(node);
   }
 
   for (const [status, tasks] of Object.entries(columns)) {
-    if (tasks.length === 0 && status !== "pending" && status !== "running") continue;
+    if (tasks.length === 0 && status !== "Pending" && status !== "Running") continue;
 
     const col = document.createElement("div");
     col.className = "kanban-col";
@@ -422,9 +443,9 @@ function renderReply(container) {
   input.placeholder = "Reply to agent…";
   reply.appendChild(input);
 
-  const runningTask = state.currentWorkflow?.graph?.find(
-    (n) => n.executionStatus === "running"
-  );
+  const runningTask = state.currentWorkflow
+    ? Object.values(state.currentWorkflow.graph).find((n) => n.executionStatus === "running")
+    : undefined;
   const taskId = runningTask?.id ?? null;
 
   const btnContinue = document.createElement("button");

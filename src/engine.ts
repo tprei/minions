@@ -176,11 +176,11 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   }
 
   let pwaRoot: string | undefined;
-  if (config.pwaDir !== undefined) {
-    // serveStatic refuses absolute paths; resolve abs first then make CWD-relative for stability across path forms.
-    const abs = isAbsolute(config.pwaDir)
-      ? config.pwaDir
-      : resolve(process.cwd(), config.pwaDir);
+  const pwaDirRaw = config.pwaDir ?? process.env["MWF_PWA_DIR"];
+  if (pwaDirRaw !== undefined) {
+    const abs = isAbsolute(pwaDirRaw)
+      ? pwaDirRaw
+      : resolve(process.cwd(), pwaDirRaw);
     pwaRoot = relative(process.cwd(), abs);
   }
 
