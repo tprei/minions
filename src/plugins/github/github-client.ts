@@ -190,16 +190,7 @@ export class GitHubClient {
   }
 
   async listCheckRuns(owner: string, repo: string, headSha: string): Promise<GhCheckRun[]> {
-    await this.bucket.acquire();
-    const url = `${GITHUB_API}/repos/${owner}/${repo}/commits/${headSha}/check-runs?per_page=100`;
-    let data: unknown;
-    try {
-      data = await this.request(url);
-    } catch (err) {
-      if (err instanceof GitHubApiError && err.status === 404) return [];
-      throw err;
-    }
-    const body = data as { total_count: number; check_runs: Array<{
+    type RawRun = {
       name: string;
       status: string;
       conclusion: string | null;
@@ -207,24 +198,58 @@ export class GitHubClient {
       started_at?: string;
       completed_at?: string;
       output?: { title?: string; summary?: string; text?: string };
-    }> };
-    if (body.total_count > 100) {
-      console.warn(`listCheckRuns: total_count=${body.total_count} exceeds per_page=100 for ${owner}/${repo}@${headSha}; pagination deferred`);
-    }
-    return body.check_runs.map((r) => {
-      const run: GhCheckRun = {
-        name: r.name,
-        status: r.status as GhCheckRun["status"],
-      };
-      if (r.conclusion !== null && KNOWN_CONCLUSIONS.has(r.conclusion)) {
-        run.conclusion = r.conclusion as Exclude<GhCheckRun["conclusion"], undefined>;
+    };
+
+    const mapCheckRuns = (rawRuns: RawRun[]): GhCheckRun[] =>
+      rawRuns.map((r) => {
+        const run: GhCheckRun = {
+          name: r.name,
+          status: r.status as GhCheckRun["status"],
+        };
+        if (r.conclusion !== null && KNOWN_CONCLUSIONS.has(r.conclusion)) {
+          run.conclusion = r.conclusion as Exclude<GhCheckRun["conclusion"], undefined>;
+        }
+        if (r.html_url !== undefined) run.htmlUrl = r.html_url;
+        if (r.started_at !== undefined) run.startedAt = r.started_at;
+        if (r.completed_at !== undefined) run.completedAt = r.completed_at;
+        if (r.output !== undefined) run.output = r.output;
+        return run;
+      });
+
+    const all: GhCheckRun[] = [];
+    let nextUrl: string | null = `/repos/${owner}/${repo}/commits/${headSha}/check-runs?per_page=100`;
+    let pages = 0;
+    const maxPages = 10; // safety cap against runaway pagination
+
+    while (nextUrl !== null && pages < maxPages) {
+      await this.bucket.acquire();
+      const pageUrl = `${GITHUB_API}${nextUrl}`;
+      const res: Response = await this.fetchImpl(pageUrl, {
+        headers: baseHeaders(this.token),
+      });
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        const retryAfterHeader = res.headers.get("retry-after");
+        const retryAfter = retryAfterHeader !== null ? parseInt(retryAfterHeader, 10) : undefined;
+        throw new GitHubApiError(res.status, pageUrl, body, isNaN(retryAfter ?? NaN) ? undefined : retryAfter);
       }
-      if (r.html_url !== undefined) run.htmlUrl = r.html_url;
-      if (r.started_at !== undefined) run.startedAt = r.started_at;
-      if (r.completed_at !== undefined) run.completedAt = r.completed_at;
-      if (r.output !== undefined) run.output = r.output;
-      return run;
-    });
+
+      const text = await res.text();
+      const data = JSON.parse(text) as { total_count: number; check_runs: RawRun[] };
+      all.push(...mapCheckRuns(data.check_runs));
+
+      const linkHeader: string | null = res.headers.get("Link");
+      nextUrl = linkHeader !== null ? parseNextLink(linkHeader) : null;
+      pages++;
+    }
+
+    if (nextUrl !== null && pages === maxPages) {
+      // Hit the page cap; results are bounded but incomplete
+      console.warn(`listCheckRuns: hit page cap of ${maxPages} for ${owner}/${repo}@${headSha}`);
+    }
+
+    return all;
   }
 
   async mergePR(
@@ -249,4 +274,19 @@ export class GitHubClient {
     }) as { merged: boolean; sha: string; message: string };
     return result;
   }
+}
+
+function parseNextLink(linkHeader: string): string | null {
+  for (const part of linkHeader.split(",")) {
+    const match = part.match(/<([^>]+)>;\s*rel="next"/);
+    if (match) {
+      const fullUrl = match[1]!;
+      // Strip the base URL prefix to return a path-relative URL
+      if (fullUrl.startsWith(GITHUB_API)) {
+        return fullUrl.slice(GITHUB_API.length);
+      }
+      return fullUrl;
+    }
+  }
+  return null;
 }

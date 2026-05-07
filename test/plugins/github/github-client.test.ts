@@ -10,12 +10,12 @@ function makeClient(fetchMock: typeof fetch): GitHubClient {
   return new GitHubClient({ token: "test-pat", bucket: makeBucket(), fetchImpl: fetchMock });
 }
 
-function mockFetch(status: number, body: unknown): typeof fetch {
+function mockFetch(status: number, body: unknown, linkHeader?: string): typeof fetch {
   return vi.fn().mockResolvedValue({
     ok: status >= 200 && status < 300,
     status,
     text: () => Promise.resolve(typeof body === "string" ? body : JSON.stringify(body)),
-    headers: { get: () => null },
+    headers: { get: (name: string) => name.toLowerCase() === "link" ? (linkHeader ?? null) : null },
   }) as unknown as typeof fetch;
 }
 
@@ -111,10 +111,10 @@ describe("GitHubClient", () => {
       });
     });
 
-    it("returns [] on 404", async () => {
+    it("throws GitHubApiError on 404", async () => {
       const client = makeClient(mockFetch(404, "Not Found"));
-      const runs = await client.listCheckRuns("owner", "repo", "abc123");
-      expect(runs).toEqual([]);
+      await expect(client.listCheckRuns("owner", "repo", "abc123"))
+        .rejects.toBeInstanceOf(GitHubApiError);
     });
 
     it("throws on 5xx", async () => {
@@ -123,20 +123,54 @@ describe("GitHubClient", () => {
         .rejects.toBeInstanceOf(GitHubApiError);
     });
 
-    it("logs warn when total_count > 100", async () => {
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const body = {
-        total_count: 150,
-        check_runs: Array.from({ length: 1 }, (_, i) => ({
-          name: `check-${i}`,
-          status: "completed",
-          conclusion: "success",
-        })),
+    it("paginates via Link header", async () => {
+      const page1Body = {
+        total_count: 2,
+        check_runs: [{ name: "check-1", status: "completed", conclusion: "success" }],
       };
-      const client = makeClient(mockFetch(200, body));
-      await client.listCheckRuns("owner", "repo", "abc123");
+      const page2Body = {
+        total_count: 2,
+        check_runs: [{ name: "check-2", status: "completed", conclusion: "failure" }],
+      };
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(JSON.stringify(page1Body)),
+          headers: { get: (name: string) => name.toLowerCase() === "link" ? '</repos/owner/repo/commits/abc123/check-runs?per_page=100&page=2>; rel="next"' : null },
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(JSON.stringify(page2Body)),
+          headers: { get: () => null },
+        }) as unknown as typeof fetch;
+      const client = makeClient(fetchMock);
+      const runs = await client.listCheckRuns("owner", "repo", "abc123");
+      expect(runs).toHaveLength(2);
+      expect(runs[0]?.name).toBe("check-1");
+      expect(runs[1]?.name).toBe("check-2");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("hits page cap and warns", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const pageBody = {
+        total_count: 1100,
+        check_runs: [{ name: "check", status: "completed", conclusion: "success" }],
+      };
+      const perpetualLinkFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve(JSON.stringify(pageBody)),
+        headers: { get: (name: string) => name.toLowerCase() === "link" ? '</repos/owner/repo/commits/abc123/check-runs?per_page=100&page=2>; rel="next"' : null },
+      }) as unknown as typeof fetch;
+      const client = makeClient(perpetualLinkFetch);
+      const runs = await client.listCheckRuns("owner", "repo", "abc123");
+      expect(perpetualLinkFetch).toHaveBeenCalledTimes(10);
+      expect(runs).toHaveLength(10);
       expect(warnSpy).toHaveBeenCalledOnce();
-      expect(warnSpy.mock.calls[0]![0]).toMatch(/total_count=150/);
+      expect(warnSpy.mock.calls[0]![0]).toMatch(/page cap/);
       warnSpy.mockRestore();
     });
 

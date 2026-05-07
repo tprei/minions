@@ -1,5 +1,6 @@
 import type { WorkflowEvent } from "../domain/events.js";
 import type { Artifact } from "../domain/types.js";
+import { GitHubApiError } from "../plugins/github/github-client.js";
 import type { GitHubClient } from "../plugins/github/github-client.js";
 import type { Command, CommandResult } from "./commands.js";
 import type { WorkflowRepository } from "./repository.js";
@@ -66,7 +67,9 @@ export class CIBabysitterService {
 
     deps.signal.addEventListener("abort", () => {
       for (const iter of this.activeIterators.values()) {
-        void iter.return?.();
+        if (iter !== null) {
+          void iter.return?.();
+        }
       }
       for (const ctrl of this.taskControllers.values()) {
         ctrl.abort();
@@ -78,6 +81,31 @@ export class CIBabysitterService {
   attach(workflowId: string): void {
     if (this.activeIterators.has(workflowId)) return;
     this.activeIterators.set(workflowId, null as unknown as AsyncIterator<WorkflowEvent>);
+    void this.attachAsync(workflowId);
+  }
+
+  private async attachAsync(workflowId: string): Promise<void> {
+    const workflow = await this.deps.workflowRepo.get(workflowId);
+    if (!workflow) {
+      this.activeIterators.delete(workflowId);
+      return;
+    }
+    for (const [taskId, task] of Object.entries(workflow.graph)) {
+      if (task.executionStatus === "pr-open") {
+        const key = `${workflowId}:${taskId}`;
+        if (!this.taskControllers.has(key)) {
+          const ctrl = new AbortController();
+          this.taskControllers.set(key, ctrl);
+          void this.pollPR(workflowId, taskId, ctrl.signal).catch((err) => {
+            console.error(`ci-babysitter: pollPR error for ${key}:`, err);
+          }).finally(() => {
+            if (this.taskControllers.get(key) === ctrl) {
+              this.taskControllers.delete(key);
+            }
+          });
+        }
+      }
+    }
     void this.consume(workflowId);
   }
 
@@ -211,6 +239,11 @@ export class CIBabysitterService {
       try {
         runs = await github.listCheckRuns(repoCoords.owner, repoCoords.repo, headSha);
       } catch (err) {
+        if (err instanceof GitHubApiError && err.status === 404) {
+          // Commit no longer exists (force-pushed); no point polling further
+          console.info(`ci-babysitter: commit not found for task ${taskId} (force-pushed?), bailing`);
+          return;
+        }
         console.error(`ci-babysitter: listCheckRuns error for task ${taskId}:`, err);
         continue;
       }
@@ -247,6 +280,10 @@ export class CIBabysitterService {
         try {
           confirmedRuns = await github.listCheckRuns(repoCoords.owner, repoCoords.repo, headSha);
         } catch (err) {
+          if (err instanceof GitHubApiError && err.status === 404) {
+            console.info(`ci-babysitter: commit not found during confirmation for task ${taskId} (force-pushed?), bailing`);
+            return;
+          }
           console.error(`ci-babysitter: listCheckRuns confirmation error for task ${taskId}:`, err);
           continue;
         }

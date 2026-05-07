@@ -4,6 +4,7 @@ import { applyCommand } from "../../src/application/commands.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
 import type { ContinueTaskInput } from "../../src/application/continue-task-service.js";
 import type { CommandResult } from "../../src/application/commands.js";
+import { GitHubApiError } from "../../src/plugins/github/github-client.js";
 import type { GhCheckRun } from "../../src/plugins/github/github-client.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
 import type { Artifact } from "../../src/domain/types.js";
@@ -505,5 +506,74 @@ describe("CIBabysitterService", () => {
     const parseErrorCall = errorCalls.find((c) => typeof c[0] === "string" && c[0].includes("parse PR number"));
     expect(parseErrorCall).toBeDefined();
     errorSpy.mockRestore();
+  });
+
+  it("attach polls existing pr-open tasks at attach time", async () => {
+    const repo = makeRepo();
+    await makeTaskUpToFinalizing(repo);
+    await openPR(repo);
+
+    const ctrl = new AbortController();
+    const listCheckRuns = vi.fn().mockResolvedValue([
+      { name: "ci", status: "completed", conclusion: "success" } satisfies GhCheckRun,
+    ]);
+    const github = makeGithub({ listCheckRuns });
+    const continueTaskService = makeContinueTaskService();
+
+    const service = new CIBabysitterService({
+      workflowRepo: repo,
+      github,
+      repoCoords: { owner: OWNER, repo: REPO },
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      continueTaskService,
+      signal: ctrl.signal,
+      now,
+      sleep: immediateSleep,
+      cadence: FAST_CADENCE,
+    });
+
+    service.attach(WORKFLOW_ID);
+    await new Promise((r) => setTimeout(r, 100));
+    ctrl.abort();
+
+    // pollPR must have started without any task-transitioned event
+    expect(listCheckRuns).toHaveBeenCalled();
+  });
+
+  it("pollPR bails on 404 from listCheckRuns", async () => {
+    const repo = makeRepo();
+    await makeTaskUpToFinalizing(repo);
+
+    const ctrl = new AbortController();
+    const listCheckRuns = vi.fn().mockRejectedValue(
+      new GitHubApiError(404, "https://api.github.com/repos/acme/app/commits/abc123/check-runs", "Not Found"),
+    );
+    const github = makeGithub({ listCheckRuns });
+    const continueTaskService = makeContinueTaskService();
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const service = new CIBabysitterService({
+      workflowRepo: repo,
+      github,
+      repoCoords: { owner: OWNER, repo: REPO },
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      continueTaskService,
+      signal: ctrl.signal,
+      now,
+      sleep: immediateSleep,
+      cadence: FAST_CADENCE,
+    });
+
+    service.attach(WORKFLOW_ID);
+    await new Promise((r) => setImmediate(r));
+
+    await openPR(repo);
+    await new Promise((r) => setTimeout(r, 100));
+    ctrl.abort();
+
+    expect(continueTaskService.run).not.toHaveBeenCalled();
+    const bailCall = infoSpy.mock.calls.find((c) => typeof c[0] === "string" && c[0].includes("force-pushed"));
+    expect(bailCall).toBeDefined();
+    infoSpy.mockRestore();
   });
 });
