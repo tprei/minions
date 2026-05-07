@@ -10,10 +10,15 @@ import { NoopRestackExecutor } from "./application/restack-executor.js";
 import type { RestackExecutor } from "./application/restack-executor.js";
 import { RunOrchestrator } from "./application/run-orchestrator.js";
 import type { RunOrchestratorDeps } from "./application/run-orchestrator.js";
+import { PushService } from "./application/push-service.js";
+import type { SubscriptionRepository } from "./application/subscription-repository.js";
 import { SQLiteWorkflowRepository } from "./persistence/sqlite-repo.js";
+import { SQLiteSubscriptionRepository, listDistinctWorkflowIds } from "./persistence/sqlite-subscription-repo.js";
 import type { ProviderPlugin } from "./plugins/provider-plugin.js";
 import type { RuntimeBackend } from "./plugins/runtime-backend.js";
 import { StubRuntimeBackend } from "./plugins/stub-runtime.js";
+import { WebPushSender } from "./plugins/push-sender.js";
+import type { PushSender, VapidConfig } from "./plugins/push-sender.js";
 import type { WorkspaceBackend } from "./plugins/workspace-backend.js";
 import { GitClient } from "./plugins/git/git-client.js";
 import { GitWorktreeWorkspaceBackend } from "./plugins/workspace/git-worktree-backend.js";
@@ -34,6 +39,19 @@ export interface EngineConfig {
   repoPath?: string;
   workspaceRoot?: string;
   gitCommandPrefix?: readonly string[];
+  vapid?: VapidConfig;
+  pushSender?: PushSender;
+}
+
+function resolveVapid(config: EngineConfig): VapidConfig | undefined {
+  if (config.vapid) return config.vapid;
+  const pub = process.env["MWF_VAPID_PUBLIC_KEY"];
+  const priv = process.env["MWF_VAPID_PRIVATE_KEY"];
+  const subject = process.env["MWF_VAPID_SUBJECT"];
+  if (pub && priv && subject) {
+    return { publicKey: pub, privateKey: priv, subject };
+  }
+  return undefined;
 }
 
 export interface Engine {
@@ -67,6 +85,8 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   } else {
     workspace = new StubWorkspaceBackend();
   }
+
+  const vapid = resolveVapid(config);
 
   const repo = new SQLiteWorkflowRepository(config.dbPath);
   const recoveryService = createRecoveryService(repo, executor, runtime, now);
@@ -128,7 +148,33 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
 
   const bootReport = await runBootRecovery(repo, recoveryService, runtime, bootRecoveryOpts);
 
+  let pushAbort: AbortController | undefined;
+  let pushService: PushService | undefined;
+  let subscriptions: SubscriptionRepository | undefined;
+
+  if (vapid) {
+    pushAbort = new AbortController();
+    const db = repo.getDatabase();
+    subscriptions = new SQLiteSubscriptionRepository(db);
+    const sender: PushSender = config.pushSender ?? new WebPushSender(vapid);
+    pushService = new PushService({ workflowRepo: repo, subscriptions, sender, signal: pushAbort.signal });
+
+    const recoverableWorkflows = await repo.listRecoverable();
+    const recoverableIds = new Set(recoverableWorkflows.map((w) => w.id));
+    const subWorkflowIds = listDistinctWorkflowIds(db);
+    const allAttach = new Set([...recoverableIds, ...subWorkflowIds]);
+    for (const workflowId of allAttach) {
+      pushService.attach(workflowId);
+    }
+  }
+
   const serverDeps: Parameters<typeof createServer>[0] = { repo, recoveryService, executor };
+
+  if (vapid && pushService && subscriptions) {
+    serverDeps.pushService = pushService;
+    serverDeps.subscriptions = subscriptions;
+    serverDeps.vapidPublicKey = vapid.publicKey;
+  }
 
   if (config.providerFactory) {
     serverDeps.continueTaskService = new ContinueTaskService({
@@ -158,6 +204,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     bootReport,
     dataDir,
     async close() {
+      pushAbort?.abort();
       for (const entry of activeOrchestrators) {
         entry.controller.abort();
       }

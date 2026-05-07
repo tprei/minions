@@ -198,6 +198,10 @@ export class SQLiteWorkflowRepository implements WorkflowRepository {
     return this.hub.subscriberCount(workflowId);
   }
 
+  getDatabase(): Database.Database {
+    return this.db;
+  }
+
   close(): void {
     this.db.close();
   }

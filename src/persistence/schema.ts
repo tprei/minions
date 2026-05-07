@@ -46,3 +46,26 @@ export const SQL_LOOKUP_IDEMPOTENCY =
   "SELECT result_ref FROM idempotency WHERE workflow_id = ? AND key = ?";
 export const SQL_LIST_NON_COMPLETED = "SELECT blob FROM workflows WHERE status != 'completed'";
 export const SQL_LIST_COMPLETED = "SELECT blob FROM workflows WHERE status = 'completed'";
+
+export const PUSH_SUBSCRIPTIONS_DDL = `
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  endpoint TEXT PRIMARY KEY,
+  workflow_id TEXT NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_push_subs_workflow ON push_subscriptions(workflow_id);
+`;
+
+export const SQL_UPSERT_SUBSCRIPTION =
+  "INSERT INTO push_subscriptions (endpoint, workflow_id, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?) " +
+  "ON CONFLICT(endpoint) DO UPDATE SET workflow_id = excluded.workflow_id, p256dh = excluded.p256dh, auth = excluded.auth";
+
+export const SQL_DELETE_SUBSCRIPTION = "DELETE FROM push_subscriptions WHERE endpoint = ?";
+
+export const SQL_LIST_SUBS_BY_WORKFLOW =
+  "SELECT endpoint, workflow_id, p256dh, auth FROM push_subscriptions WHERE workflow_id = ?";
+
+export const SQL_LIST_DISTINCT_WORKFLOW_IDS =
+  "SELECT DISTINCT workflow_id FROM push_subscriptions";

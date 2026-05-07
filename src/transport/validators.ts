@@ -132,6 +132,34 @@ export function validateCommand(body: unknown): ValidationResult {
   return runChecks(body, COMMAND_CHECKS[kind as AllCommandKind]);
 }
 
+function isPushEndpoint(v: unknown): boolean {
+  if (typeof v !== "string") return false;
+  if (v.startsWith("https://")) return true;
+  if (v.startsWith("http://127.0.0.1") || v.startsWith("http://localhost")) return true;
+  return false;
+}
+
+const PUSH_SUBSCRIBE_CHECKS: FieldCheck[] = [
+  { path: "workflowId", check: isNonEmptyString, expected: "non-empty string" },
+  { path: "subscription", check: isObject, expected: "object" },
+  { path: "subscription.endpoint", check: isPushEndpoint, expected: "https:// URL (or http://localhost / http://127.0.0.1 for local use)" },
+  { path: "subscription.keys", check: isObject, expected: "object" },
+  { path: "subscription.keys.p256dh", check: isNonEmptyString, expected: "non-empty string" },
+  { path: "subscription.keys.auth", check: isNonEmptyString, expected: "non-empty string" },
+];
+
+const PUSH_UNSUBSCRIBE_CHECKS: FieldCheck[] = [
+  { path: "endpoint", check: isNonEmptyString, expected: "non-empty string" },
+];
+
+export function validatePushSubscribe(body: unknown): ValidationResult {
+  return runChecks(body, PUSH_SUBSCRIBE_CHECKS);
+}
+
+export function validatePushUnsubscribe(body: unknown): ValidationResult {
+  return runChecks(body, PUSH_UNSUBSCRIBE_CHECKS);
+}
+
 export function validateWorkflowSpec(body: unknown): ValidationResult {
   const topLevel = runChecks(body, WORKFLOW_SPEC_CHECKS);
   if (!topLevel.ok) return topLevel;

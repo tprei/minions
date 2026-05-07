@@ -27,6 +27,8 @@ export * from "./plugins/workspace-backend.js";
 export * from "./plugins/git/git-client.js";
 export * from "./plugins/workspace/git-worktree-backend.js";
 export * from "./plugins/workspace/stub-workspace.js";
+export type { VapidConfig, PushSender, PushSendTarget, PushSendResult } from "./plugins/push-sender.js";
+export type { PushSubscriptionRecord, SubscriptionRepository } from "./application/subscription-repository.js";
 export * from "./transport/errors.js";
 export * from "./transport/server.js";
 export * from "./transport/validators.js";

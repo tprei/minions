@@ -7,11 +7,13 @@ import type { RetryTaskService } from "../application/retry-task-service.js";
 import type { RecoveryService } from "../application/recovery-service.js";
 import type { WorkflowRepository } from "../application/repository.js";
 import type { RestackExecutor } from "../application/restack-executor.js";
+import type { PushService } from "../application/push-service.js";
+import type { SubscriptionRepository } from "../application/subscription-repository.js";
 import { DomainError } from "../domain/errors.js";
 import { createWorkflow } from "../domain/workflow.js";
 import type { WorkflowSpec } from "../domain/types.js";
 import { domainErrorToHttp } from "./errors.js";
-import { validateCommand, validateWorkflowSpec } from "./validators.js";
+import { validateCommand, validatePushSubscribe, validatePushUnsubscribe, validateWorkflowSpec } from "./validators.js";
 
 export interface ServerDeps {
   repo: WorkflowRepository;
@@ -19,6 +21,9 @@ export interface ServerDeps {
   executor: RestackExecutor;
   continueTaskService?: ContinueTaskService;
   retryTaskService?: RetryTaskService;
+  pushService?: PushService;
+  subscriptions?: SubscriptionRepository;
+  vapidPublicKey?: string;
 }
 
 type AcceptedCommandKind = CommandKind | "continue-task" | "retry-task";
@@ -86,6 +91,7 @@ export function createServer(deps: ServerDeps): Hono {
 
     const workflow = createWorkflow(body as WorkflowSpec);
     await repo.save(workflow, []);
+    deps.pushService?.attach(workflow.id);
     return c.json(workflow, 201);
   });
 
@@ -148,6 +154,84 @@ export function createServer(deps: ServerDeps): Hono {
 
     const result = await applyCommand(repo, body as unknown as Command);
     return c.json(result);
+  });
+
+  app.get("/push/vapid-public-key", (c) => {
+    if (!deps.vapidPublicKey) {
+      return c.json({ code: "push_disabled", message: "push notifications not configured" }, 503);
+    }
+    return c.json({ publicKey: deps.vapidPublicKey });
+  });
+
+  app.post("/push/subscribe", async (c) => {
+    if (!deps.pushService || !deps.subscriptions) {
+      return c.json({ code: "push_disabled", message: "push notifications not configured" }, 503);
+    }
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ code: "invalid_body", message: "request body is not valid JSON" }, 400);
+    }
+
+    const validation = validatePushSubscribe(body);
+    if (!validation.ok) {
+      return c.json(
+        {
+          code: "invalid_request",
+          message: validation.failure.message,
+          details: { field: validation.failure.field, expected: validation.failure.expected },
+        },
+        400,
+      );
+    }
+
+    const b = body as Record<string, unknown>;
+    const workflowId = b["workflowId"] as string;
+    const workflow = await repo.get(workflowId);
+    if (!workflow) {
+      return c.json({ code: "not_found", message: "workflow not found", details: {} }, 404);
+    }
+
+    const sub = b["subscription"] as Record<string, unknown>;
+    const keys = sub["keys"] as Record<string, string | undefined>;
+    await deps.subscriptions.upsert({
+      endpoint: sub["endpoint"] as string,
+      workflowId,
+      keys: { p256dh: keys["p256dh"] as string, auth: keys["auth"] as string },
+    });
+    deps.pushService.attach(workflowId);
+    return c.json({ ok: true }, 201);
+  });
+
+  app.delete("/push/subscribe", async (c) => {
+    if (!deps.subscriptions) {
+      return c.json({ code: "push_disabled", message: "push notifications not configured" }, 503);
+    }
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ code: "invalid_body", message: "request body is not valid JSON" }, 400);
+    }
+
+    const validation = validatePushUnsubscribe(body);
+    if (!validation.ok) {
+      return c.json(
+        {
+          code: "invalid_request",
+          message: validation.failure.message,
+          details: { field: validation.failure.field, expected: validation.failure.expected },
+        },
+        400,
+      );
+    }
+
+    const endpoint = (body as Record<string, unknown>)["endpoint"] as string;
+    await deps.subscriptions.remove(endpoint);
+    return c.json({ ok: true });
   });
 
   app.get("/workflows/:id/events", async (c) => {
