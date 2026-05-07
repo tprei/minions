@@ -159,7 +159,7 @@ const TRANSITIONS: Record<TransitionKind, TransitionRule> = {
     apply: () => ({ patch: { executionStatus: "merged" } }),
   },
   "merge-conflict": {
-    from: ["pr-open", "finalizing"],
+    from: ["pr-open", "finalizing", "ci-pending"],
     apply: (task, command) => ({
       patch: {
         executionStatus: "needs-review",

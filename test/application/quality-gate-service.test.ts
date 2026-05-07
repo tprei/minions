@@ -5,7 +5,7 @@ import { InMemoryWorkflowRepository } from "../../src/application/repository.js"
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
 import { StubQualityPlugin } from "../../src/plugins/quality/stub-quality-plugin.js";
 import type { WorkspaceBackend, WorkspaceHandle } from "../../src/plugins/workspace-backend.js";
-import type { QualityGateConfig, QualityRunResult } from "../../src/plugins/quality-plugin.js";
+import type { QualityGateConfig, QualityPlugin, QualityRunResult } from "../../src/plugins/quality-plugin.js";
 
 const NOW = "2026-05-07T10:00:00.000Z";
 const now = () => NOW;
@@ -54,7 +54,7 @@ async function makeTaskCompleted(repo: InMemoryWorkflowRepository, workspaceId =
 function makeDeps(overrides: {
   repo?: InMemoryWorkflowRepository;
   workspace?: WorkspaceBackend;
-  plugin?: InstanceType<typeof StubQualityPlugin>;
+  plugin?: QualityPlugin;
   signal?: AbortSignal;
 }) {
   const repo = overrides.repo ?? makeRepo();
@@ -340,6 +340,33 @@ describe("QualityGateService", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(abortedBySignal).toBe(true);
+  });
+
+  it("malformed loadConfig — task transitions to needs-review with config-error artifact", async () => {
+    const repo = makeRepo();
+    await makeTaskCompleted(repo);
+
+    const plugin = {
+      loadConfig: async (_path: string): Promise<never> => {
+        throw new SyntaxError("Unexpected token < in JSON");
+      },
+      run: vi.fn(),
+    };
+    const deps = makeDeps({ repo, plugin });
+    const service = makeService(deps);
+
+    service.attach(WORKFLOW_ID);
+    await new Promise((r) => setTimeout(r, 100));
+    deps.ctrl.abort();
+
+    const wf = await repo.get(WORKFLOW_ID);
+    expect(wf?.graph[TASK_ID]?.executionStatus).toBe("needs-review");
+    const artifacts = wf?.graph[TASK_ID]?.artifacts ?? [];
+    const report = artifacts.find((a) => a.kind === "quality-report");
+    expect(report).toBeDefined();
+    const ref = JSON.parse(report!.ref) as { reason: string; overallStatus: string };
+    expect(ref.reason).toBe("config-error");
+    expect(ref.overallStatus).toBe("failed");
   });
 
   it("runForTask bails when task moved out of completed mid-run", async () => {

@@ -146,12 +146,43 @@ const probeGateRule: ActionRule<TaskRecoveryAction> = (workflow, action) => {
   return {
     key: planKey,
     run: async (deps) => {
-      const transitionKind: TransitionKind =
-        task.executionStatus === "quality-pending" ? "complete-quality-gate" : "complete-ci-gate";
-      const artifactKind = task.executionStatus === "quality-pending" ? "quality-report" : "ci-report";
+      const recoveryRecord: IdempotencyRecord = {
+        key: planKey,
+        resultRef: `recovery:probe-gate:${action.taskId}`,
+      };
+
+      if (task.executionStatus === "quality-pending") {
+        const artifact: Artifact = {
+          kind: "quality-report",
+          ref: JSON.stringify({
+            overallStatus: "failed",
+            checks: [],
+            ranAt: deps.now(),
+            reason: "stale-recovery",
+          }),
+          producedBy: "recovery",
+          createdAt: deps.now(),
+        };
+
+        return applyCommand(
+          deps.repo,
+          {
+            kind: "transition-task",
+            workflowId: workflow.id,
+            transition: {
+              kind: "complete-quality-gate",
+              taskId: action.taskId,
+              passed: false,
+              artifacts: [artifact],
+              now: deps.now(),
+            },
+          },
+          { recoveryIdempotency: recoveryRecord },
+        );
+      }
 
       const artifact: Artifact = {
-        kind: artifactKind,
+        kind: "ci-report",
         ref: JSON.stringify({
           overallStatus: "failed",
           checks: [],
@@ -162,21 +193,16 @@ const probeGateRule: ActionRule<TaskRecoveryAction> = (workflow, action) => {
         createdAt: deps.now(),
       };
 
-      const recoveryRecord: IdempotencyRecord = {
-        key: planKey,
-        resultRef: `recovery:probe-gate:${action.taskId}`,
-      };
-
       return applyCommand(
         deps.repo,
         {
           kind: "transition-task",
           workflowId: workflow.id,
           transition: {
-            kind: transitionKind,
+            kind: "merge-conflict",
             taskId: action.taskId,
-            passed: false,
             artifacts: [artifact],
+            reason: "ci_stale_recovery",
             now: deps.now(),
           },
         },

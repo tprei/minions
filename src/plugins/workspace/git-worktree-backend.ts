@@ -141,7 +141,13 @@ export class GitWorktreeWorkspaceBackend implements WorkspaceBackend {
 
   async get(workspaceId: string): Promise<WorkspaceHandle | undefined> {
     const cached = this.handles.get(workspaceId);
-    if (cached) return cached;
+    if (cached) {
+      if (await this.probeWorktree(cached.path) !== "worktree") {
+        this.handles.delete(workspaceId);
+        return undefined;
+      }
+      return cached;
+    }
 
     if (workspaceId.startsWith("existing-")) return undefined;
 
@@ -149,6 +155,12 @@ export class GitWorktreeWorkspaceBackend implements WorkspaceBackend {
 
     const slug = workspaceId.slice(3);
     const worktreePath = join(this.workspaceRoot, slug);
+
+    try {
+      await this.validateContainment(worktreePath);
+    } catch {
+      return undefined;
+    }
 
     if (await this.probeWorktree(worktreePath) !== "worktree") return undefined;
 

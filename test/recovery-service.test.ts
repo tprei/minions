@@ -416,4 +416,58 @@ describe("RecoveryService.scan", () => {
     expect(secondResults).toHaveLength(0);
     expect(afterCursor).toBe(beforeCursor);
   });
+
+  it("stale ci-pending → probe-gate → merge-conflict → task ends in needs-review", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => started);
+    await repo.save(wf, []);
+
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-ready", taskId: "wf-1:task", now: started },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s1", now: started },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "complete-runtime", taskId: "wf-1:task", now: started },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "start-finalization", taskId: "wf-1:task", now: started },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: {
+        kind: "open-review",
+        taskId: "wf-1:task",
+        artifacts: [{ kind: "pr", ref: "https://github.com/org/repo/pull/1", producedBy: "merge", createdAt: started }],
+        now: started,
+      },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "wf-1",
+      transition: { kind: "start-ci-gate", taskId: "wf-1:task", now: started },
+    });
+
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const results = await service.scan("wf-1", { ...defaultOptions, staleGateMs: 60_000 });
+
+    expect(results).toHaveLength(1);
+    const saved = await repo.get("wf-1");
+    const task = saved?.graph["wf-1:task"];
+    expect(task?.executionStatus).toBe("needs-review");
+    const report = task?.artifacts.find((a) => a.kind === "ci-report");
+    expect(report).toBeDefined();
+    const ref = JSON.parse(report!.ref) as { reason: string };
+    expect(ref.reason).toBe("stale-recovery");
+  });
 });

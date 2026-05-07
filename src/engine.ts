@@ -283,7 +283,17 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     });
     serverDeps.qualityGateService = qualityGateService;
     const recoverableWorkflows = await repo.listRecoverable();
-    for (const w of recoverableWorkflows) qualityGateService.attach(w.id);
+    const attachedIds = new Set<string>();
+    for (const w of recoverableWorkflows) {
+      qualityGateService.attach(w.id);
+      attachedIds.add(w.id);
+    }
+    const allWorkflows = await repo.list({ includeCompleted: true });
+    for (const w of allWorkflows) {
+      if (!attachedIds.has(w.id) && Object.values(w.graph).some((t) => t.executionStatus === "completed")) {
+        qualityGateService.attach(w.id);
+      }
+    }
   }
 
   const server = createServer(serverDeps);

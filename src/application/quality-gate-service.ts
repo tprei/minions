@@ -50,6 +50,7 @@ export class QualityGateService {
   }
 
   private async attachAsync(workflowId: string): Promise<void> {
+    const cursor = await this.deps.workflowRepo.latestCursor(workflowId);
     const workflow = await this.deps.workflowRepo.get(workflowId);
     if (!workflow) {
       this.activeIterators.delete(workflowId);
@@ -60,7 +61,7 @@ export class QualityGateService {
         this.spawnRunForTask(workflowId, taskId);
       }
     }
-    void this.consume(workflowId);
+    void this.consume(workflowId, cursor);
   }
 
   private spawnRunForTask(workflowId: string, taskId: string): void {
@@ -75,8 +76,8 @@ export class QualityGateService {
       });
   }
 
-  private async consume(workflowId: string): Promise<void> {
-    const latestCursor = await this.deps.workflowRepo.latestCursor(workflowId);
+  private async consume(workflowId: string, fromCursor?: number): Promise<void> {
+    const latestCursor = fromCursor ?? await this.deps.workflowRepo.latestCursor(workflowId);
     const iterable = this.deps.workflowRepo.subscribe(workflowId, latestCursor);
     const iter = iterable[Symbol.asyncIterator]();
     this.activeIterators.set(workflowId, iter);
@@ -145,8 +146,6 @@ export class QualityGateService {
       return;
     }
 
-    const configs = await plugin.loadConfig(handle.path);
-
     try {
       await applyCommand({
         kind: "transition-task",
@@ -154,6 +153,32 @@ export class QualityGateService {
         transition: { kind: "start-quality-gate", taskId, now: now() },
       });
     } catch {
+      return;
+    }
+
+    if (signal.aborted) return;
+
+    let configs: Awaited<ReturnType<typeof plugin.loadConfig>>;
+    try {
+      configs = await plugin.loadConfig(handle.path);
+    } catch (err) {
+      const artifact = {
+        kind: "quality-report" as const,
+        ref: JSON.stringify({
+          overallStatus: "failed",
+          checks: [],
+          ranAt: now(),
+          reason: "config-error",
+          error: (err as Error).message,
+        }),
+        producedBy: "quality-gate",
+        createdAt: now(),
+      };
+      await applyCommand({
+        kind: "transition-task",
+        workflowId,
+        transition: { kind: "complete-quality-gate", taskId, passed: false, artifacts: [artifact], now: now() },
+      }).catch(() => {});
       return;
     }
 

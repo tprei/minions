@@ -369,8 +369,16 @@ describe("GitWorktreeWorkspaceBackend", () => {
     it("after create, get returns matching handle (cache hit)", async () => {
       const gitClient = makeGitClient();
       const backend = await makeBackend(gitClient);
+      const fsp = vi.mocked(await import("node:fs/promises"));
 
       const created = await backend.create({ workflowId: "wf1", taskId: "task1", branch: "b", mode: "worktree" });
+
+      // Simulate worktree still present so cache-hit re-validation passes
+      fsp.access.mockImplementation(async (p) => {
+        if (String(p) === `${created.path}/.git`) return undefined;
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      });
+
       const got = await backend.get(created.workspaceId);
 
       expect(got).toBeDefined();
@@ -424,6 +432,50 @@ describe("GitWorktreeWorkspaceBackend", () => {
 
       const got = await backend.get(created.workspaceId);
       expect(got).toBeUndefined();
+    });
+
+    it("cache hit returns undefined when worktree deleted out-of-band", async () => {
+      const gitClient = makeGitClient();
+      const backend = await makeBackend(gitClient);
+      const fsp = vi.mocked(await import("node:fs/promises"));
+
+      const worktreePath = "/fake/workspaces/wf1-a16d54_task1-943be8";
+
+      // First: .git exists so worktreeAdd and create succeed (probe sees a worktree)
+      fsp.access.mockImplementation(async (p) => {
+        if (String(p) === `${worktreePath}/.git`) return undefined;
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      });
+
+      const created = await backend.create({ workflowId: "wf1", taskId: "task1", branch: "b", mode: "worktree" });
+
+      // Simulate out-of-band deletion: .git no longer accessible
+      fsp.access.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+
+      const got = await backend.get(created.workspaceId);
+      expect(got).toBeUndefined();
+    });
+
+    it("crafted workspaceId with .. path traversal returns undefined from get()", async () => {
+      const gitClient = makeGitClient();
+      const fsp = vi.mocked(await import("node:fs/promises"));
+
+      fsp.realpath.mockImplementation(async (p) => {
+        const s = String(p);
+        if (s === FAKE_ROOT) return FAKE_ROOT;
+        // dirname of "/fake/workspaces/..victim" is "/fake/workspaces"
+        // dirname of "/fake/workspaces/../victim" resolves to "/fake"
+        if (s === "/fake/workspaces") return "/fake/workspaces";
+        if (s.endsWith("/..") || s.includes("/../")) return "/fake";
+        return s;
+      });
+
+      const backend = await makeBackend(gitClient);
+
+      // Simulate a crafted id whose slug resolves outside workspaceRoot
+      const got = await backend.get("ws-../victim");
+      expect(got).toBeUndefined();
+      expect(gitClient.run).not.toHaveBeenCalled();
     });
   });
 
