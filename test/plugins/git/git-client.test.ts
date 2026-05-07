@@ -134,6 +134,41 @@ describe("GitClient", () => {
     });
   });
 
+  describe("run env option", () => {
+    it("merges opts.env into process.env and passes to spawn", async () => {
+      const client = new GitClient();
+      spawnMock.mockReturnValue(makeMockProc("", "", 0));
+
+      await client.run("/repo", ["status"], { env: { FOO: "bar" } });
+
+      const call = spawnMock.mock.calls[0] as [string, string[], { cwd: string; env: Record<string, string> }];
+      expect(call[2].env).toBeDefined();
+      expect(call[2].env["FOO"]).toBe("bar");
+    });
+
+    it("does not set env key when opts.env is not provided", async () => {
+      const client = new GitClient();
+      spawnMock.mockReturnValue(makeMockProc("", "", 0));
+
+      await client.run("/repo", ["status"]);
+
+      const call = spawnMock.mock.calls[0] as [string, string[], { cwd: string; env?: unknown }];
+      expect(call[2].env).toBeUndefined();
+    });
+
+    it("honors commandPrefix alongside env passthrough", async () => {
+      const client = new GitClient({ commandPrefix: ["docker", "exec", "worker"] });
+      spawnMock.mockReturnValue(makeMockProc("", "", 0));
+
+      await client.run("/repo", ["push", "origin", "main"], { env: { GIT_ASKPASS: "/scripts/askpass.sh" } });
+
+      const call = spawnMock.mock.calls[0] as [string, string[], { cwd: string; env: Record<string, string> }];
+      expect(call[0]).toBe("docker");
+      expect(call[1]).toEqual(["exec", "worker", "git", "push", "origin", "main"]);
+      expect(call[2].env["GIT_ASKPASS"]).toBe("/scripts/askpass.sh");
+    });
+  });
+
   describe("worktreeList", () => {
     it("parses --porcelain k/v output into entries", async () => {
       const client = new GitClient();

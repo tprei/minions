@@ -6,6 +6,7 @@ import { StubRuntimeBackend } from "../../src/plugins/stub-runtime.js";
 import { createServer } from "../../src/transport/server.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
 import type { MergeService } from "../../src/application/merge-service.js";
+import { MergeServiceError } from "../../src/application/merge-service.js";
 
 const now = "2026-05-06T10:00:00.000Z";
 
@@ -60,5 +61,20 @@ describe("POST /workflows/:id/tasks/:taskId/merge", () => {
     expect(res.status).toBe(404);
     const body = await res.json() as { code: string };
     expect(body.code).toBe("not_found");
+  });
+
+  it("returns 500 with merge_state_inconsistent code when MergeServiceError is thrown", async () => {
+    const mockMergeService = {
+      merge: vi.fn().mockRejectedValue(
+        new MergeServiceError("merge_state_inconsistent", { sha: "abc", workflowId: "wf-1", taskId: "wf-1:task" }),
+      ),
+    } as unknown as MergeService;
+
+    const { app } = makeApp(mockMergeService);
+
+    const res = await app.request("/workflows/wf-1/tasks/wf-1:task/merge", { method: "POST" });
+    expect(res.status).toBe(500);
+    const body = await res.json() as { code: string };
+    expect(body.code).toBe("merge_state_inconsistent");
   });
 });

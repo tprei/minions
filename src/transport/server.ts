@@ -5,6 +5,7 @@ import { applyCommand } from "../application/commands.js";
 import type { Command, CommandKind } from "../application/commands.js";
 import type { ContinueTaskService } from "../application/continue-task-service.js";
 import type { MergeService } from "../application/merge-service.js";
+import { MergeServiceError } from "../application/merge-service.js";
 import type { RetryTaskService } from "../application/retry-task-service.js";
 import type { RecoveryService } from "../application/recovery-service.js";
 import type { WorkflowRepository } from "../application/repository.js";
@@ -172,8 +173,18 @@ export function createServer(deps: ServerDeps): Hono {
     }
     const workflowId = c.req.param("id");
     const taskId = c.req.param("taskId");
-    const result = await deps.mergeService.merge({ workflowId, taskId });
-    return c.json(result);
+    try {
+      const result = await deps.mergeService.merge({ workflowId, taskId });
+      return c.json(result);
+    } catch (err) {
+      if (err instanceof MergeServiceError && err.code === "merge_state_inconsistent") {
+        return c.json(
+          { code: "merge_state_inconsistent", message: "GitHub merged but internal state transition failed; operator must reconcile", details: { workflowId, taskId } },
+          500,
+        );
+      }
+      throw err;
+    }
   });
 
   app.get("/push/vapid-public-key", (c) => {

@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { MergeService } from "../src/application/merge-service.js";
+import { MergeService, MergeServiceError } from "../src/application/merge-service.js";
 import { InMemoryWorkflowRepository } from "../src/application/repository.js";
 import { applyCommand } from "../src/application/commands.js";
 import { createSingleTaskWorkflow } from "../src/domain/workflow.js";
 import { transitionTask } from "../src/application/transitions.js";
+import type { Command } from "../src/application/commands.js";
 import type { SCMPlugin, MergeResult, MergeOutcome } from "../src/plugins/scm-plugin.js";
 import type { WorkspaceBackend, WorkspaceHandle } from "../src/plugins/workspace-backend.js";
 import type { WorkflowEvent } from "../src/domain/events.js";
@@ -89,6 +90,41 @@ describe("MergeService", () => {
     ]);
 
     expect(result.workflow.graph["wf-1:task"]?.executionStatus).toBe("merged");
+    expect(scm.pushBranch).toHaveBeenCalledTimes(2);
+  });
+
+  it("merge-task transition fails 3 times: throws MergeServiceError, does NOT call merge-conflict", async () => {
+    const { repo } = await buildWorkflow();
+    const scm = makeScm();
+    const workspace = makeWorkspace();
+    let mergeTaskAttempts = 0;
+    const applyCommandSpy = vi.fn().mockImplementation(async (cmd: Command) => {
+      if (cmd.kind === "transition-task" && "transition" in cmd && cmd.transition.kind === "merge-task") {
+        mergeTaskAttempts++;
+        throw new Error("simulated transition failure");
+      }
+      return applyCommand(repo, cmd);
+    });
+
+    const service = new MergeService({
+      repo,
+      applyCommand: applyCommandSpy,
+      scm,
+      workspace,
+      repoCoords: { owner: "o", repo: "r" },
+      baseBranch: "main",
+      now: () => now,
+    });
+
+    await expect(service.merge({ workflowId: "wf-1", taskId: "wf-1:task" })).rejects.toBeInstanceOf(MergeServiceError);
+    expect(mergeTaskAttempts).toBe(3);
+    const mergeConflictCalls = applyCommandSpy.mock.calls.filter(
+      (args: unknown[]) => {
+        const cmd = args[0] as Command;
+        return cmd.kind === "transition-task" && "transition" in cmd && cmd.transition.kind === "merge-conflict";
+      },
+    );
+    expect(mergeConflictCalls).toHaveLength(0);
   });
 
   it("rebase conflict: task transitions to needs-review with patch artifact", async () => {

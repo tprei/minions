@@ -1,6 +1,5 @@
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
-import { spawn } from "node:child_process";
 import type { GitClient } from "../git/git-client.js";
 import { GitError } from "../git/git-client.js";
 import type { GitHubClient } from "./github-client.js";
@@ -80,30 +79,8 @@ export class GitHubScmPlugin implements SCMPlugin {
   }
 
   async pushBranch(path: string, branch: string): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      const env: Record<string, string> = {
-        ...process.env as Record<string, string>,
-        GIT_ASKPASS: ASKPASS_PATH,
-        GH_TOKEN: this.token,
-      };
-
-      const proc = spawn("git", ["push", "-u", "--force-with-lease", "origin", branch], {
-        cwd: path,
-        env,
-      });
-
-      const stderrChunks: Buffer[] = [];
-      proc.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
-
-      proc.on("close", (code) => {
-        if (code === 0) {
-          resolve();
-        } else {
-          const stderr = Buffer.concat(stderrChunks).toString("utf8");
-          reject(new Error(`git push failed (exit ${code ?? 1}): ${stderr}`));
-        }
-      });
-      proc.on("error", reject);
+    await this.git.run(path, ["push", "-u", "--force-with-lease", "origin", branch], {
+      env: { GIT_ASKPASS: ASKPASS_PATH, GH_TOKEN: this.token },
     });
   }
 

@@ -7,6 +7,18 @@ import { slugify } from "../plugins/workspace-backend.js";
 import type { Command, CommandResult } from "./commands.js";
 import type { WorkflowRepository } from "./repository.js";
 
+export class MergeServiceError extends Error {
+  readonly code: string;
+  readonly details: Record<string, unknown>;
+
+  constructor(code: string, details: Record<string, unknown>) {
+    super(code);
+    this.name = "MergeServiceError";
+    this.code = code;
+    this.details = details;
+  }
+}
+
 export interface MergeServiceDeps {
   repo: WorkflowRepository;
   applyCommand: (cmd: Command) => Promise<CommandResult>;
@@ -103,6 +115,8 @@ export class MergeService {
         (err as Error & { conflictPaths: string[] }).conflictPaths = rebaseResult.conflictPaths;
         throw err;
       }
+      // Push after rebase so the remote head matches the rebased SHA before GitHub merges.
+      await scm.pushBranch(workspaceHandle.path, branch);
       emitPhase("rebase", "completed");
 
       // Phase 5: applyMerge
@@ -160,20 +174,43 @@ export class MergeService {
 
       // Phase 6: finalize
       emitPhase("finalize", "started");
-      const finalResult = await applyCommand({
-        kind: "transition-task",
-        workflowId,
-        transition: {
-          kind: "merge-task",
-          taskId,
-          now: now(),
-        },
-      });
+      const maxAttempts = 3;
+      let finalResult: CommandResult | undefined;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+          finalResult = await applyCommand({
+            kind: "transition-task",
+            workflowId,
+            transition: { kind: "merge-task", taskId, now: now() },
+          });
+          break;
+        } catch (err) {
+          if (attempt + 1 >= maxAttempts) {
+            // GitHub is already merged but internal state won't transition — operator must reconcile.
+            console.error(
+              `MERGE INCONSISTENCY: github merged sha=${outcome.sha} but internal merge-task transition failed after ${maxAttempts} attempts. Operator must reconcile. Workflow=${workflowId} Task=${taskId}`,
+              err,
+            );
+            throw new MergeServiceError("merge_state_inconsistent", {
+              sha: outcome.sha,
+              workflowId,
+              taskId,
+              cause: err,
+            });
+          }
+          await new Promise<void>((r) => setTimeout(r, 100 * Math.pow(2, attempt)));
+        }
+      }
       await workspace.cleanup(workspaceHandle.workspaceId).catch(() => {});
       emitPhase("finalize", "completed");
 
-      return finalResult;
+      return finalResult!;
     } catch (err) {
+      if (err instanceof MergeServiceError) {
+        emitPhase("finalize", "completed", "MERGE_INCONSISTENT");
+        throw err;
+      }
+
       const phase = resolveFailedPhase(err, workspaceHandle);
       const reason = err instanceof Error ? err.message : String(err);
       const conflictPaths = (err as { conflictPaths?: string[] }).conflictPaths;

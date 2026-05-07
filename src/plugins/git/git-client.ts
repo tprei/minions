@@ -34,7 +34,11 @@ export class GitClient {
     this.commandPrefix = config.commandPrefix ?? [];
   }
 
-  run(cwd: string, args: readonly string[]): Promise<{ stdout: string; stderr: string }> {
+  run(
+    cwd: string,
+    args: readonly string[],
+    opts?: { env?: Record<string, string> },
+  ): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
       const [spawnBin, spawnArgs] =
         this.commandPrefix.length > 0
@@ -44,7 +48,11 @@ export class GitClient {
             ]
           : [this.bin, [...args]];
 
-      const proc = spawn(spawnBin, spawnArgs, { cwd });
+      const spawnEnv = opts?.env !== undefined
+        ? { ...process.env, ...opts.env }
+        : undefined;
+
+      const proc = spawn(spawnBin, spawnArgs, { cwd, ...(spawnEnv !== undefined ? { env: spawnEnv } : {}) });
       const stdoutChunks: Buffer[] = [];
       const stderrChunks: Buffer[] = [];
 
