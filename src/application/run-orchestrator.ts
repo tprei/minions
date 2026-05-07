@@ -1,8 +1,9 @@
 import { DomainError } from "../domain/errors.js";
-import type { ProviderPlugin } from "../plugins/provider-plugin.js";
+import type { ProviderEvent, ProviderPlugin } from "../plugins/provider-plugin.js";
 import { runProvider } from "../plugins/providers/run-provider.js";
 import type { RuntimeBackend } from "../plugins/runtime-backend.js";
 import type { Command, CommandResult } from "./commands.js";
+import type { TransitionCommand } from "./transitions.js";
 
 export interface RunOrchestratorDeps {
   workflowId: string;
@@ -27,6 +28,22 @@ export class RunOrchestrator {
 
     let latestOffset: number | undefined;
     let latestSessionRef: string | undefined;
+    let lastNonRecoverableError: ProviderEvent | undefined;
+
+    const dispatch = async (transition: Omit<TransitionCommand, "expectedSessionId">): Promise<void> => {
+      await applyCommand({
+        kind: "transition-task",
+        workflowId,
+        transition: { ...transition, expectedSessionId: runtimeSessionId },
+      });
+    };
+
+    const isAdvisory = (err: unknown): boolean =>
+      err instanceof DomainError &&
+      (err.code === "version_conflict" || err.code === "invalid_transition" || err.code === "session_mismatch");
+
+    const isStale = (err: unknown): boolean =>
+      err instanceof DomainError && err.code === "session_mismatch";
 
     try {
       for await (const item of runProvider(runtime, runtimeSessionId, provider, signal)) {
@@ -36,6 +53,11 @@ export class RunOrchestrator {
         }
 
         const event = item.event;
+
+        if (event.kind === "error" && !event.recoverable) {
+          lastNonRecoverableError = event;
+          continue;
+        }
 
         if (event.kind !== "final") {
           continue;
@@ -49,74 +71,89 @@ export class RunOrchestrator {
           if (latestOffset !== undefined) patch.outputOffset = latestOffset;
 
           try {
-            await applyCommand({
-              kind: "transition-task",
-              workflowId,
-              transition: { kind: "update-run", taskId, ...patch, now: now() },
-            });
+            await dispatch({ kind: "update-run", taskId, ...patch, now: now() });
           } catch (err) {
-            if (err instanceof DomainError && (err.code === "version_conflict" || err.code === "invalid_transition")) {
-              console.error("run-orchestrator update-run advisory write skipped:", err.message);
-            } else {
-              throw err;
+            if (isStale(err)) {
+              console.error("run-orchestrator stale session on update-run, exiting:", (err as DomainError).message);
+              return;
             }
+            if (!isAdvisory(err)) throw err;
+            console.error("run-orchestrator update-run advisory write skipped:", (err as Error).message);
           }
         }
 
-        await applyCommand({
-          kind: "transition-task",
-          workflowId,
-          transition: { kind: "complete-runtime", taskId, now: now() },
-        });
+        if (lastNonRecoverableError !== undefined) {
+          try {
+            await dispatch({ kind: "mark-interrupted", taskId, now: now() });
+          } catch (err) {
+            if (isStale(err)) {
+              console.error("run-orchestrator stale session on mark-interrupted, exiting:", (err as DomainError).message);
+              return;
+            }
+            throw err;
+          }
+        } else {
+          try {
+            await dispatch({ kind: "complete-runtime", taskId, now: now() });
+          } catch (err) {
+            if (isStale(err)) {
+              console.error("run-orchestrator stale session on complete-runtime, exiting:", (err as DomainError).message);
+              return;
+            }
+            throw err;
+          }
+        }
         return;
       }
     } catch (err) {
       if (latestOffset !== undefined) {
         try {
-          await applyCommand({
-            kind: "transition-task",
-            workflowId,
-            transition: { kind: "update-run", taskId, outputOffset: latestOffset, now: now() },
-          });
+          await dispatch({ kind: "update-run", taskId, outputOffset: latestOffset, now: now() });
         } catch (updateErr) {
-          if (
-            !(updateErr instanceof DomainError) ||
-            (updateErr.code !== "version_conflict" && updateErr.code !== "invalid_transition")
-          ) {
+          if (isStale(updateErr)) {
+            console.error("run-orchestrator stale session on best-effort update-run, exiting:", (updateErr as DomainError).message);
+            return;
+          }
+          if (!isAdvisory(updateErr)) {
             console.error("run-orchestrator best-effort update-run failed:", updateErr);
           }
         }
       }
 
-      await applyCommand({
-        kind: "transition-task",
-        workflowId,
-        transition: { kind: "mark-interrupted", taskId, now: now() },
-      });
+      try {
+        await dispatch({ kind: "mark-interrupted", taskId, now: now() });
+      } catch (interruptErr) {
+        if (isStale(interruptErr)) {
+          console.error("run-orchestrator stale session on mark-interrupted, exiting:", (interruptErr as DomainError).message);
+          return;
+        }
+        throw interruptErr;
+      }
       return;
     }
 
     if (latestOffset !== undefined) {
       try {
-        await applyCommand({
-          kind: "transition-task",
-          workflowId,
-          transition: { kind: "update-run", taskId, outputOffset: latestOffset, now: now() },
-        });
+        await dispatch({ kind: "update-run", taskId, outputOffset: latestOffset, now: now() });
       } catch (updateErr) {
-        if (
-          !(updateErr instanceof DomainError) ||
-          (updateErr.code !== "version_conflict" && updateErr.code !== "invalid_transition")
-        ) {
+        if (isStale(updateErr)) {
+          console.error("run-orchestrator stale session on best-effort update-run, exiting:", (updateErr as DomainError).message);
+          return;
+        }
+        if (!isAdvisory(updateErr)) {
           console.error("run-orchestrator best-effort update-run failed:", updateErr);
         }
       }
     }
 
-    await applyCommand({
-      kind: "transition-task",
-      workflowId,
-      transition: { kind: "mark-interrupted", taskId, now: now() },
-    });
+    try {
+      await dispatch({ kind: "mark-interrupted", taskId, now: now() });
+    } catch (interruptErr) {
+      if (isStale(interruptErr)) {
+        console.error("run-orchestrator stale session on mark-interrupted, exiting:", (interruptErr as DomainError).message);
+        return;
+      }
+      throw interruptErr;
+    }
   }
 }

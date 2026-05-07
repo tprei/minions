@@ -167,4 +167,43 @@ describe("RunOrchestrator", () => {
 
     expect(calls).toEqual(["update-run", "complete-runtime"]);
   });
+
+  it("stale session: session_mismatch on complete-runtime → exits silently without rethrowing", async () => {
+    const calls: string[] = [];
+    const applyCommand = vi.fn(async (cmd: Command): Promise<CommandResult> => {
+      if (cmd.kind === "transition-task") {
+        calls.push(cmd.transition.kind);
+        if (cmd.transition.kind === "complete-runtime") {
+          throw new DomainError("session_mismatch", "task session does not match", { taskId: "task-1" });
+        }
+      }
+      return makeCommandResult();
+    });
+
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "ref-x" };
+    const chunks = makeChunks(["line-1"], 0);
+
+    const orchestrator = makeOrchestrator([[finalEvent]], chunks, applyCommand);
+    await expect(orchestrator.run()).resolves.toBeUndefined();
+    expect(calls).toContain("complete-runtime");
+    expect(calls).not.toContain("mark-interrupted");
+  });
+
+  it("provider error{recoverable:false} then final → update-run then mark-interrupted, not complete-runtime", async () => {
+    const calls: string[] = [];
+    const applyCommand = vi.fn(async (cmd: Command): Promise<CommandResult> => {
+      if (cmd.kind === "transition-task") calls.push(cmd.transition.kind);
+      return makeCommandResult();
+    });
+
+    const errorEvent: ProviderEvent = { kind: "error", recoverable: false, message: "turn failed" };
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "ref-x" };
+    const chunks = makeChunks(["line-1", "line-2"], 0);
+
+    const orchestrator = makeOrchestrator([[errorEvent], [finalEvent]], chunks, applyCommand);
+    await orchestrator.run();
+
+    expect(calls).toEqual(["update-run", "mark-interrupted"]);
+    expect(calls).not.toContain("complete-runtime");
+  });
 });

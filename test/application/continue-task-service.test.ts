@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ContinueTaskService } from "../../src/application/continue-task-service.js";
 import { applyCommand } from "../../src/application/commands.js";
+import type { CommandResult } from "../../src/application/commands.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
 import { DomainError } from "../../src/domain/errors.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
@@ -55,7 +56,7 @@ describe("ContinueTaskService", () => {
     const service = new ContinueTaskService({
       repo,
       applyCommand: (cmd) => applyCommand(repo, cmd),
-      provider,
+      providerFactory: () => provider,
       runtime,
       now: () => now,
     });
@@ -108,7 +109,7 @@ describe("ContinueTaskService", () => {
     const service = new ContinueTaskService({
       repo,
       applyCommand: (cmd) => applyCommand(repo, cmd),
-      provider,
+      providerFactory: () => provider,
       runtime,
       now: () => now,
     });
@@ -124,7 +125,7 @@ describe("ContinueTaskService", () => {
     expect(resumeSpy).not.toHaveBeenCalled();
   });
 
-  it("sad path: provider.resume rejects → error propagates, no transitions applied", async () => {
+  it("sad path: provider.resume rejects → error propagates, task left in ready state", async () => {
     const repo = new InMemoryWorkflowRepository();
     const runtime = new StubRuntimeBackend();
     const provider = new StubProviderPlugin({ frames: [] });
@@ -132,13 +133,10 @@ describe("ContinueTaskService", () => {
 
     await makeNeedsReviewTask(repo, "existing-ref");
 
-    const wfBefore = await repo.get("wf-1");
-    const versionBefore = wfBefore!.version;
-
     const service = new ContinueTaskService({
       repo,
       applyCommand: (cmd) => applyCommand(repo, cmd),
-      provider,
+      providerFactory: () => provider,
       runtime,
       now: () => now,
     });
@@ -147,7 +145,42 @@ describe("ContinueTaskService", () => {
       service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "continue" }),
     ).rejects.toThrow("provider unavailable");
 
+    // mark-ready fires before provider.resume; task is in ready state after failure
     const wfAfter = await repo.get("wf-1");
-    expect(wfAfter!.version).toBe(versionBefore);
+    expect(wfAfter!.graph["wf-1:task"]!.executionStatus).toBe("ready");
+  });
+
+  it("sad path: mark-running rejects → runtime.stop called for cleanup before error propagates", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const stopSpy = vi.spyOn(runtime, "stop");
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "new-session" };
+    const provider = new StubProviderPlugin({ frames: [[finalEvent]] });
+
+    await makeNeedsReviewTask(repo, "prior-session-ref");
+
+    let markRunningCallCount = 0;
+    const wrappedApply = vi.fn(async (cmd: Parameters<typeof applyCommand>[1]): Promise<CommandResult> => {
+      if (cmd.kind === "transition-task" && cmd.transition.kind === "mark-running") {
+        markRunningCallCount++;
+        throw new DomainError("version_conflict", "concurrent update", { taskId: "wf-1:task" });
+      }
+      return applyCommand(repo, cmd);
+    });
+
+    const service = new ContinueTaskService({
+      repo,
+      applyCommand: wrappedApply,
+      providerFactory: () => provider,
+      runtime,
+      now: () => now,
+    });
+
+    await expect(
+      service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "continue" }),
+    ).rejects.toThrow();
+
+    expect(markRunningCallCount).toBe(1);
+    expect(stopSpy).toHaveBeenCalledOnce();
   });
 });

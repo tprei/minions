@@ -103,7 +103,6 @@ const COMMAND_CHECKS: { [K in AllCommandKind]: FieldCheck[] } = {
     BASE_WORKFLOW_ID,
     { path: "taskId", check: isString, expected: "string" },
     { path: "prompt", check: isNonEmptyString, expected: "non-empty string" },
-    { path: "now", check: isString, expected: "string" },
   ],
 };
 

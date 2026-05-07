@@ -8,7 +8,7 @@ import { RunOrchestrator } from "./run-orchestrator.js";
 export interface ContinueTaskServiceDeps {
   repo: WorkflowRepository;
   applyCommand: (cmd: Command) => Promise<CommandResult>;
-  provider: ProviderPlugin;
+  providerFactory: () => ProviderPlugin;
   runtime: RuntimeBackend;
   now: () => string;
 }
@@ -28,7 +28,7 @@ export class ContinueTaskService {
 
   async run(input: ContinueTaskInput): Promise<CommandResult> {
     const { workflowId, taskId, prompt } = input;
-    const { repo, applyCommand, provider, runtime, now } = this.deps;
+    const { repo, applyCommand, providerFactory, runtime, now } = this.deps;
 
     const workflow = await repo.get(workflowId);
     if (!workflow) {
@@ -53,6 +53,14 @@ export class ContinueTaskService {
       throw new DomainError("invalid_transition", "no resumable session on prior run", { taskId });
     }
 
+    // Claim state before allocating resources — fails cleanly if task isn't in needs-review
+    await applyCommand({
+      kind: "transition-task",
+      workflowId,
+      transition: { kind: "mark-ready", taskId, now: now() },
+    });
+
+    const provider = providerFactory();
     const invocation = await provider.resume({ sessionRef: priorSessionRef, prompt, taskId, workflowId });
     const startSpec: { taskId: string; workflowId: string; command: string[]; env?: Record<string, string> } = {
       taskId,
@@ -62,25 +70,25 @@ export class ContinueTaskService {
     if (invocation.env !== undefined) startSpec.env = invocation.env;
     const { sessionId: runtimeSessionId, runtimeType } = await runtime.start(startSpec);
 
-    await applyCommand({
-      kind: "transition-task",
-      workflowId,
-      transition: { kind: "mark-ready", taskId, now: now() },
-    });
-
-    const runningResult = await applyCommand({
-      kind: "transition-task",
-      workflowId,
-      transition: {
-        kind: "mark-running",
-        taskId,
-        sessionId: runtimeSessionId,
-        providerType: invocation.providerType,
-        runtimeType,
-        providerSessionRef: priorSessionRef,
-        now: now(),
-      },
-    });
+    let runningResult: CommandResult;
+    try {
+      runningResult = await applyCommand({
+        kind: "transition-task",
+        workflowId,
+        transition: {
+          kind: "mark-running",
+          taskId,
+          sessionId: runtimeSessionId,
+          providerType: invocation.providerType,
+          runtimeType,
+          providerSessionRef: priorSessionRef,
+          now: now(),
+        },
+      });
+    } catch (err) {
+      await runtime.stop(runtimeSessionId).catch(() => {});
+      throw err;
+    }
 
     const orchestrator = new RunOrchestrator({
       workflowId,

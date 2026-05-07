@@ -18,7 +18,7 @@ export interface EngineConfig {
   dataDir?: string;
   runtime?: RuntimeBackend;
   executor?: RestackExecutor;
-  provider?: ProviderPlugin;
+  providerFactory?: () => ProviderPlugin;
   staleReadyMs?: number;
   staleGateMs?: number;
   now?: () => string;
@@ -50,11 +50,11 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
 
   const serverDeps: Parameters<typeof createServer>[0] = { repo, recoveryService, executor };
 
-  if (config.provider) {
+  if (config.providerFactory) {
     serverDeps.continueTaskService = new ContinueTaskService({
       repo,
       applyCommand: (cmd) => applyCommand(repo, cmd),
-      provider: config.provider,
+      providerFactory: config.providerFactory,
       runtime,
       now,
     });

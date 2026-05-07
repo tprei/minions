@@ -58,7 +58,7 @@ describe("runProvider", () => {
     expect(offsetItems[1]?.offset).toBe(14);
   });
 
-  it("offset item appears after provider items from the same chunk", async () => {
+  it("offset item appears before provider items from the same chunk", async () => {
     const finalEvent: ProviderEvent = { kind: "final", sessionRef: "s" };
     const provider = new StubProviderPlugin({ frames: [[finalEvent]] });
 
@@ -70,8 +70,8 @@ describe("runProvider", () => {
       items.push(item);
     }
 
-    expect(items[0]?.kind).toBe("provider");
-    expect(items[1]?.kind).toBe("offset");
+    expect(items[0]?.kind).toBe("offset");
+    expect(items[1]?.kind).toBe("provider");
   });
 
   it("no chunks → no items emitted", async () => {
