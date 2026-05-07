@@ -1,4 +1,4 @@
-const state = {
+export const state = {
   workflows: [],
   currentId: null,
   currentWorkflow: null,
@@ -8,6 +8,7 @@ const state = {
 };
 
 let es = null;
+let routeGen = 0;
 
 document.addEventListener("DOMContentLoaded", bootstrap);
 
@@ -61,9 +62,13 @@ function loadList() {
     });
 }
 
-function loadWorkflowAndSubscribe(id) {
-  state.transcript = [];
+export function loadWorkflowAndSubscribe(id) {
+  // generation counter ensures a late-resolving fetch from a prior navigation
+  // can never overwrite state that belongs to the current route
+  const myGen = ++routeGen;
+  closeStream();
   state.currentWorkflow = null;
+  state.transcript = [];
   render();
 
   fetch(`/workflows/${id}`)
@@ -72,11 +77,13 @@ function loadWorkflowAndSubscribe(id) {
       return r.json();
     })
     .then((wf) => {
+      if (myGen !== routeGen) return;
       state.currentWorkflow = wf;
       render();
       openStream(id);
     })
     .catch((err) => {
+      if (myGen !== routeGen) return;
       state.error = err.message;
       render();
     });
