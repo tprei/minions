@@ -3,6 +3,7 @@ import type { QualityPlugin, QualityRunResult } from "../plugins/quality-plugin.
 import type { WorkspaceBackend } from "../plugins/workspace-backend.js";
 import type { Command, CommandResult } from "./commands.js";
 import type { WorkflowRepository } from "./repository.js";
+import type { Logger } from "../observability/logger.js";
 
 export interface QualityGateServiceDeps {
   workflowRepo: WorkflowRepository;
@@ -12,6 +13,7 @@ export interface QualityGateServiceDeps {
   signal: AbortSignal;
   now: () => string;
   defaultTimeoutMs?: number;
+  log: Logger;
 }
 
 export class QualityGateService {
@@ -70,7 +72,7 @@ export class QualityGateService {
     const ctrl = new AbortController();
     this.taskControllers.set(key, ctrl);
     void this.runForTask(workflowId, taskId, ctrl.signal)
-      .catch((err) => console.error(`quality-gate: runForTask error for ${key}:`, err))
+      .catch((err) => this.deps.log.error(`quality-gate: runForTask error for ${key}`, { error: (err as Error).message }))
       .finally(() => {
         if (this.taskControllers.get(key) === ctrl) this.taskControllers.delete(key);
       });
@@ -108,7 +110,7 @@ export class QualityGateService {
         }
       }
     } catch (err) {
-      console.error(`quality-gate: consume error for ${workflowId}:`, err);
+      this.deps.log.error(`quality-gate: consume error for ${workflowId}`, { error: (err as Error).message });
     } finally {
       this.activeIterators.delete(workflowId);
     }
@@ -121,7 +123,7 @@ export class QualityGateService {
     const task = workflow?.graph[taskId];
     if (!task || task.executionStatus !== "completed") return;
     if (!task.workspaceId) {
-      console.error(`quality-gate: task ${taskId} has no workspaceId, skipping`);
+      this.deps.log.error(`quality-gate: task ${taskId} has no workspaceId, skipping`, { taskId, workflowId });
       return;
     }
 
@@ -205,7 +207,7 @@ export class QualityGateService {
       if (defaultTimeoutMs !== undefined) runOpts.defaultTimeoutMs = defaultTimeoutMs;
       result = await plugin.run(configs, handle.path, runOpts);
     } catch (err) {
-      console.error(`quality-gate: plugin.run threw for ${workflowId}:${taskId}:`, err);
+      this.deps.log.error(`quality-gate: plugin.run threw for ${workflowId}:${taskId}`, { taskId, workflowId, error: (err as Error).message });
       const artifact = {
         kind: "quality-report" as const,
         ref: JSON.stringify({

@@ -1,0 +1,15 @@
+export type Level = "debug" | "info" | "warn" | "error";
+
+export interface LogRecord {
+  t: string;
+  lvl: Level;
+  msg: string;
+  [k: string]: unknown;
+}
+
+export type ObservabilityKind =
+  | "engine-lifecycle"
+  | "recovery-action"
+  | "service-attached"
+  | "http-request"
+  | "sink-degraded";

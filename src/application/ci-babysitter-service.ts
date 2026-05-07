@@ -6,6 +6,7 @@ import type { Command, CommandResult } from "./commands.js";
 import type { WorkflowRepository } from "./repository.js";
 import type { ContinueTaskService } from "./continue-task-service.js";
 import { MergeAbortedError, MergeConflictError, MergeService, MergeServiceError } from "./merge-service.js";
+import type { Logger } from "../observability/logger.js";
 
 export interface PollCadenceInterval {
   afterMs: number;
@@ -53,6 +54,7 @@ export interface CIBabysitterServiceDeps {
   now: () => string;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   cadence?: PollCadence;
+  log: Logger;
 }
 
 export class CIBabysitterService {
@@ -99,7 +101,7 @@ export class CIBabysitterService {
           const ctrl = new AbortController();
           this.taskControllers.set(key, ctrl);
           void this.pollPR(workflowId, taskId, ctrl.signal).catch((err) => {
-            console.error(`ci-babysitter: pollPR error for ${key}:`, err);
+            this.deps.log.error(`ci-babysitter: pollPR error for ${key}`, { error: (err as Error).message });
           }).finally(() => {
             if (this.taskControllers.get(key) === ctrl) {
               this.taskControllers.delete(key);
@@ -151,7 +153,7 @@ export class CIBabysitterService {
           const ctrl = new AbortController();
           this.taskControllers.set(key, ctrl);
           void this.pollPR(workflowId, taskId, ctrl.signal).catch((err) => {
-            console.error(`ci-babysitter: pollPR error for ${key}:`, err);
+            this.deps.log.error(`ci-babysitter: pollPR error for ${key}`, { error: (err as Error).message });
           }).finally(() => {
             if (this.taskControllers.get(key) === ctrl) {
               this.taskControllers.delete(key);
@@ -166,7 +168,7 @@ export class CIBabysitterService {
         }
       }
     } catch (err) {
-      console.error(`ci-babysitter: consume error for ${workflowId}:`, err);
+      this.deps.log.error(`ci-babysitter: consume error for ${workflowId}`, { error: (err as Error).message });
     } finally {
       this.activeIterators.delete(workflowId);
     }
@@ -183,20 +185,20 @@ export class CIBabysitterService {
 
     const prArtifact = [...task.artifacts].reverse().find((a) => a.kind === "pr");
     if (!prArtifact) {
-      console.error(`ci-babysitter: no pr artifact on task ${taskId}`);
+      this.deps.log.error(`ci-babysitter: no pr artifact on task ${taskId}`, { taskId, workflowId });
       return;
     }
 
     const prUrlMatch = prArtifact.ref.match(/\/pull\/(\d+)(?:$|\?|#)/);
     if (!prUrlMatch) {
-      console.error(`ci-babysitter: could not parse PR number from ref "${prArtifact.ref}" on task ${taskId}`);
+      this.deps.log.error(`ci-babysitter: could not parse PR number from ref on task ${taskId}`, { taskId, workflowId, ref: prArtifact.ref });
       return;
     }
     const prNumber = parseInt(prUrlMatch[1]!, 10);
 
     const ciReportCount = task.artifacts.filter((a) => a.kind === "ci-report").length;
     if (ciReportCount >= 1) {
-      console.info(`ci-babysitter: ci attempt cap reached for task ${taskId}`);
+      this.deps.log.info(`ci-babysitter: ci attempt cap reached for task ${taskId}`, { taskId, workflowId });
       return;
     }
 
@@ -205,7 +207,7 @@ export class CIBabysitterService {
       const pr = await github.getPR(repoCoords.owner, repoCoords.repo, prNumber);
       prDetail = { headSha: pr.headSha, url: pr.url };
     } catch (err) {
-      console.error(`ci-babysitter: getPR failed for task ${taskId}:`, err);
+      this.deps.log.error(`ci-babysitter: getPR failed for task ${taskId}`, { taskId, workflowId, error: (err as Error).message });
       return;
     }
 
@@ -219,7 +221,7 @@ export class CIBabysitterService {
 
       const elapsed = Date.now() - startMs;
       if (elapsed > this.cadence.maxHorizonMs) {
-        console.info(`ci-babysitter: max horizon reached for task ${taskId}`);
+        this.deps.log.info(`ci-babysitter: max horizon reached for task ${taskId}`, { taskId, workflowId });
         return;
       }
 
@@ -243,10 +245,10 @@ export class CIBabysitterService {
       } catch (err) {
         if (err instanceof GitHubApiError && err.status === 404) {
           // Commit no longer exists (force-pushed); no point polling further
-          console.info(`ci-babysitter: commit not found for task ${taskId} (force-pushed?), bailing`);
+          this.deps.log.info(`ci-babysitter: commit not found for task ${taskId} (force-pushed?), bailing`, { taskId, workflowId, headSha });
           return;
         }
-        console.error(`ci-babysitter: listCheckRuns error for task ${taskId}:`, err);
+        this.deps.log.error(`ci-babysitter: listCheckRuns error for task ${taskId}`, { taskId, workflowId, headSha, error: (err as Error).message });
         continue;
       }
 
@@ -256,7 +258,7 @@ export class CIBabysitterService {
 
       if (runs.length === 0) {
         if (elapsedAfterSleep > this.cadence.noChecksBailMs) {
-          console.info(`ci-babysitter: no checks ever observed for task ${taskId}, bailing`);
+          this.deps.log.info(`ci-babysitter: no checks ever observed for task ${taskId}, bailing`, { taskId, workflowId, headSha });
           return;
         }
         lastSeenAllComplete = false;
@@ -283,10 +285,10 @@ export class CIBabysitterService {
           confirmedRuns = await github.listCheckRuns(repoCoords.owner, repoCoords.repo, headSha);
         } catch (err) {
           if (err instanceof GitHubApiError && err.status === 404) {
-            console.info(`ci-babysitter: commit not found during confirmation for task ${taskId} (force-pushed?), bailing`);
+            this.deps.log.info(`ci-babysitter: commit not found during confirmation for task ${taskId} (force-pushed?), bailing`, { taskId, workflowId, headSha });
             return;
           }
-          console.error(`ci-babysitter: listCheckRuns confirmation error for task ${taskId}:`, err);
+          this.deps.log.error(`ci-babysitter: listCheckRuns confirmation error for task ${taskId}`, { taskId, workflowId, headSha, error: (err as Error).message });
           continue;
         }
 
@@ -300,7 +302,7 @@ export class CIBabysitterService {
 
       const failed = runs.filter((r) => r.conclusion !== undefined && FAILED_CONCLUSIONS.has(r.conclusion));
       if (failed.length === 0) {
-        console.info(`ci-babysitter: all checks passed for task ${taskId}`);
+        this.deps.log.info(`ci-babysitter: all checks passed for task ${taskId}`, { taskId, workflowId, headSha, prNumber });
 
         const refreshed = await workflowRepo.get(workflowId);
         const refreshedTask = refreshed?.graph[taskId];
@@ -316,10 +318,10 @@ export class CIBabysitterService {
           if (err instanceof MergeAbortedError) return;
           if (err instanceof MergeConflictError) return;
           if (err instanceof MergeServiceError) {
-            console.error(`ci-babysitter: catastrophic merge failure for ${workflowId}:${taskId}:`, err);
+            this.deps.log.error(`ci-babysitter: catastrophic merge failure for ${workflowId}:${taskId}`, { taskId, workflowId, error: (err as Error).message });
             return;
           }
-          console.error(`ci-babysitter: mergeService.merge threw for ${workflowId}:${taskId}, will not retry:`, err);
+          this.deps.log.error(`ci-babysitter: mergeService.merge threw for ${workflowId}:${taskId}, will not retry`, { taskId, workflowId, error: (err as Error).message });
           return;
         }
       }
@@ -352,14 +354,14 @@ export class CIBabysitterService {
           },
         });
       } catch (err) {
-        console.error(`ci-babysitter: merge-conflict transition failed for task ${taskId}:`, err);
+        this.deps.log.error(`ci-babysitter: merge-conflict transition failed for task ${taskId}`, { taskId, workflowId, error: (err as Error).message });
         return;
       }
 
       try {
         await continueTaskService.run({ workflowId, taskId, prompt: failureMessage });
       } catch (err) {
-        console.error(`ci-babysitter: continueTaskService.run failed for task ${taskId}:`, err);
+        this.deps.log.error(`ci-babysitter: continueTaskService.run failed for task ${taskId}`, { taskId, workflowId, error: (err as Error).message });
       }
 
       return;

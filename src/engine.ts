@@ -33,6 +33,10 @@ import { QualityGateService } from "./application/quality-gate-service.js";
 import { CompletionDispatcher } from "./application/completion-dispatcher.js";
 import type { QualityPlugin } from "./plugins/quality-plugin.js";
 import type { WorkflowEvent } from "./domain/events.js";
+import { buildSinksFromEnv, type Sink } from "./observability/sinks.js";
+import { createLogger, parseLevel, type Logger } from "./observability/logger.js";
+import type { Level } from "./observability/types.js";
+import { ObservabilityService } from "./observability/observability-service.js";
 
 export interface EngineConfig {
   dbPath: string;
@@ -61,6 +65,9 @@ export interface EngineConfig {
   githubBaseBranch?: string;
   qualityPlugin?: QualityPlugin;
   qualityDefaultTimeoutMs?: number;
+  log?: Logger;
+  logLevel?: Level;
+  logSinks?: Sink[];
 }
 
 function resolveVapid(config: EngineConfig): VapidConfig | undefined {
@@ -82,6 +89,15 @@ export interface Engine {
 }
 
 export async function createEngine(config: EngineConfig): Promise<Engine> {
+  const ownsSinks = config.log === undefined;
+  const sinks: Sink[] = ownsSinks ? (config.logSinks ?? buildSinksFromEnv()) : [];
+  const log: Logger = config.log ?? createLogger(
+    config.logLevel ?? parseLevel(process.env["MWF_LOG_LEVEL"]),
+    sinks,
+    { service: "engine" },
+  );
+  log.info("engine started", { kind: "engine-lifecycle", phase: "started", dbPath: config.dbPath });
+
   const dataDir = config.dataDir ?? `${dirname(config.dbPath)}/sessions`;
   const runtime = config.runtime ?? new StubRuntimeBackend();
   const executor = config.executor ?? new NoopRestackExecutor();
@@ -110,29 +126,29 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   const vapid = resolveVapid(config);
 
   const repo = new SQLiteWorkflowRepository(config.dbPath);
-  const recoveryService = createRecoveryService(repo, executor, runtime, now);
+  const recoveryService = createRecoveryService(repo, executor, runtime, now, log.child({ component: "recovery" }));
 
   type ActiveOrchestratorEntry = { controller: AbortController; promise: Promise<void> };
   const activeOrchestrators = new Set<ActiveOrchestratorEntry>();
 
-  const spawnTracked = (deps: Omit<RunOrchestratorDeps, "signal">): void => {
+  const spawnTracked = (deps: Omit<RunOrchestratorDeps, "signal" | "log">): void => {
     const controller = new AbortController();
     const entry: ActiveOrchestratorEntry = {
       controller,
       promise: undefined as unknown as Promise<void>,
     };
     activeOrchestrators.add(entry);
-    const orch = new RunOrchestrator({ ...deps, signal: controller.signal });
+    const orch = new RunOrchestrator({ ...deps, signal: controller.signal, log: log.child({ component: "run-orchestrator", workflowId: deps.workflowId, taskId: deps.taskId }) });
     entry.promise = orch
       .run()
-      .catch((err) => console.error("run-orchestrator error:", err))
+      .catch((err) => log.child({ component: "run-orchestrator" }).error("run-orchestrator error", { error: (err as Error).message }))
       .finally(() => { activeOrchestrators.delete(entry); });
   };
 
   const bootSpawnOrchestrator = config.providerFactory
     ? (ctx: BootRespawnContext) => {
         const provider = config.providerFactory!();
-        const deps: Omit<RunOrchestratorDeps, "signal"> = {
+        const deps: Omit<RunOrchestratorDeps, "signal" | "log"> = {
           workflowId: ctx.workflowId,
           taskId: ctx.taskId,
           runId: ctx.runId,
@@ -168,6 +184,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   if (bootSpawnOrchestrator !== undefined) bootRecoveryOpts.spawnOrchestrator = bootSpawnOrchestrator;
 
   const bootReport = await runBootRecovery(repo, recoveryService, runtime, bootRecoveryOpts);
+  log.info("boot complete", { kind: "engine-lifecycle", phase: "boot-complete", report: bootReport });
 
   let pushAbort: AbortController | undefined;
   let pushService: PushService | undefined;
@@ -178,7 +195,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     const db = repo.getDatabase();
     subscriptions = new SQLiteSubscriptionRepository(db);
     const sender: PushSender = config.pushSender ?? new WebPushSender(vapid);
-    pushService = new PushService({ workflowRepo: repo, subscriptions, sender, signal: pushAbort.signal });
+    pushService = new PushService({ workflowRepo: repo, subscriptions, sender, signal: pushAbort.signal, log: log.child({ component: "push" }) });
 
     const recoverableWorkflows = await repo.listRecoverable();
     const recoverableIds = new Set(recoverableWorkflows.map((w) => w.id));
@@ -240,7 +257,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     }
     const gitClient = sharedGitClient ?? new GitClient();
     const bucket = new TokenBucket({ capacity: 20, refillPerSec: 10 });
-    const ghClient = new GitHubClient({ token: githubToken, bucket });
+    const ghClient = new GitHubClient({ token: githubToken, bucket, log: log.child({ component: "github-client" }) });
     const scm = new GitHubScmPlugin({ github: ghClient, git: gitClient, token: githubToken });
     serverDeps.mergeService = new MergeService({
       repo,
@@ -250,6 +267,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       repoCoords: config.githubRepo,
       baseBranch: config.githubBaseBranch ?? "main",
       now,
+      log: log.child({ component: "merge" }),
     });
 
     if (config.providerFactory && serverDeps.continueTaskService) {
@@ -263,6 +281,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
         mergeService: serverDeps.mergeService,
         signal: ciBabysitterAbort.signal,
         now,
+        log: log.child({ component: "ci-babysitter" }),
       });
       serverDeps.ciBabysitter = babysitter;
       const recoverableWorkflows = await repo.listRecoverable();
@@ -281,6 +300,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       applyCommand: (cmd) => applyCommand(repo, cmd),
       signal: qualityAbort.signal,
       now,
+      log: log.child({ component: "quality-gate" }),
       ...(config.qualityDefaultTimeoutMs !== undefined ? { defaultTimeoutMs: config.qualityDefaultTimeoutMs } : {}),
     });
     serverDeps.qualityGateService = qualityGateService;
@@ -308,11 +328,23 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       mergeService: serverDeps.mergeService,
       signal: completionDispatcherAbort.signal,
       now,
+      log: log.child({ component: "completion-dispatcher" }),
     });
     serverDeps.completionDispatcher = completionDispatcher;
     const recoverableWorkflows = await repo.listRecoverable();
     for (const w of recoverableWorkflows) completionDispatcher.attach(w.id);
   }
+
+  const observabilityAbort = new AbortController();
+  const observability = new ObservabilityService({
+    workflowRepo: repo,
+    log: log.child({ component: "observability" }),
+    signal: observabilityAbort.signal,
+  });
+  const allWorkflows = await repo.list({ includeCompleted: true });
+  for (const w of allWorkflows) observability.attach(w.id);
+  serverDeps.observability = observability;
+  serverDeps.log = log.child({ component: "transport" });
 
   const server = createServer(serverDeps);
 
@@ -321,15 +353,18 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     bootReport,
     dataDir,
     async close() {
+      log.info("engine shutdown", { kind: "engine-lifecycle", phase: "shutdown" });
       pushAbort?.abort();
       ciBabysitterAbort?.abort();
       qualityAbort?.abort();
       completionDispatcherAbort?.abort();
+      observabilityAbort.abort();
       for (const entry of activeOrchestrators) {
         entry.controller.abort();
       }
       await Promise.all([...activeOrchestrators].map((e) => e.promise));
       repo.close();
+      if (ownsSinks) await Promise.all(sinks.map((s) => s.close?.() ?? Promise.resolve()));
     },
   };
 }

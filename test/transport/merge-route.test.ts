@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
 import { NoopRestackExecutor } from "../../src/application/restack-executor.js";
 import { createRecoveryService } from "../../src/application/recovery-service.js";
+import { silentLogger } from "../test-helpers.js";
 import { StubRuntimeBackend } from "../../src/plugins/stub-runtime.js";
 import { createServer } from "../../src/transport/server.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
@@ -14,7 +15,7 @@ function makeApp(mergeService?: MergeService) {
   const repo = new InMemoryWorkflowRepository();
   const executor = new NoopRestackExecutor();
   const runtime = new StubRuntimeBackend();
-  const recoveryService = createRecoveryService(repo, executor, runtime, () => now);
+  const recoveryService = createRecoveryService(repo, executor, runtime, () => now, silentLogger());
   const deps = { repo, recoveryService, executor };
   if (mergeService !== undefined) {
     (deps as typeof deps & { mergeService: MergeService }).mergeService = mergeService;

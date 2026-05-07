@@ -16,7 +16,7 @@ export interface ContinueTaskServiceDeps {
   runtime: RuntimeBackend;
   workspace: WorkspaceBackend;
   now: () => string;
-  spawnOrchestrator: (deps: Omit<RunOrchestratorDeps, "signal">) => void;
+  spawnOrchestrator: (deps: Omit<RunOrchestratorDeps, "signal" | "log">) => void;
 }
 
 export interface ContinueTaskInput {

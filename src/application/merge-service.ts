@@ -6,6 +6,7 @@ import type { WorkspaceBackend } from "../plugins/workspace-backend.js";
 import { slugify } from "../plugins/workspace-backend.js";
 import type { Command, CommandResult } from "./commands.js";
 import type { WorkflowRepository } from "./repository.js";
+import type { Logger } from "../observability/logger.js";
 
 export class MergeServiceError extends Error {
   readonly code: string;
@@ -46,6 +47,7 @@ export interface MergeServiceDeps {
   repoCoords: { owner: string; repo: string };
   baseBranch: string;
   now: () => string;
+  log: Logger;
 }
 
 export interface MergeInput {
@@ -160,9 +162,9 @@ export class MergeService {
         break;
       } catch (err) {
         if (attempt + 1 >= maxAttempts) {
-          console.error(
-            `MERGE INCONSISTENCY: github merged sha=${mergedSha} but internal merge-task transition failed after ${maxAttempts} attempts. Operator must reconcile. Workflow=${workflowId} Task=${taskId}`,
-            err,
+          this.deps.log.error(
+            `MERGE INCONSISTENCY: github merged sha=${mergedSha} but internal merge-task transition failed after ${maxAttempts} attempts. Operator must reconcile.`,
+            { workflowId, taskId, sha: mergedSha, error: (err as Error).message },
           );
           throw new MergeServiceError("merge_state_inconsistent", {
             sha: mergedSha,
@@ -309,7 +311,7 @@ export class MergeService {
     } finally {
       if (workspaceHandle !== undefined) {
         await this.deps.workspace.cleanup(workspaceHandle.workspaceId).catch((err) => {
-          console.error(`workspace cleanup failed for ${workspaceHandle!.workspaceId}:`, err);
+          this.deps.log.error("workspace cleanup failed", { workspaceId: workspaceHandle!.workspaceId, error: (err as Error).message });
         });
       }
     }
@@ -362,7 +364,7 @@ export class MergeService {
     } finally {
       if (workspaceHandle !== undefined) {
         await this.deps.workspace.cleanup(workspaceHandle.workspaceId).catch((err) => {
-          console.error(`workspace cleanup failed for ${workspaceHandle!.workspaceId}:`, err);
+          this.deps.log.error("workspace cleanup failed", { workspaceId: workspaceHandle!.workspaceId, error: (err as Error).message });
         });
       }
     }

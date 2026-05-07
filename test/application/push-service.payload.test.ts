@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PushService } from "../../src/application/push-service.js";
+import { silentLogger } from "../test-helpers.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
 import { InMemorySubscriptionRepository } from "../../src/application/subscription-repository.js";
 import { StubPushSender } from "../../src/testing/stub-push-sender.js";
@@ -12,7 +13,7 @@ function makeService() {
   const subscriptions = new InMemorySubscriptionRepository();
   const sender = new StubPushSender();
   const controller = new AbortController();
-  const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal });
+  const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal, log: silentLogger() });
   return { service };
 }
 

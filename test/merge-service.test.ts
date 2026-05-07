@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MergeAbortedError, MergeService, MergeServiceError } from "../src/application/merge-service.js";
+import { silentLogger } from "./test-helpers.js";
 import { InMemoryWorkflowRepository } from "../src/application/repository.js";
 import { applyCommand } from "../src/application/commands.js";
 import { createSingleTaskWorkflow } from "../src/domain/workflow.js";
@@ -70,6 +71,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -115,6 +117,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     await expect(service.merge({ workflowId: "wf-1", taskId: "wf-1:task" })).rejects.toBeInstanceOf(MergeServiceError);
@@ -143,6 +146,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -171,6 +175,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -196,6 +201,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     // task is in "pending" — should not be mergeable
@@ -218,6 +224,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     await expect(service.merge({ workflowId: "wf-1", taskId: "wf-1:task" })).rejects.toBe(githubError);
@@ -246,6 +253,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -271,6 +279,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -299,6 +308,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     await expect(service.merge({ workflowId: "wf-1", taskId: "wf-1:task" })).rejects.toBe(pushError);
@@ -321,6 +331,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -344,6 +355,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -365,6 +377,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -388,6 +401,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     await expect(service.merge({ workflowId: "wf-1", taskId: "wf-1:task" })).rejects.toBeDefined();
@@ -407,6 +421,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.openOnly({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -432,6 +447,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.openOnly({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -461,6 +477,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     await service.openOnly({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -497,6 +514,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -518,6 +536,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -539,6 +558,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -566,6 +586,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     await expect(service.merge({ workflowId: "wf-1", taskId: "wf-1:task" })).rejects.toBeInstanceOf(MergeServiceError);
@@ -597,6 +618,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.merge({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -630,6 +652,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.openOnly({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -655,6 +678,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     const result = await service.openOnly({ workflowId: "wf-1", taskId: "wf-1:task" });
@@ -682,6 +706,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     await expect(service.openOnly({ workflowId: "wf-1", taskId: "wf-1:task", signal: ctrl.signal })).rejects.toBeInstanceOf(MergeAbortedError);
@@ -715,6 +740,7 @@ describe("MergeService", () => {
       repoCoords: { owner: "o", repo: "r" },
       baseBranch: "main",
       now: () => now,
+      log: silentLogger(),
     });
 
     await expect(service.merge({ workflowId: "wf-1", taskId: "wf-1:task", signal: ctrl.signal })).rejects.toBeInstanceOf(MergeAbortedError);

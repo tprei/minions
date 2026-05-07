@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { QualityGateService } from "../../src/application/quality-gate-service.js";
+import { silentLogger } from "../test-helpers.js";
 import { applyCommand } from "../../src/application/commands.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
@@ -79,6 +80,7 @@ function makeService(deps: ReturnType<typeof makeDeps>) {
     applyCommand: (cmd) => applyCommand(deps.repo, cmd),
     signal: deps.signal,
     now,
+    log: silentLogger(),
   });
 }
 
@@ -223,6 +225,7 @@ describe("QualityGateService", () => {
       applyCommand: (cmd) => applyCommand(repo, cmd),
       signal: ctrl.signal,
       now,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -252,6 +255,7 @@ describe("QualityGateService", () => {
       applyCommand: applyCommandSpy,
       signal: ctrl.signal,
       now,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -288,6 +292,7 @@ describe("QualityGateService", () => {
       applyCommand: (cmd) => applyCommand(repo, cmd),
       signal: ctrl.signal,
       now,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -331,6 +336,7 @@ describe("QualityGateService", () => {
       applyCommand: (cmd) => applyCommand(repo, cmd),
       signal: ctrl.signal,
       now,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -387,6 +393,7 @@ describe("QualityGateService", () => {
       applyCommand: applyCommandSpy,
       signal: ctrl.signal,
       now,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);

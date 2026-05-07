@@ -1,5 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { PushService } from "../../src/application/push-service.js";
+import { silentLogger } from "../test-helpers.js";
+import { createLogger } from "../../src/observability/logger.js";
+import type { Sink } from "../../src/observability/sinks.js";
+import type { LogRecord } from "../../src/observability/types.js";
+
+function makeCapturingSink(): { sink: Sink; records: LogRecord[] } {
+  const records: LogRecord[] = [];
+  return { sink: { write: (r) => { records.push(r); } }, records };
+}
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
 import { InMemorySubscriptionRepository } from "../../src/application/subscription-repository.js";
 import { StubPushSender } from "../../src/testing/stub-push-sender.js";
@@ -46,7 +55,7 @@ describe("PushService.trySend failure handling", () => {
 
     sender.setDefaultResponse({ ok: false, statusCode: 410 });
 
-    const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal });
+    const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal, log: silentLogger() });
     service.attach("wf-1");
 
     await new Promise((r) => setImmediate(r));
@@ -78,7 +87,7 @@ describe("PushService.trySend failure handling", () => {
 
     sender.setDefaultResponse({ ok: false, statusCode: 404 });
 
-    const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal });
+    const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal, log: silentLogger() });
     service.attach("wf-1");
 
     await new Promise((r) => setImmediate(r));
@@ -95,7 +104,8 @@ describe("PushService.trySend failure handling", () => {
   });
 
   it("keeps subscription and logs on 500-class error", async () => {
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { sink, records } = makeCapturingSink();
+    const log = createLogger("debug", [sink]);
 
     const workflowRepo = new InMemoryWorkflowRepository();
     const subscriptions = new InMemorySubscriptionRepository();
@@ -110,7 +120,7 @@ describe("PushService.trySend failure handling", () => {
 
     sender.setDefaultResponse({ ok: false, statusCode: 500 });
 
-    const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal });
+    const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal, log });
     service.attach("wf-1");
 
     await new Promise((r) => setImmediate(r));
@@ -122,9 +132,8 @@ describe("PushService.trySend failure handling", () => {
 
     const remaining = await subscriptions.listByWorkflow("wf-1");
     expect(remaining).toHaveLength(1);
-    expect(consoleSpy).toHaveBeenCalled();
+    expect(records.some((r) => r.lvl === "error")).toBe(true);
 
-    consoleSpy.mockRestore();
     controller.abort();
   });
 });

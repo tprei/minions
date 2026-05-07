@@ -3,6 +3,7 @@ import { InMemoryWorkflowRepository } from "../../src/application/repository.js"
 import { InMemorySubscriptionRepository } from "../../src/application/subscription-repository.js";
 import { NoopRestackExecutor } from "../../src/application/restack-executor.js";
 import { createRecoveryService } from "../../src/application/recovery-service.js";
+import { silentLogger } from "../test-helpers.js";
 import { PushService } from "../../src/application/push-service.js";
 import { StubPushSender } from "../../src/testing/stub-push-sender.js";
 import { StubRuntimeBackend } from "../../src/plugins/stub-runtime.js";
@@ -15,7 +16,7 @@ function makeApp(withPush = true) {
   const repo = new InMemoryWorkflowRepository();
   const executor = new NoopRestackExecutor();
   const runtime = new StubRuntimeBackend();
-  const recoveryService = createRecoveryService(repo, executor, runtime, () => now);
+  const recoveryService = createRecoveryService(repo, executor, runtime, () => now, silentLogger());
 
   if (!withPush) {
     return { app: createServer({ repo, recoveryService, executor }), repo };
@@ -24,7 +25,7 @@ function makeApp(withPush = true) {
   const subscriptions = new InMemorySubscriptionRepository();
   const sender = new StubPushSender();
   const controller = new AbortController();
-  const pushService = new PushService({ workflowRepo: repo, subscriptions, sender, signal: controller.signal });
+  const pushService = new PushService({ workflowRepo: repo, subscriptions, sender, signal: controller.signal, log: silentLogger() });
 
   const app = createServer({
     repo,

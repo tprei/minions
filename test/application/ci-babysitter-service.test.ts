@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { CIBabysitterService } from "../../src/application/ci-babysitter-service.js";
+import { silentLogger } from "../test-helpers.js";
+import { createLogger } from "../../src/observability/logger.js";
+import type { Sink } from "../../src/observability/sinks.js";
+import type { LogRecord } from "../../src/observability/types.js";
+
+function makeCapturingSink(): { sink: Sink; records: LogRecord[] } {
+  const records: LogRecord[] = [];
+  return { sink: { write: (r) => { records.push(r); } }, records };
+}
 import { applyCommand } from "../../src/application/commands.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
 import type { ContinueTaskInput } from "../../src/application/continue-task-service.js";
@@ -127,6 +136,7 @@ describe("CIBabysitterService", () => {
       now,
       sleep: immediateSleep,
       cadence: FAST_CADENCE,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -161,6 +171,7 @@ describe("CIBabysitterService", () => {
       now,
       sleep: immediateSleep,
       cadence: FAST_CADENCE,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -204,6 +215,7 @@ describe("CIBabysitterService", () => {
       now,
       sleep: immediateSleep,
       cadence: FAST_CADENCE,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -262,6 +274,7 @@ describe("CIBabysitterService", () => {
       now,
       sleep: immediateSleep,
       cadence: FAST_CADENCE,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -306,6 +319,7 @@ describe("CIBabysitterService", () => {
       now,
       sleep: sleepFn,
       cadence: FAST_CADENCE,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -352,6 +366,7 @@ describe("CIBabysitterService", () => {
       now,
       sleep: immediateSleep,
       cadence: FAST_CADENCE,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -391,6 +406,7 @@ describe("CIBabysitterService", () => {
       now,
       sleep: immediateSleep,
       cadence: shortBailCadence,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -425,6 +441,7 @@ describe("CIBabysitterService", () => {
       now,
       sleep: sleepFn,
       cadence: FAST_CADENCE,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -468,7 +485,8 @@ describe("CIBabysitterService", () => {
     const listCheckRuns = vi.fn();
     const github = makeGithub({ listCheckRuns });
     const continueTaskService = makeContinueTaskService();
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { sink, records } = makeCapturingSink();
+    const log = createLogger("debug", [sink]);
 
     const service = new CIBabysitterService({
       workflowRepo: repo,
@@ -480,6 +498,7 @@ describe("CIBabysitterService", () => {
       now,
       sleep: immediateSleep,
       cadence: FAST_CADENCE,
+      log,
     });
 
     service.attach(WORKFLOW_ID);
@@ -502,10 +521,8 @@ describe("CIBabysitterService", () => {
 
     expect(listCheckRuns).not.toHaveBeenCalled();
     expect(continueTaskService.run).not.toHaveBeenCalled();
-    const errorCalls = errorSpy.mock.calls;
-    const parseErrorCall = errorCalls.find((c) => typeof c[0] === "string" && c[0].includes("parse PR number"));
-    expect(parseErrorCall).toBeDefined();
-    errorSpy.mockRestore();
+    const parseErrorRecord = records.find((r) => r.lvl === "error" && typeof r.msg === "string" && r.msg.includes("parse PR number"));
+    expect(parseErrorRecord).toBeDefined();
   });
 
   it("attach polls existing pr-open tasks at attach time", async () => {
@@ -530,6 +547,7 @@ describe("CIBabysitterService", () => {
       now,
       sleep: immediateSleep,
       cadence: FAST_CADENCE,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -550,7 +568,8 @@ describe("CIBabysitterService", () => {
     );
     const github = makeGithub({ listCheckRuns });
     const continueTaskService = makeContinueTaskService();
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const { sink, records } = makeCapturingSink();
+    const log = createLogger("debug", [sink]);
 
     const service = new CIBabysitterService({
       workflowRepo: repo,
@@ -562,6 +581,7 @@ describe("CIBabysitterService", () => {
       now,
       sleep: immediateSleep,
       cadence: FAST_CADENCE,
+      log,
     });
 
     service.attach(WORKFLOW_ID);
@@ -572,9 +592,8 @@ describe("CIBabysitterService", () => {
     ctrl.abort();
 
     expect(continueTaskService.run).not.toHaveBeenCalled();
-    const bailCall = infoSpy.mock.calls.find((c) => typeof c[0] === "string" && c[0].includes("force-pushed"));
-    expect(bailCall).toBeDefined();
-    infoSpy.mockRestore();
+    const bailRecord = records.find((r) => r.lvl === "info" && typeof r.msg === "string" && r.msg.includes("force-pushed"));
+    expect(bailRecord).toBeDefined();
   });
 });
 
@@ -643,6 +662,7 @@ describe("CIBabysitterService autoMerge", () => {
       now,
       sleep: immediateSleep,
       cadence: FAST_CADENCE,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -678,6 +698,7 @@ describe("CIBabysitterService autoMerge", () => {
       now,
       sleep: immediateSleep,
       cadence: FAST_CADENCE,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -715,6 +736,7 @@ describe("CIBabysitterService autoMerge", () => {
       now,
       sleep: immediateSleep,
       cadence: FAST_CADENCE,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -754,6 +776,7 @@ describe("CIBabysitterService autoMerge", () => {
       now,
       sleep: immediateSleep,
       cadence: FAST_CADENCE,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -793,6 +816,7 @@ describe("CIBabysitterService autoMerge", () => {
       now,
       sleep: immediateSleep,
       cadence: FAST_CADENCE,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -829,6 +853,7 @@ describe("CIBabysitterService autoMerge", () => {
       now,
       sleep: immediateSleep,
       cadence: FAST_CADENCE,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);
@@ -869,6 +894,7 @@ describe("CIBabysitterService autoMerge", () => {
       now,
       sleep: immediateSleep,
       cadence: FAST_CADENCE,
+      log: silentLogger(),
     });
 
     service.attach(WORKFLOW_ID);

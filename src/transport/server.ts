@@ -20,6 +20,8 @@ import { createWorkflow } from "../domain/workflow.js";
 import type { WorkflowSpec } from "../domain/types.js";
 import { domainErrorToHttp } from "./errors.js";
 import { validateCommand, validatePushSubscribe, validatePushUnsubscribe, validateWorkflowSpec } from "./validators.js";
+import type { ObservabilityService } from "../observability/observability-service.js";
+import type { Logger } from "../observability/logger.js";
 
 export interface ServerDeps {
   repo: WorkflowRepository;
@@ -35,6 +37,8 @@ export interface ServerDeps {
   subscriptions?: SubscriptionRepository;
   vapidPublicKey?: string;
   pwaRoot?: string;
+  observability?: ObservabilityService;
+  log?: Logger;
 }
 
 type AcceptedCommandKind = CommandKind | "continue-task" | "retry-task";
@@ -66,6 +70,21 @@ export function createServer(deps: ServerDeps): Hono {
     c.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
     c.header("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID");
   });
+
+  if (deps.log) {
+    const reqLog = deps.log;
+    app.use("*", async (c, next) => {
+      const start = Date.now();
+      await next();
+      reqLog.info("http", {
+        kind: "http-request",
+        method: c.req.method,
+        path: new URL(c.req.url).pathname,
+        status: c.res.status,
+        durationMs: Date.now() - start,
+      });
+    });
+  }
 
   app.onError((err, c) => {
     if (err instanceof DomainError) {
@@ -106,6 +125,7 @@ export function createServer(deps: ServerDeps): Hono {
     deps.ciBabysitter?.attach(workflow.id);
     deps.qualityGateService?.attach(workflow.id);
     deps.completionDispatcher?.attach(workflow.id);
+    deps.observability?.attach(workflow.id);
     return c.json(workflow, 201);
   });
 

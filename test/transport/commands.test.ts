@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { NoopRestackExecutor } from "../../src/application/restack-executor.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
 import { createRecoveryService } from "../../src/application/recovery-service.js";
+import { silentLogger } from "../test-helpers.js";
 import { StubRuntimeBackend } from "../../src/plugins/stub-runtime.js";
 import { createServer } from "../../src/transport/server.js";
 import type { ContinueTaskService } from "../../src/application/continue-task-service.js";
@@ -15,7 +16,7 @@ function makeApp(opts: { continueTaskService?: ContinueTaskService; retryTaskSer
   const repo = new InMemoryWorkflowRepository();
   const executor = new NoopRestackExecutor();
   const runtime = new StubRuntimeBackend();
-  const recoveryService = createRecoveryService(repo, executor, runtime, () => now);
+  const recoveryService = createRecoveryService(repo, executor, runtime, () => now, silentLogger());
   const app = createServer({ repo, recoveryService, executor, ...opts });
   return { app, repo };
 }

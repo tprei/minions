@@ -1,4 +1,5 @@
 import type { TokenBucket } from "./rate-limiter.js";
+import { createLogger, type Logger } from "../../observability/logger.js";
 
 const GITHUB_API = "https://api.github.com";
 
@@ -87,17 +88,20 @@ export interface GitHubClientDeps {
   token: string;
   bucket: TokenBucket;
   fetchImpl?: typeof fetch;
+  log?: Logger;
 }
 
 export class GitHubClient {
   private readonly token: string;
   private readonly bucket: TokenBucket;
   private readonly fetchImpl: typeof fetch;
+  private readonly log: Logger;
 
   constructor(deps: GitHubClientDeps) {
     this.token = deps.token;
     this.bucket = deps.bucket;
     this.fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+    this.log = deps.log ?? createLogger("info", []);
   }
 
   private async request(url: string, init?: RequestInit): Promise<unknown> {
@@ -251,8 +255,7 @@ export class GitHubClient {
     }
 
     if (nextUrl !== null && pages === maxPages) {
-      // Hit the page cap; results are bounded but incomplete
-      console.warn(`listCheckRuns: hit page cap of ${maxPages} for ${owner}/${repo}@${headSha}`);
+      this.log.warn("listCheckRuns: hit page cap", { owner, repo, headSha, maxPages });
     }
 
     return all;

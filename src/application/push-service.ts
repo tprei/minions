@@ -3,6 +3,7 @@ import { TASK_TERMINAL_EXECUTION_STATUSES } from "../domain/types.js";
 import type { PushSendResult, PushSender } from "../plugins/push-sender.js";
 import type { PushSubscriptionRecord, SubscriptionRepository } from "./subscription-repository.js";
 import type { WorkflowRepository } from "./repository.js";
+import type { Logger } from "../observability/logger.js";
 
 const TITLE_PERMISSION_NEEDED = "Permission needed";
 const TITLE_TASK_ERROR = "Task error";
@@ -39,6 +40,7 @@ export interface PushServiceDeps {
   subscriptions: SubscriptionRepository;
   sender: PushSender;
   signal: AbortSignal;
+  log: Logger;
 }
 
 export class PushService {
@@ -145,10 +147,10 @@ export class PushService {
     );
     if (!result.ok) {
       if (result.statusCode === 404 || result.statusCode === 410) {
-        console.info(`push: removing stale subscription ${sub.endpoint} (${result.statusCode})`);
+        this.deps.log.info("push: removing stale subscription", { endpoint: sub.endpoint, statusCode: result.statusCode });
         await this.deps.subscriptions.remove(sub.endpoint, workflowId);
       } else {
-        console.error("push: send failed", { endpoint: sub.endpoint, statusCode: result.statusCode, error: result.error });
+        this.deps.log.error("push: send failed", { endpoint: sub.endpoint, statusCode: result.statusCode, error: result.error });
       }
     }
   }
@@ -177,7 +179,7 @@ export class PushService {
         await Promise.allSettled(subs.map((sub) => this.trySend(sub, payloadStr, workflowId)));
       }
     } catch (err) {
-      console.error("push-service consumer error:", err);
+      this.deps.log.error("push-service consumer error", { error: (err as Error).message });
     } finally {
       this.activeIterators.delete(workflowId);
     }

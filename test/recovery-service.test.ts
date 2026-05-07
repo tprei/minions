@@ -7,6 +7,7 @@ import type { WorkflowRepository } from "../src/application/repository.js";
 import type { RuntimeProbeState } from "../src/application/recovery.js";
 import { StubRuntimeBackend } from "../src/plugins/stub-runtime.js";
 import { createSingleTaskWorkflow } from "../src/domain/workflow.js";
+import { silentLogger } from "./test-helpers.js";
 
 const started = "2026-05-04T11:19:00.000Z";
 const nowMs = new Date("2026-05-04T11:21:00.000Z").getTime();
@@ -32,7 +33,7 @@ async function seedReady() {
 describe("RecoveryService.scan", () => {
   it("recovers a stale-ready task back to pending", async () => {
     const repo = await seedReady();
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started, silentLogger());
 
     const results = await service.scan("wf-1", defaultOptions);
 
@@ -57,7 +58,7 @@ describe("RecoveryService.scan", () => {
       },
     });
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started, silentLogger());
     const results = await service.scan("wf-1", defaultOptions);
 
     expect(results.length).toBeGreaterThanOrEqual(1);
@@ -67,7 +68,7 @@ describe("RecoveryService.scan", () => {
 
   it("second scan produces zero new events for the same conditions", async () => {
     const repo = await seedReady();
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started, silentLogger());
 
     await service.scan("wf-1", defaultOptions);
 
@@ -81,14 +82,14 @@ describe("RecoveryService.scan", () => {
 
   it("throws not_found for unknown workflow", async () => {
     const repo = new InMemoryWorkflowRepository();
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started, silentLogger());
 
     await expect(service.scan("missing", defaultOptions)).rejects.toMatchObject({ code: "not_found" });
   });
 
   it("records an idempotency key after recovering a stale-ready task", async () => {
     const repo = await seedReady();
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started, silentLogger());
 
     await service.scan("wf-1", defaultOptions);
 
@@ -112,7 +113,7 @@ describe("RecoveryService.scan", () => {
       transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s-missing", now: started },
     });
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started, silentLogger());
     const results = await service.scan("wf-1", {
       ...defaultOptions,
       runtimeProbes: { "s-missing": "missing" as RuntimeProbeState },
@@ -142,7 +143,7 @@ describe("RecoveryService.scan", () => {
       transition: { kind: "mark-running", taskId: "wf-1:task", sessionId: "s-missing", now: started },
     });
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started, silentLogger());
     const options = { ...defaultOptions, runtimeProbes: { "s-missing": "missing" as RuntimeProbeState } };
     await service.scan("wf-1", options);
 
@@ -161,7 +162,7 @@ describe("RecoveryService.scan", () => {
     const wf = await repo.get("wf-1");
     await repo.save({ ...wf!, version: wf!.version + 1 }, [], [{ key, resultRef: "recovery:recover-task:wf-1:task" }]);
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started, silentLogger());
     const results = await service.scan("wf-1", defaultOptions);
 
     expect(results).toHaveLength(0);
@@ -226,6 +227,7 @@ describe("RecoveryService.scan", () => {
       new NoopRestackExecutor(),
       new StubRuntimeBackend(),
       () => started,
+      silentLogger(),
     );
 
     const results = await service.scan("wf-1", {
@@ -323,6 +325,7 @@ describe("RecoveryService.scan", () => {
       new NoopRestackExecutor(),
       new StubRuntimeBackend(),
       () => started,
+      silentLogger(),
     );
 
     const results = await service.scan("wf-x", {
@@ -366,7 +369,7 @@ describe("RecoveryService.scan", () => {
       transition: { kind: "start-quality-gate", taskId: "wf-1:task", now: started },
     });
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started, silentLogger());
     const results = await service.scan("wf-1", { ...defaultOptions, staleGateMs: 60_000 });
 
     expect(results).toHaveLength(1);
@@ -405,7 +408,7 @@ describe("RecoveryService.scan", () => {
       transition: { kind: "start-quality-gate", taskId: "wf-1:task", now: started },
     });
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started, silentLogger());
     const staleOpts = { ...defaultOptions, staleGateMs: 60_000 };
     await service.scan("wf-1", staleOpts);
 
@@ -458,7 +461,7 @@ describe("RecoveryService.scan", () => {
       transition: { kind: "start-ci-gate", taskId: "wf-1:task", now: started },
     });
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), new StubRuntimeBackend(), () => started, silentLogger());
     const results = await service.scan("wf-1", { ...defaultOptions, staleGateMs: 60_000 });
 
     expect(results).toHaveLength(1);

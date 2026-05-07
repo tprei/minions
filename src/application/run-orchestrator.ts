@@ -6,6 +6,7 @@ import type { RuntimeBackend } from "../plugins/runtime-backend.js";
 import type { WorkspaceBackend } from "../plugins/workspace-backend.js";
 import type { Command, CommandResult } from "./commands.js";
 import type { TransitionCommand } from "./transitions.js";
+import type { Logger } from "../observability/logger.js";
 
 export interface RunOrchestratorDeps {
   workflowId: string;
@@ -21,6 +22,7 @@ export interface RunOrchestratorDeps {
   now: () => string;
   signal?: AbortSignal;
   fromOffset?: number;
+  log: Logger;
 }
 
 export class RunOrchestrator {
@@ -54,7 +56,7 @@ export class RunOrchestrator {
   }
 
   async run(): Promise<void> {
-    const { workflowId, taskId, runtimeSessionId, provider, runtime, applyCommand, now, workspace, workspaceId } = this.deps;
+    const { workflowId, taskId, runtimeSessionId, provider, runtime, applyCommand, now, workspace, workspaceId, log } = this.deps;
 
     let latestOffset: number | undefined;
     let latestSessionRef: string | undefined;
@@ -112,11 +114,11 @@ export class RunOrchestrator {
             await dispatch({ kind: "update-run", taskId, providerSessionRef: effectiveSessionRef, now: now() });
           } catch (err) {
             if (isStale(err)) {
-              console.error("run-orchestrator stale session on update-run, exiting:", (err as DomainError).message);
+              log.error("run-orchestrator stale session on update-run, exiting", { error: (err as DomainError).message });
               return;
             }
             if (!isAdvisory(err)) throw err;
-            console.error("run-orchestrator update-run advisory write skipped:", (err as Error).message);
+            log.error("run-orchestrator update-run advisory write skipped", { error: (err as Error).message });
           }
         }
 
@@ -124,11 +126,11 @@ export class RunOrchestrator {
           try {
             await this.dispatchWithRetry({ kind: "mark-interrupted", taskId, now: now() });
             await workspace.cleanup(workspaceId).catch((err) => {
-              console.error("workspace cleanup failed:", err);
+              log.error("workspace cleanup failed", { error: (err as Error).message });
             });
           } catch (err) {
             if (isStale(err)) {
-              console.error("run-orchestrator stale session on mark-interrupted, exiting:", (err as DomainError).message);
+              log.error("run-orchestrator stale session on mark-interrupted, exiting", { error: (err as DomainError).message });
               return;
             }
             throw err;
@@ -138,7 +140,7 @@ export class RunOrchestrator {
             await this.dispatchWithRetry({ kind: "complete-runtime", taskId, now: now() });
           } catch (err) {
             if (isStale(err)) {
-              console.error("run-orchestrator stale session on complete-runtime, exiting:", (err as DomainError).message);
+              log.error("run-orchestrator stale session on complete-runtime, exiting", { error: (err as DomainError).message });
               return;
             }
             throw err;
@@ -149,7 +151,7 @@ export class RunOrchestrator {
     } catch (err) {
       // Graceful shutdown: signal was aborted, leave the task running so boot can re-spawn it.
       if (this.deps.signal?.aborted === true) {
-        console.error("run-orchestrator exiting due to signal abort, leaving task running");
+        log.info("run-orchestrator exiting due to signal abort, leaving task running");
         return;
       }
 
@@ -158,11 +160,11 @@ export class RunOrchestrator {
           await dispatch({ kind: "update-run", taskId, outputOffset: latestOffset, now: now() });
         } catch (updateErr) {
           if (isStale(updateErr)) {
-            console.error("run-orchestrator stale session on best-effort update-run, exiting:", (updateErr as DomainError).message);
+            log.error("run-orchestrator stale session on best-effort update-run, exiting", { error: (updateErr as DomainError).message });
             return;
           }
           if (!isAdvisory(updateErr)) {
-            console.error("run-orchestrator best-effort update-run failed:", updateErr);
+            log.error("run-orchestrator best-effort update-run failed", { error: (updateErr as Error).message });
           }
         }
       }
@@ -170,11 +172,11 @@ export class RunOrchestrator {
       try {
         await this.dispatchWithRetry({ kind: "mark-interrupted", taskId, now: now() });
         await workspace.cleanup(workspaceId).catch((err) => {
-          console.error("workspace cleanup failed:", err);
+          log.error("workspace cleanup failed", { error: (err as Error).message });
         });
       } catch (interruptErr) {
         if (isStale(interruptErr)) {
-          console.error("run-orchestrator stale session on mark-interrupted, exiting:", (interruptErr as DomainError).message);
+          log.error("run-orchestrator stale session on mark-interrupted, exiting", { error: (interruptErr as DomainError).message });
           return;
         }
         throw interruptErr;
@@ -184,7 +186,7 @@ export class RunOrchestrator {
 
     // Graceful shutdown: signal was aborted, leave the task running so boot can re-spawn it.
     if (this.deps.signal?.aborted === true) {
-      console.error("run-orchestrator exiting due to signal abort, leaving task running");
+      log.info("run-orchestrator exiting due to signal abort, leaving task running");
       return;
     }
 
@@ -193,11 +195,11 @@ export class RunOrchestrator {
         await dispatch({ kind: "update-run", taskId, outputOffset: latestOffset, now: now() });
       } catch (updateErr) {
         if (isStale(updateErr)) {
-          console.error("run-orchestrator stale session on best-effort update-run, exiting:", (updateErr as DomainError).message);
+          log.error("run-orchestrator stale session on best-effort update-run, exiting", { error: (updateErr as DomainError).message });
           return;
         }
         if (!isAdvisory(updateErr)) {
-          console.error("run-orchestrator best-effort update-run failed:", updateErr);
+          log.error("run-orchestrator best-effort update-run failed", { error: (updateErr as Error).message });
         }
       }
     }
@@ -205,11 +207,11 @@ export class RunOrchestrator {
     try {
       await this.dispatchWithRetry({ kind: "mark-interrupted", taskId, now: now() });
       await workspace.cleanup(workspaceId).catch((err) => {
-        console.error("workspace cleanup failed:", err);
+        log.error("workspace cleanup failed", { error: (err as Error).message });
       });
     } catch (interruptErr) {
       if (isStale(interruptErr)) {
-        console.error("run-orchestrator stale session on mark-interrupted, exiting:", (interruptErr as DomainError).message);
+        log.error("run-orchestrator stale session on mark-interrupted, exiting", { error: (interruptErr as DomainError).message });
         return;
       }
       throw interruptErr;

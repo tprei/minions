@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { RunOrchestrator } from "../../src/application/run-orchestrator.js";
+import { silentLogger } from "../test-helpers.js";
 import { DomainError } from "../../src/domain/errors.js";
 import type { Command, CommandResult } from "../../src/application/commands.js";
 import type { RuntimeBackend, RuntimeAttachOptions, RuntimeOutputChunk } from "../../src/plugins/runtime-backend.js";
@@ -66,6 +67,7 @@ function makeOrchestrator(
     applyCommand,
     publish: publish ?? (() => {}),
     now: () => now,
+    log: silentLogger(),
   });
 }
 
@@ -235,6 +237,7 @@ describe("RunOrchestrator", () => {
       publish: () => {},
       now: () => now,
       fromOffset: 42,
+      log: silentLogger(),
     });
     await orch.run();
 
@@ -303,6 +306,7 @@ describe("RunOrchestrator", () => {
       publish: () => {},
       now: () => now,
       signal: controller.signal,
+      log: silentLogger(),
     });
 
     await orch.run();
@@ -526,6 +530,7 @@ describe("RunOrchestrator", () => {
       applyCommand,
       publish: () => {},
       now: () => now,
+      log: silentLogger(),
     });
     await orch.run();
 
@@ -553,6 +558,7 @@ describe("RunOrchestrator", () => {
       applyCommand,
       publish: () => {},
       now: () => now,
+      log: silentLogger(),
     });
     await orch.run();
 
@@ -581,6 +587,7 @@ describe("RunOrchestrator", () => {
       applyCommand,
       publish: () => {},
       now: () => now,
+      log: silentLogger(),
     });
     await expect(orch.run()).resolves.toBeUndefined();
   });
@@ -616,6 +623,7 @@ describe("RunOrchestrator", () => {
       publish: () => {},
       now: () => now,
       signal: controller.signal,
+      log: silentLogger(),
     });
 
     await orch.run();

@@ -3,6 +3,14 @@ import { ExecQualityPlugin } from "../../../src/plugins/quality/exec-quality-plu
 import type { CommandRunner, CommandRunResult, CommandRunOptions } from "../../../src/plugins/command-runner.js";
 import type { QualityGateConfig } from "../../../src/plugins/quality-plugin.js";
 import * as fsp from "node:fs/promises";
+import { createLogger } from "../../../src/observability/logger.js";
+import type { Sink } from "../../../src/observability/sinks.js";
+import type { LogRecord } from "../../../src/observability/types.js";
+
+function makeCapturingSink(): { sink: Sink; records: LogRecord[] } {
+  const records: LogRecord[] = [];
+  return { sink: { write: (r) => { records.push(r); } }, records };
+}
 
 vi.mock("node:fs/promises", () => ({
   readFile: vi.fn(),
@@ -44,7 +52,6 @@ describe("ExecQualityPlugin — loadConfig", () => {
   });
 
   it("skips invalid entries with a warning", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.mocked(fsp.readFile).mockResolvedValue(
       JSON.stringify([
         { name: "lint", command: "npm run lint" },
@@ -52,12 +59,12 @@ describe("ExecQualityPlugin — loadConfig", () => {
         "not-an-object",
       ]),
     );
-    const plugin = new ExecQualityPlugin(makeRunner());
+    const { sink, records } = makeCapturingSink();
+    const plugin = new ExecQualityPlugin(makeRunner(), createLogger("debug", [sink]));
     const result = await plugin.loadConfig("/workspace");
     expect(result).toHaveLength(1);
     expect(result[0]?.name).toBe("lint");
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
+    expect(records.some((r) => r.lvl === "warn")).toBe(true);
   });
 
   it("throws on malformed JSON", async () => {
@@ -67,13 +74,12 @@ describe("ExecQualityPlugin — loadConfig", () => {
   });
 
   it("returns [] with warning when root is not an array", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.mocked(fsp.readFile).mockResolvedValue(JSON.stringify({ name: "lint" }));
-    const plugin = new ExecQualityPlugin(makeRunner());
+    const { sink, records } = makeCapturingSink();
+    const plugin = new ExecQualityPlugin(makeRunner(), createLogger("debug", [sink]));
     const result = await plugin.loadConfig("/workspace");
     expect(result).toEqual([]);
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
+    expect(records.some((r) => r.lvl === "warn")).toBe(true);
   });
 });
 

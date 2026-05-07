@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createEngine } from "../src/engine.js";
 import type { Engine, EngineConfig } from "../src/engine.js";
+import { silentLogger } from "./test-helpers.js";
 import type { RuntimeAttachOptions, RuntimeBackend, RuntimeOutputChunk, RuntimeStartResult, RuntimeStartSpec } from "../src/plugins/runtime-backend.js";
 import type { RuntimeProbeState } from "../src/application/recovery.js";
 import { SQLiteWorkflowRepository } from "../src/persistence/sqlite-repo.js";
@@ -30,12 +31,12 @@ describe("createEngine", () => {
   });
 
   it("creates engine with SQLite repo and stub runtime", async () => {
-    engine = await createEngine({ dbPath });
+    engine = await createEngine({ dbPath, log: silentLogger() });
     expect(engine.server).toBeDefined();
   });
 
   it("close() releases the DB without throwing", async () => {
-    engine = await createEngine({ dbPath });
+    engine = await createEngine({ dbPath, log: silentLogger() });
     await expect(engine.close()).resolves.toBeUndefined();
   });
 
@@ -47,7 +48,7 @@ describe("createEngine", () => {
       tasks: [{ id: "t1", title: "T", prompt: "P" }],
     };
 
-    const first = await createEngine({ dbPath, now: () => now });
+    const first = await createEngine({ dbPath, now: () => now, log: silentLogger() });
     const req = new Request("http://localhost/workflows", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -57,7 +58,7 @@ describe("createEngine", () => {
     expect(res.status).toBe(201);
     await first.close();
 
-    const second = await createEngine({ dbPath, now: () => now });
+    const second = await createEngine({ dbPath, now: () => now, log: silentLogger() });
     const getReq = new Request("http://localhost/workflows/wf-engine-1");
     const getRes = await second.server.fetch(getReq);
     expect(getRes.status).toBe(200);
@@ -115,6 +116,7 @@ describe("createEngine — close() aborts boot-spawned orchestrators", () => {
       runtime,
       now: () => now,
       providerFactory: () => new StubProviderPlugin({ frames: [] }),
+      log: silentLogger(),
     };
 
     const eng = await createEngine(config);
@@ -193,6 +195,7 @@ describe("createEngine — close() aborts service-spawned orchestrators", () => 
       runtime: stubRuntime,
       now: () => now,
       providerFactory: () => new StubProviderPlugin({ frames: [] }),
+      log: silentLogger(),
     };
 
     const eng = await createEngine(config);

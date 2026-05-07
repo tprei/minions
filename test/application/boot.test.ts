@@ -3,6 +3,7 @@ import { runBootRecovery } from "../../src/application/boot.js";
 import type { BootRespawnContext } from "../../src/application/boot.js";
 import { applyCommand } from "../../src/application/commands.js";
 import { createRecoveryService } from "../../src/application/recovery-service.js";
+import { silentLogger } from "../test-helpers.js";
 import { NoopRestackExecutor } from "../../src/application/restack-executor.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
 import { StubRuntimeBackend } from "../../src/plugins/stub-runtime.js";
@@ -28,7 +29,7 @@ describe("runBootRecovery", () => {
   it("no-op when there are no recoverable workflows", async () => {
     const repo = new InMemoryWorkflowRepository();
     const runtime = new StubRuntimeBackend();
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
 
     const report = await runBootRecovery(repo, service, runtime, bootOptions);
     expect(report).toEqual({ workflowsScanned: 0, orchestratorsSpawned: 0, failures: [] });
@@ -45,7 +46,7 @@ describe("runBootRecovery", () => {
       transition: { kind: "mark-ready", taskId: "wf-1:task", now: started },
     });
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     await runBootRecovery(repo, service, runtime, bootOptions);
 
     const saved = await repo.get("wf-1");
@@ -70,7 +71,7 @@ describe("runBootRecovery", () => {
     };
     await repo.save(wfWithSession, []);
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     await runBootRecovery(repo, service, runtime, bootOptions);
 
     expect(probeSpy).toHaveBeenCalledWith("stub-session-1");
@@ -102,7 +103,7 @@ describe("runBootRecovery", () => {
     };
     await repo.save(cancelledWf, []);
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     await runBootRecovery(repo, service, runtime, bootOptions);
 
     expect(stopSpy).toHaveBeenCalledWith(sessionId);
@@ -119,7 +120,7 @@ describe("runBootRecovery", () => {
       transition: { kind: "mark-ready", taskId: "wf-1:task", now: started },
     });
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     await runBootRecovery(repo, service, runtime, bootOptions);
 
     const afterFirst = (await repo.eventsSince("wf-1", 0)).length;
@@ -163,7 +164,7 @@ describe("runBootRecovery", () => {
       return "live";
     });
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     const report = await runBootRecovery(repo, service, runtime, bootOptions);
 
     expect(report.failures).toHaveLength(1);
@@ -183,7 +184,7 @@ describe("runBootRecovery", () => {
       transition: { kind: "mark-ready", taskId: "wf-1:task", now: started },
     });
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     vi.spyOn(service, "scan").mockRejectedValueOnce(new Error("scan exploded"));
 
     const report = await runBootRecovery(repo, service, runtime, bootOptions);
@@ -213,7 +214,7 @@ describe("runBootRecovery", () => {
 
     vi.spyOn(runtime, "probe").mockResolvedValue("missing");
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     await runBootRecovery(repo, service, runtime, bootOptions);
 
     const saved = await repo.get("wf-1");
@@ -244,7 +245,7 @@ describe("runBootRecovery", () => {
 
     vi.spyOn(runtime, "probe").mockResolvedValue("dead");
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     await runBootRecovery(repo, service, runtime, bootOptions);
 
     const saved = await repo.get("wf-1");
@@ -273,7 +274,7 @@ describe("runBootRecovery", () => {
     const runningWf = { ...wf, graph: { "wf-1:task": taskRunning } };
     await repo.save(runningWf, []);
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     await runBootRecovery(repo, service, runtime, bootOptions);
 
     const saved = await repo.get("wf-1");
@@ -304,7 +305,7 @@ describe("runBootRecovery — spawnOrchestrator", () => {
     };
     await repo.save({ ...wf, graph: { "wf-1:task": taskRunning } }, []);
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     const report = await runBootRecovery(repo, service, runtime, bootOptions);
 
     expect(report.orchestratorsSpawned).toBe(0);
@@ -335,7 +336,7 @@ describe("runBootRecovery — spawnOrchestrator", () => {
     vi.spyOn(runtime, "probe").mockResolvedValue("dead");
 
     const spawned: BootRespawnContext[] = [];
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     const report = await runBootRecovery(repo, service, runtime, {
       ...bootOptions,
       spawnOrchestrator: (ctx) => spawned.push(ctx),
@@ -369,7 +370,7 @@ describe("runBootRecovery — spawnOrchestrator", () => {
     await repo.save({ ...wf, graph: { "wf-1:task": taskRunning } }, []);
 
     const spawned: BootRespawnContext[] = [];
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     await runBootRecovery(repo, service, runtime, {
       ...bootOptions,
       spawnOrchestrator: (ctx) => spawned.push(ctx),
@@ -404,7 +405,7 @@ describe("runBootRecovery — spawnOrchestrator", () => {
     await repo.save({ ...wf, graph: { "wf-1:task": taskRunning } }, []);
 
     const spawned: BootRespawnContext[] = [];
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     const report = await runBootRecovery(repo, service, runtime, {
       ...bootOptions,
       spawnOrchestrator: (ctx) => spawned.push(ctx),
@@ -442,7 +443,7 @@ describe("runBootRecovery — spawnOrchestrator", () => {
     };
     await repo.save({ ...wf, graph: { "wf-1:task": taskRunning } }, []);
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     const report = await runBootRecovery(repo, service, runtime, {
       ...bootOptions,
       spawnOrchestrator: () => { throw new Error("spawn failed"); },
@@ -478,7 +479,7 @@ describe("runBootRecovery — spawnOrchestrator", () => {
     await repo.save({ ...wf, graph: { "wf-1:task": taskRunning } }, []);
 
     const spawned: BootRespawnContext[] = [];
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     await runBootRecovery(repo, service, runtime, {
       ...bootOptions,
       spawnOrchestrator: (ctx) => spawned.push(ctx),
@@ -513,7 +514,7 @@ describe("runBootRecovery — spawnOrchestrator", () => {
     await repo.save({ ...wf, graph: { "wf-1:task": taskRunning } }, []);
 
     const spawned: BootRespawnContext[] = [];
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
     await runBootRecovery(repo, service, runtime, {
       ...bootOptions,
       spawnOrchestrator: (ctx) => spawned.push(ctx),
@@ -565,7 +566,7 @@ describe("runBootRecovery — spawnOrchestrator", () => {
     };
     await repo.save({ ...wf, graph: { "wf-1:task": taskRunning } }, []);
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => staleNow, silentLogger());
 
     const orchestratorDonePromises: Promise<void>[] = [];
     const report = await runBootRecovery(repo, service, runtime, {
@@ -584,6 +585,7 @@ describe("runBootRecovery — spawnOrchestrator", () => {
           applyCommand: (cmd) => applyCommand(repo, cmd),
           publish: () => {},
           now: () => staleNow,
+          log: silentLogger(),
         };
         if (ctx.fromOffset !== undefined) deps.fromOffset = ctx.fromOffset;
         const orch = new RunOrchestrator(deps);

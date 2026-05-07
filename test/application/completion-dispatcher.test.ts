@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { CompletionDispatcher } from "../../src/application/completion-dispatcher.js";
+import { silentLogger } from "../test-helpers.js";
 import { MergeAbortedError, MergeConflictError, MergeServiceError } from "../../src/application/merge-service.js";
 import { applyCommand } from "../../src/application/commands.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
@@ -65,6 +66,7 @@ function makeService(
     mergeService,
     signal,
     now,
+    log: silentLogger(),
   });
 }
 
@@ -304,6 +306,7 @@ describe("CompletionDispatcher", () => {
       mergeService,
       signal: ctrl.signal,
       now,
+      log: silentLogger(),
     });
     service.attach(WORKFLOW_ID);
 

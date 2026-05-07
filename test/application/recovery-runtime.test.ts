@@ -5,6 +5,7 @@ import { NoopRestackExecutor } from "../../src/application/restack-executor.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
 import { StubRuntimeBackend } from "../../src/plugins/stub-runtime.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
+import { silentLogger } from "../test-helpers.js";
 
 const started = "2026-05-04T11:19:00.000Z";
 const nowMs = new Date("2026-05-04T11:21:00.000Z").getTime();
@@ -41,7 +42,7 @@ describe("recovery-service: stop-runtime rule", () => {
     };
     await repo.save(cancelledWf, []);
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => started, silentLogger());
     await service.scan("wf-1", { ...defaultOptions, workflowCancelled: true });
 
     expect(stopSpy).toHaveBeenCalledWith(sessionId);
@@ -75,7 +76,7 @@ describe("recovery-service: stop-runtime rule", () => {
     };
     await repo.save(cancelledWf, []);
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => started, silentLogger());
 
     await expect(
       service.scan("wf-1", { ...defaultOptions, workflowCancelled: true }),
@@ -103,7 +104,7 @@ describe("recovery-service: stop-runtime rule", () => {
     };
     await repo.save(cancelledWf, []);
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => started, silentLogger());
     // workflow-cancelled-with-runtime rule requires sessionId, so no action fires
     // but if we manually emit stop-runtime without sessionId it would cancel
     // Verify the rule skips stop() when no sessionId
@@ -125,7 +126,7 @@ describe("recovery-service: stop-runtime rule", () => {
       transition: { kind: "mark-ready", taskId: "wf-1:task", now: started },
     });
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => started, silentLogger());
     await service.scan("wf-1", { ...defaultOptions });
 
     const key = `recovery:wf-1:wf-1:task:recover-task:0`;
@@ -151,7 +152,7 @@ describe("recovery-service: stop-runtime rule", () => {
 
     const saveSpy = vi.spyOn(repo, "save").mockRejectedValueOnce(new Error("disk full"));
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => started, silentLogger());
     await expect(service.scan("wf-1", defaultOptions)).rejects.toThrow("disk full");
 
     saveSpy.mockRestore();
@@ -176,7 +177,7 @@ describe("recovery-service: stop-runtime rule", () => {
       transition: { kind: "mark-ready", taskId: "wf-1:task", now: started },
     });
 
-    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => started);
+    const service = createRecoveryService(repo, new NoopRestackExecutor(), runtime, () => started, silentLogger());
 
     const firstResults = await service.scan("wf-1", defaultOptions);
     expect(firstResults).toHaveLength(1);

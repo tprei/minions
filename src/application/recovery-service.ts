@@ -14,6 +14,7 @@ import type { RestackExecutor } from "./restack-executor.js";
 import { planRestack } from "./restack.js";
 import type { RuntimeBackend } from "../plugins/runtime-backend.js";
 import type { TransitionCommand, TransitionKind } from "./transitions.js";
+import type { Logger } from "../observability/logger.js";
 
 export interface RecoveryService {
   scan(workflowId: string, options: RecoveryOptions): Promise<CommandResult[]>;
@@ -24,6 +25,7 @@ interface ServiceDeps {
   executor: RestackExecutor;
   runtime: RuntimeBackend;
   now: () => string;
+  log: Logger;
 }
 
 interface DispatchPlan {
@@ -51,6 +53,7 @@ const taskActionRule: ActionRule<TaskRecoveryAction> = (workflow, action) => {
   return {
     key: planKey,
     run: async (deps) => {
+      deps.log.info("recovery action", { kind: "recovery-action", action: action.kind, workflowId: workflow.id, taskId: action.taskId, planKey });
       if (action.kind === "stop-runtime" && action.sessionId) {
         await deps.runtime.stop(action.sessionId);
       }
@@ -83,6 +86,7 @@ const resumeOperationRule: ActionRule<GraphOperationRecoveryAction> = (workflow,
   return {
     key: planKey,
     run: async (deps) => {
+      deps.log.info("recovery action", { kind: "recovery-action", action: action.kind, workflowId: workflow.id, operationId: action.operationId, planKey });
       let current = workflow;
 
       if (operation.status === "pending") {
@@ -146,6 +150,7 @@ const probeGateRule: ActionRule<TaskRecoveryAction> = (workflow, action) => {
   return {
     key: planKey,
     run: async (deps) => {
+      deps.log.info("recovery action", { kind: "recovery-action", action: action.kind, workflowId: workflow.id, taskId: action.taskId, planKey });
       const recoveryRecord: IdempotencyRecord = {
         key: planKey,
         resultRef: `recovery:probe-gate:${action.taskId}`,
@@ -226,8 +231,9 @@ export function createRecoveryService(
   executor: RestackExecutor,
   runtime: RuntimeBackend,
   now: () => string,
+  log: Logger,
 ): RecoveryService {
-  const deps: ServiceDeps = { repo, executor, runtime, now };
+  const deps: ServiceDeps = { repo, executor, runtime, now, log };
 
   return {
     async scan(workflowId, options) {

@@ -2,6 +2,7 @@ import type { WorkflowEvent } from "../domain/events.js";
 import type { Command, CommandResult } from "./commands.js";
 import { MergeAbortedError, MergeConflictError, MergeService, MergeServiceError } from "./merge-service.js";
 import type { WorkflowRepository } from "./repository.js";
+import type { Logger } from "../observability/logger.js";
 
 export interface CompletionDispatcherDeps {
   workflowRepo: WorkflowRepository;
@@ -9,6 +10,7 @@ export interface CompletionDispatcherDeps {
   mergeService: MergeService;
   signal: AbortSignal;
   now: () => string;
+  log: Logger;
 }
 
 export class CompletionDispatcher {
@@ -66,7 +68,7 @@ export class CompletionDispatcher {
     const ctrl = new AbortController();
     this.taskControllers.set(key, ctrl);
     void this.dispatchForTask(workflowId, taskId, ctrl.signal)
-      .catch((err) => console.error(`completion-dispatcher: dispatchForTask error for ${key}:`, err))
+      .catch((err) => this.deps.log.error(`completion-dispatcher: dispatchForTask error for ${key}`, { error: (err as Error).message }))
       .finally(() => {
         if (this.taskControllers.get(key) === ctrl) this.taskControllers.delete(key);
       });
@@ -100,7 +102,7 @@ export class CompletionDispatcher {
         }
       }
     } catch (err) {
-      console.error(`completion-dispatcher: consume error for ${workflowId}:`, err);
+      this.deps.log.error(`completion-dispatcher: consume error for ${workflowId}`, { error: (err as Error).message });
     } finally {
       this.activeIterators.delete(workflowId);
     }
@@ -122,10 +124,10 @@ export class CompletionDispatcher {
       if (err instanceof MergeAbortedError) return;
       if (err instanceof MergeConflictError) return;
       if (err instanceof MergeServiceError) {
-        console.error(`completion-dispatcher: catastrophic merge failure for ${workflowId}:${taskId}:`, err);
+        this.deps.log.error(`completion-dispatcher: catastrophic merge failure for ${workflowId}:${taskId}`, { taskId, workflowId, error: (err as Error).message });
         return;
       }
-      console.error(`completion-dispatcher: openOnly threw for ${workflowId}:${taskId}, leaving in finalizing for retry:`, err);
+      this.deps.log.error(`completion-dispatcher: openOnly threw for ${workflowId}:${taskId}, leaving in finalizing for retry`, { taskId, workflowId, error: (err as Error).message });
     }
   }
 }

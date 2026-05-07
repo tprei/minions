@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PushService } from "../../src/application/push-service.js";
+import { silentLogger } from "../test-helpers.js";
 import { InMemoryWorkflowRepository } from "../../src/application/repository.js";
 import { InMemorySubscriptionRepository } from "../../src/application/subscription-repository.js";
 import { StubPushSender } from "../../src/testing/stub-push-sender.js";
@@ -43,7 +44,7 @@ describe("PushService.attach", () => {
     const wf2 = { ...wf, version: wf.version + 1, updatedAt: nowStr };
     await workflowRepo.save(wf2, [terminalEvent(), terminalEvent(), terminalEvent()]);
 
-    const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal });
+    const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal, log: silentLogger() });
     service.attach("wf-1");
 
     await new Promise((r) => setImmediate(r));
@@ -70,7 +71,7 @@ describe("PushService.attach", () => {
     await workflowRepo.save(wf, []);
     await subscriptions.upsert({ endpoint: "https://push.example.com/s1", workflowId: "wf-1", keys: { p256dh: "k", auth: "a" } });
 
-    const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal });
+    const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal, log: silentLogger() });
     service.attach("wf-1");
 
     await new Promise((r) => setImmediate(r));
@@ -99,7 +100,7 @@ describe("PushService.attach", () => {
     await workflowRepo.save(wf, []);
     await subscriptions.upsert({ endpoint: "https://push.example.com/s1", workflowId: "wf-1", keys: { p256dh: "k", auth: "a" } });
 
-    const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal });
+    const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal, log: silentLogger() });
     service.attach("wf-1");
     service.attach("wf-1");
     service.attach("wf-1");
@@ -127,7 +128,7 @@ describe("PushService.attach", () => {
     await workflowRepo.save(wf, []);
     await subscriptions.upsert({ endpoint: "https://push.example.com/s1", workflowId: "wf-1", keys: { p256dh: "k", auth: "a" } });
 
-    const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal });
+    const service = new PushService({ workflowRepo, subscriptions, sender, signal: controller.signal, log: silentLogger() });
     service.attach("wf-1");
 
     await new Promise((r) => setImmediate(r));

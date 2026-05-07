@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { CommandRunner } from "../command-runner.js";
 import type { QualityPlugin, QualityGateConfig, QualityCheckResult, QualityRunResult } from "../quality-plugin.js";
+import { createLogger, type Logger } from "../../observability/logger.js";
 
 const MAX_TAIL = 4096;
 
@@ -38,7 +39,10 @@ function pLimit(concurrency: number): <T>(fn: () => Promise<T>) => Promise<T> {
 }
 
 export class ExecQualityPlugin implements QualityPlugin {
-  constructor(private readonly runner: CommandRunner) {}
+  private readonly log: Logger;
+  constructor(private readonly runner: CommandRunner, log: Logger = createLogger("info", [])) {
+    this.log = log;
+  }
 
   async loadConfig(workspacePath: string): Promise<QualityGateConfig[]> {
     const configPath = join(workspacePath, ".minions", "quality.json");
@@ -58,7 +62,7 @@ export class ExecQualityPlugin implements QualityPlugin {
     }
 
     if (!Array.isArray(parsed)) {
-      console.warn(`quality.json is not an array at ${configPath}, ignoring`);
+      this.log.warn(`quality.json is not an array at ${configPath}, ignoring`, { configPath });
       return [];
     }
 
@@ -72,7 +76,7 @@ export class ExecQualityPlugin implements QualityPlugin {
       ) {
         configs.push(entry as QualityGateConfig);
       } else {
-        console.warn("quality.json: skipping invalid entry", entry);
+        this.log.warn("quality.json: skipping invalid entry", { configPath });
       }
     }
     return configs;

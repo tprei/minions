@@ -1,9 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { GitHubClient, GitHubApiError } from "../../../src/plugins/github/github-client.js";
 import { TokenBucket } from "../../../src/plugins/github/rate-limiter.js";
+import { createLogger } from "../../../src/observability/logger.js";
+import type { Sink } from "../../../src/observability/sinks.js";
+import type { LogRecord } from "../../../src/observability/types.js";
 
 function makeBucket(): TokenBucket {
   return new TokenBucket({ capacity: 20, refillPerSec: 10 });
+}
+
+function makeCapturingSink(): { sink: Sink; records: LogRecord[] } {
+  const records: LogRecord[] = [];
+  return { sink: { write: (r) => { records.push(r); } }, records };
 }
 
 function makeClient(fetchMock: typeof fetch): GitHubClient {
@@ -154,7 +162,6 @@ describe("GitHubClient", () => {
     });
 
     it("hits page cap and warns", async () => {
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const pageBody = {
         total_count: 1100,
         check_runs: [{ name: "check", status: "completed", conclusion: "success" }],
@@ -165,13 +172,14 @@ describe("GitHubClient", () => {
         text: () => Promise.resolve(JSON.stringify(pageBody)),
         headers: { get: (name: string) => name.toLowerCase() === "link" ? '</repos/owner/repo/commits/abc123/check-runs?per_page=100&page=2>; rel="next"' : null },
       }) as unknown as typeof fetch;
-      const client = makeClient(perpetualLinkFetch);
+      const { sink, records } = makeCapturingSink();
+      const client = new GitHubClient({ token: "test-pat", bucket: makeBucket(), fetchImpl: perpetualLinkFetch, log: createLogger("debug", [sink]) });
       const runs = await client.listCheckRuns("owner", "repo", "abc123");
       expect(perpetualLinkFetch).toHaveBeenCalledTimes(10);
       expect(runs).toHaveLength(10);
-      expect(warnSpy).toHaveBeenCalledOnce();
-      expect(warnSpy.mock.calls[0]![0]).toMatch(/page cap/);
-      warnSpy.mockRestore();
+      const warnRecord = records.find((r) => r.lvl === "warn");
+      expect(warnRecord).toBeDefined();
+      expect(String(warnRecord?.msg)).toMatch(/page cap/);
     });
 
     it("maps unknown conclusion to undefined", async () => {
