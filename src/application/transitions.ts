@@ -69,6 +69,11 @@ const TRANSITIONS: Record<TransitionKind, TransitionRule> = {
           taskId: task.id,
         });
       }
+      if (task.stackStatus !== "clean") {
+        throw new DomainError("invalid_transition",
+          `task stack is ${task.stackStatus}; must be clean to start running`,
+          { taskId: task.id, stackStatus: task.stackStatus });
+      }
       const attempt = task.runs.length + 1;
       const run: NodeRun = {
         id: `run-${task.id}-${attempt}`,

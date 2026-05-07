@@ -249,6 +249,53 @@ describe("mark-running from needs-review", () => {
   });
 });
 
+describe("mark-running stack-status guard", () => {
+  it("rejects when task.stackStatus is restack-pending", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+
+    const task = workflow.graph["task-1:task"]!;
+    workflow = {
+      ...workflow,
+      graph: { "task-1:task": { ...task, stackStatus: "restack-pending" } },
+    };
+
+    expect(() =>
+      transitionTask(workflow, { kind: "mark-running", taskId: "task-1:task", sessionId: "session-1", now }),
+    ).toThrow(DomainError);
+  });
+
+  it("rejects when task.stackStatus is restacking", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+
+    const task = workflow.graph["task-1:task"]!;
+    workflow = {
+      ...workflow,
+      graph: { "task-1:task": { ...task, stackStatus: "restacking" } },
+    };
+
+    expect(() =>
+      transitionTask(workflow, { kind: "mark-running", taskId: "task-1:task", sessionId: "session-1", now }),
+    ).toThrow(DomainError);
+  });
+
+  it("rejects when task.stackStatus is restack-conflict", () => {
+    let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "task-1:task", now });
+
+    const task = workflow.graph["task-1:task"]!;
+    workflow = {
+      ...workflow,
+      graph: { "task-1:task": { ...task, stackStatus: "restack-conflict" } },
+    };
+
+    expect(() =>
+      transitionTask(workflow, { kind: "mark-running", taskId: "task-1:task", sessionId: "session-1", now }),
+    ).toThrow(DomainError);
+  });
+});
+
 describe("mark-running with providerSessionRef", () => {
   it("new run carries providerSessionRef when provided", () => {
     let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);

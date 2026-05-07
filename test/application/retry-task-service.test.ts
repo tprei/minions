@@ -300,6 +300,50 @@ describe("RetryTaskService", () => {
     expect(prepareSpy).not.toHaveBeenCalled();
   });
 
+  it("race window: stackStatus flips to restack-pending between preflight and mark-running → mark-running rejects, runtime.stop called", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    const runtime = new StubRuntimeBackend();
+    const stopSpy = vi.spyOn(runtime, "stop");
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "new-session" };
+    const provider = new StubProviderPlugin({ frames: [[finalEvent]] });
+
+    await makeNeedsReviewTask(repo);
+
+    let getCallCount = 0;
+    const originalGet = repo.get.bind(repo);
+    vi.spyOn(repo, "get").mockImplementation(async (workflowId: string) => {
+      getCallCount++;
+      const wf = await originalGet(workflowId);
+      if (getCallCount === 2 && wf) {
+        const task = wf.graph["wf-1:task"]!;
+        return {
+          ...wf,
+          graph: { "wf-1:task": { ...task, stackStatus: "restack-pending" as const } },
+        };
+      }
+      return wf;
+    });
+
+    const service = new RetryTaskService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      providerFactory: () => provider,
+      runtime,
+      now: () => now,
+      spawnOrchestrator: vi.fn(),
+    });
+
+    let caughtErr: unknown;
+    try {
+      await service.run({ workflowId: "wf-1", taskId: "wf-1:task", prompt: "retry" });
+    } catch (e) {
+      caughtErr = e;
+    }
+    expect(caughtErr).toBeInstanceOf(DomainError);
+    expect((caughtErr as DomainError).code).toBe("invalid_transition");
+    expect(stopSpy).toHaveBeenCalledOnce();
+  });
+
   it("sad path: provider.prepare rejects → error propagates, task stays needs-review, runtime.start not called", async () => {
     const repo = new InMemoryWorkflowRepository();
     const runtime = new StubRuntimeBackend();
