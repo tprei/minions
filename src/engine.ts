@@ -118,6 +118,10 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     ...(config.scanIntervalMs !== undefined ? { scanIntervalMs: config.scanIntervalMs } : {}),
   });
 
+  // When config.log is provided, the caller manages sink composition; supervisor.sink
+  // is not attached automatically. Audit projection and rule triggering require
+  // either no config.log (engine builds its own logger including supervisor.sink)
+  // or the caller including supervisor.sink in their logger's sink list explicitly.
   const sinks: Sink[] = ownsSinks ? [...baseSinks, supervisor.sink] : baseSinks;
 
   const log: Logger = config.log ?? createLogger(

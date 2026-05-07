@@ -51,7 +51,7 @@ export class AlertNotifier {
         this.subRepo.remove(sub.endpoint);
       } else {
         this.log?.error("alert: push send failed", {
-          kind: "push-send-failed",
+          kind: "alert-send-failed",
           endpoint: sub.endpoint,
           statusCode: result.statusCode,
           error: result.error?.message,

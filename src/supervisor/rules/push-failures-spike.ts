@@ -25,4 +25,9 @@ export const pushFailuresSpikeRule: AnomalyRule = {
       });
     }
   },
+  onScan(ctx: AnomalyRuleContext): void {
+    const cutoff = ctx.now() - WINDOW_MS;
+    const w = ctx.state.pushFailureWindow;
+    while (w.length > 0 && w[0]! < cutoff) w.shift();
+  },
 };

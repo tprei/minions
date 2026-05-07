@@ -9,6 +9,8 @@ const AUDIT_KINDS = new Set<string>([
   "service-attached",
   "merge-inconsistent",
   "push-send-failed",
+  "alert-send-failed",
+  "supervisor-error",
   "ci-attempt-cap",
   "alert",
   "task-transitioned",

@@ -71,7 +71,15 @@ export function createSupervisor(config: SupervisorConfig): SupervisorWithRepos 
       timestamp: nowIso(),
       ...partial,
     };
-    void notifier.fire(alert);
+    notifier.fire(alert).catch((err: unknown) => {
+      log?.error("supervisor: notifier.fire failed, alert may be lost", {
+        kind: "supervisor-error",
+        alertKind: alert.kind,
+        alertId: alert.id,
+        error: (err as Error).message,
+      });
+      state.recentAlerts.delete(dedupeKey);
+    });
   };
 
   const makeCtx = (): AnomalyRuleContext => ({
