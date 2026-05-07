@@ -137,6 +137,146 @@ describe("POST /push/subscribe", () => {
     expect(res.status).toBe(400);
   });
 
+  it("accepts http://localhost endpoint", async () => {
+    const { app, repo } = makeApp();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(wf, []);
+
+    const res = await app.request("/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId: "wf-1",
+        subscription: {
+          endpoint: "http://localhost/push",
+          keys: { p256dh: "key1", auth: "auth1" },
+        },
+      }),
+    });
+
+    expect(res.status).toBe(201);
+  });
+
+  it("accepts http://127.0.0.1 endpoint", async () => {
+    const { app, repo } = makeApp();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(wf, []);
+
+    const res = await app.request("/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId: "wf-1",
+        subscription: {
+          endpoint: "http://127.0.0.1/push",
+          keys: { p256dh: "key1", auth: "auth1" },
+        },
+      }),
+    });
+
+    expect(res.status).toBe(201);
+  });
+
+  it("accepts http://[::1] endpoint", async () => {
+    const { app, repo } = makeApp();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(wf, []);
+
+    const res = await app.request("/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId: "wf-1",
+        subscription: {
+          endpoint: "http://[::1]/push",
+          keys: { p256dh: "key1", auth: "auth1" },
+        },
+      }),
+    });
+
+    expect(res.status).toBe(201);
+  });
+
+  it("rejects http://localhost.evil.com prefix-attack endpoint", async () => {
+    const { app, repo } = makeApp();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(wf, []);
+
+    const res = await app.request("/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId: "wf-1",
+        subscription: {
+          endpoint: "http://localhost.evil.com/push",
+          keys: { p256dh: "key1", auth: "auth1" },
+        },
+      }),
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects http://127.0.0.1.evil.com prefix-attack endpoint", async () => {
+    const { app, repo } = makeApp();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(wf, []);
+
+    const res = await app.request("/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId: "wf-1",
+        subscription: {
+          endpoint: "http://127.0.0.1.evil.com/push",
+          keys: { p256dh: "key1", auth: "auth1" },
+        },
+      }),
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects ftp://localhost endpoint (wrong scheme)", async () => {
+    const { app, repo } = makeApp();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(wf, []);
+
+    const res = await app.request("/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId: "wf-1",
+        subscription: {
+          endpoint: "ftp://localhost/push",
+          keys: { p256dh: "key1", auth: "auth1" },
+        },
+      }),
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects malformed URL endpoint", async () => {
+    const { app, repo } = makeApp();
+    const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
+    await repo.save(wf, []);
+
+    const res = await app.request("/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId: "wf-1",
+        subscription: {
+          endpoint: "not-a-url",
+          keys: { p256dh: "key1", auth: "auth1" },
+        },
+      }),
+    });
+
+    expect(res.status).toBe(400);
+  });
+
   it("returns 400 when workflowId is empty", async () => {
     const { app } = makeApp();
 

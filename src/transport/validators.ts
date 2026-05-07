@@ -134,15 +134,22 @@ export function validateCommand(body: unknown): ValidationResult {
 
 function isPushEndpoint(v: unknown): boolean {
   if (typeof v !== "string") return false;
-  if (v.startsWith("https://")) return true;
-  if (v.startsWith("http://127.0.0.1") || v.startsWith("http://localhost")) return true;
-  return false;
+  try {
+    const url = new URL(v);
+    if (url.protocol === "https:") return true;
+    if (url.protocol === "http:") {
+      return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1" || url.hostname === "[::1]";
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 const PUSH_SUBSCRIBE_CHECKS: FieldCheck[] = [
   { path: "workflowId", check: isNonEmptyString, expected: "non-empty string" },
   { path: "subscription", check: isObject, expected: "object" },
-  { path: "subscription.endpoint", check: isPushEndpoint, expected: "https:// URL (or http://localhost / http://127.0.0.1 for local use)" },
+  { path: "subscription.endpoint", check: isPushEndpoint, expected: "endpoint must be https:// (or http://localhost for local development)" },
   { path: "subscription.keys", check: isObject, expected: "object" },
   { path: "subscription.keys.p256dh", check: isNonEmptyString, expected: "non-empty string" },
   { path: "subscription.keys.auth", check: isNonEmptyString, expected: "non-empty string" },
