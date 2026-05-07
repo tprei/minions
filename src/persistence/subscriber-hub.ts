@@ -58,7 +58,7 @@ export class SubscriberHub {
               while (sub.buffer.length > 0) {
                 const event = sub.buffer.shift()!;
                 // transient frames bypass cursor dedup; durable backbone is the resume truth
-                if (event.kind === "provider-event") {
+                if (event.kind === "provider-event" || event.kind === "merge-phase") {
                   yield event;
                   continue;
                 }
@@ -121,7 +121,7 @@ export class SubscriberHub {
     }
   }
 
-  notifyTransient(workflowId: string, event: Extract<WorkflowEvent, { kind: "provider-event" }>): void {
+  notifyTransient(workflowId: string, event: Extract<WorkflowEvent, { kind: "provider-event" | "merge-phase" }>): void {
     const subs = this.subscribers.get(workflowId);
     if (!subs) return;
     for (const sub of Array.from(subs)) {

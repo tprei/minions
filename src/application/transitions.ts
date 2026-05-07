@@ -16,6 +16,7 @@ export type TransitionKind =
   | "start-ci-gate"
   | "complete-ci-gate"
   | "merge-task"
+  | "merge-conflict"
   | "cancel-task"
   | "recover-task"
   | "mark-interrupted"
@@ -156,6 +157,15 @@ const TRANSITIONS: Record<TransitionKind, TransitionRule> = {
   "merge-task": {
     from: ["pr-open"],
     apply: () => ({ patch: { executionStatus: "merged" } }),
+  },
+  "merge-conflict": {
+    from: ["pr-open", "finalizing"],
+    apply: (task, command) => ({
+      patch: {
+        executionStatus: "needs-review",
+        artifacts: appendArtifacts(task, command),
+      },
+    }),
   },
   "cancel-task": {
     from: ["pending", "ready", "running", "finalizing", "quality-pending", "ci-pending", "needs-review"],

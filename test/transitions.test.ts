@@ -495,6 +495,67 @@ describe("workflow status derivation", () => {
   });
 });
 
+describe("merge-conflict transition", () => {
+  function reachFinalizing() {
+    let workflow = createSingleTaskWorkflow("wf-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "wf-1:task", now });
+    workflow = transitionTask(workflow, { kind: "mark-running", taskId: "wf-1:task", sessionId: "s1", now });
+    workflow = transitionTask(workflow, { kind: "complete-runtime", taskId: "wf-1:task", now });
+    workflow = transitionTask(workflow, { kind: "start-finalization", taskId: "wf-1:task", now });
+    return workflow;
+  }
+
+  function reachPrOpen() {
+    let workflow = reachFinalizing();
+    workflow = transitionTask(workflow, { kind: "open-review", taskId: "wf-1:task", now });
+    return workflow;
+  }
+
+  it("transitions from finalizing to needs-review with artifact", () => {
+    let workflow = reachFinalizing();
+    const artifact = { kind: "patch" as const, ref: '{"phase":"rebase","reason":"conflict"}', producedBy: "merge-service", createdAt: now };
+    workflow = transitionTask(workflow, {
+      kind: "merge-conflict",
+      taskId: "wf-1:task",
+      artifacts: [artifact],
+      reason: "rebase conflict",
+      now,
+    });
+    expect(workflow.graph["wf-1:task"]?.executionStatus).toBe("needs-review");
+    expect(workflow.graph["wf-1:task"]?.artifacts).toHaveLength(1);
+    expect(workflow.graph["wf-1:task"]?.artifacts[0]?.kind).toBe("patch");
+  });
+
+  it("transitions from pr-open to needs-review with artifact", () => {
+    let workflow = reachPrOpen();
+    const artifact = { kind: "patch" as const, ref: '{"phase":"applyMerge","reason":"blocked"}', producedBy: "merge-service", createdAt: now };
+    workflow = transitionTask(workflow, {
+      kind: "merge-conflict",
+      taskId: "wf-1:task",
+      artifacts: [artifact],
+      reason: "blocked",
+      now,
+    });
+    expect(workflow.graph["wf-1:task"]?.executionStatus).toBe("needs-review");
+  });
+
+  it("rejects from pending status", () => {
+    const workflow = createSingleTaskWorkflow("wf-1", { title: "Task", prompt: "Do it" }, () => now);
+    expect(() =>
+      transitionTask(workflow, { kind: "merge-conflict", taskId: "wf-1:task", now }),
+    ).toThrow(DomainError);
+  });
+
+  it("rejects from running status", () => {
+    let workflow = createSingleTaskWorkflow("wf-1", { title: "Task", prompt: "Do it" }, () => now);
+    workflow = transitionTask(workflow, { kind: "mark-ready", taskId: "wf-1:task", now });
+    workflow = transitionTask(workflow, { kind: "mark-running", taskId: "wf-1:task", sessionId: "s1", now });
+    expect(() =>
+      transitionTask(workflow, { kind: "merge-conflict", taskId: "wf-1:task", now }),
+    ).toThrow(DomainError);
+  });
+});
+
 describe("mark-running workspaceId", () => {
   it("writes workspaceId when provided in command", () => {
     let workflow = createSingleTaskWorkflow("task-1", { title: "Task", prompt: "Do it" }, () => now);

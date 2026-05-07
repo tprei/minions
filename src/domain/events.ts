@@ -18,7 +18,8 @@ export type WorkflowEventKind =
   | "run-started"
   | "run-ended"
   | "workflow-status-changed"
-  | "provider-event";
+  | "provider-event"
+  | "merge-phase";
 
 export interface TaskTransitionedPayload {
   taskId: string;
@@ -66,6 +67,15 @@ export interface ProviderEventPayload {
   providerEvent: ProviderEvent;
 }
 
+export type MergePhase = "prepareMerge" | "commit" | "squash" | "rebase" | "applyMerge" | "finalize";
+
+export interface MergePhasePayload {
+  taskId: string;
+  phase: MergePhase;
+  status: "started" | "completed";
+  error?: string;
+}
+
 interface EventBase {
   cursor: number;
   workflowId: string;
@@ -80,6 +90,7 @@ export type WorkflowEvent = EventBase &
     | { kind: "run-ended"; payload: RunEndedPayload }
     | { kind: "workflow-status-changed"; payload: WorkflowStatusChangedPayload }
     | { kind: "provider-event"; payload: ProviderEventPayload }
+    | { kind: "merge-phase"; payload: MergePhasePayload }
   );
 
 export function deriveEvents(

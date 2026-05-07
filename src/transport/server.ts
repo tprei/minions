@@ -4,6 +4,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { applyCommand } from "../application/commands.js";
 import type { Command, CommandKind } from "../application/commands.js";
 import type { ContinueTaskService } from "../application/continue-task-service.js";
+import type { MergeService } from "../application/merge-service.js";
 import type { RetryTaskService } from "../application/retry-task-service.js";
 import type { RecoveryService } from "../application/recovery-service.js";
 import type { WorkflowRepository } from "../application/repository.js";
@@ -22,6 +23,7 @@ export interface ServerDeps {
   executor: RestackExecutor;
   continueTaskService?: ContinueTaskService;
   retryTaskService?: RetryTaskService;
+  mergeService?: MergeService;
   pushService?: PushService;
   subscriptions?: SubscriptionRepository;
   vapidPublicKey?: string;
@@ -164,6 +166,16 @@ export function createServer(deps: ServerDeps): Hono {
     return c.json(result);
   });
 
+  app.post("/workflows/:id/tasks/:taskId/merge", async (c) => {
+    if (!deps.mergeService) {
+      return c.json({ code: "internal_error", message: "merge service not configured" }, 503);
+    }
+    const workflowId = c.req.param("id");
+    const taskId = c.req.param("taskId");
+    const result = await deps.mergeService.merge({ workflowId, taskId });
+    return c.json(result);
+  });
+
   app.get("/push/vapid-public-key", (c) => {
     if (!deps.vapidPublicKey) {
       return c.json({ code: "push_disabled", message: "push notifications not configured" }, 503);
@@ -275,7 +287,7 @@ export function createServer(deps: ServerDeps): Hono {
           const result = await iterator.next();
           if (result.done) break;
           const event = result.value;
-          if (event.kind === "provider-event") {
+          if (event.kind === "provider-event" || event.kind === "merge-phase") {
             // omit id: so browser EventSource doesn't advance Last-Event-ID past the durable cursor
             await stream.writeSSE({ event: event.kind, data: JSON.stringify(event) });
           } else {

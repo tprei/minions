@@ -24,6 +24,10 @@ import { GitClient } from "./plugins/git/git-client.js";
 import { GitWorktreeWorkspaceBackend } from "./plugins/workspace/git-worktree-backend.js";
 import { StubWorkspaceBackend } from "./plugins/workspace/stub-workspace.js";
 import { createServer } from "./transport/server.js";
+import { TokenBucket } from "./plugins/github/rate-limiter.js";
+import { GitHubClient } from "./plugins/github/github-client.js";
+import { GitHubScmPlugin } from "./plugins/github/github-scm-plugin.js";
+import { MergeService } from "./application/merge-service.js";
 import type { WorkflowEvent } from "./domain/events.js";
 
 export interface EngineConfig {
@@ -48,6 +52,9 @@ export interface EngineConfig {
    * path is captured once and reused for every request.
    */
   pwaDir?: string;
+  githubToken?: string;
+  githubRepo?: { owner: string; repo: string };
+  githubBaseBranch?: string;
 }
 
 function resolveVapid(config: EngineConfig): VapidConfig | undefined {
@@ -77,14 +84,15 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   const staleGateMs = config.staleGateMs ?? 30 * 60 * 1000;
 
   let workspace: WorkspaceBackend;
+  let sharedGitClient: GitClient | undefined;
   if (config.workspace) {
     workspace = config.workspace;
   } else if (config.repoPath) {
     const gitCommandPrefix = config.gitCommandPrefix ?? [];
-    const gitClient = new GitClient(gitCommandPrefix.length > 0 ? { commandPrefix: gitCommandPrefix } : {});
+    sharedGitClient = new GitClient(gitCommandPrefix.length > 0 ? { commandPrefix: gitCommandPrefix } : {});
     const workspaceRoot = config.workspaceRoot ?? join(dirname(config.repoPath), `${basename(config.repoPath)}-worktrees`);
     workspace = await GitWorktreeWorkspaceBackend.create({
-      gitClient,
+      gitClient: sharedGitClient,
       repoPath: config.repoPath,
       workspaceRoot,
       gitCommandPrefix,
@@ -194,6 +202,26 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
 
   if (pwaRoot !== undefined) {
     serverDeps.pwaRoot = pwaRoot;
+  }
+
+  const githubToken = config.githubToken ?? process.env["MWF_GITHUB_TOKEN"];
+  if (githubToken && config.githubRepo) {
+    if (workspace instanceof StubWorkspaceBackend) {
+      throw new Error("githubToken + githubRepo requires a real workspace backend (set repoPath)");
+    }
+    const gitClient = sharedGitClient ?? new GitClient();
+    const bucket = new TokenBucket({ capacity: 20, refillPerSec: 10 });
+    const ghClient = new GitHubClient({ token: githubToken, bucket });
+    const scm = new GitHubScmPlugin({ github: ghClient, git: gitClient, token: githubToken });
+    serverDeps.mergeService = new MergeService({
+      repo,
+      applyCommand: (cmd) => applyCommand(repo, cmd),
+      scm,
+      workspace,
+      repoCoords: config.githubRepo,
+      baseBranch: config.githubBaseBranch ?? "main",
+      now,
+    });
   }
 
   if (config.providerFactory) {
