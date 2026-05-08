@@ -19,7 +19,7 @@ export function createSseClient({ url, onEvent, onStatus }) {
   function buildUrl() {
     if (lastCursor === null) return url;
     const sep = url.includes("?") ? "&" : "?";
-    return `${url}${sep}cursor=${encodeURIComponent(lastCursor)}`;
+    return `${url}${sep}since=${encodeURIComponent(lastCursor)}`;
   }
 
   function clearWatchdog() {
@@ -73,7 +73,7 @@ export function createSseClient({ url, onEvent, onStatus }) {
       doReconnect(lastActivityAt > 0 && gap < QUIET_THRESHOLD_MS);
     };
 
-    es.onmessage = (evt) => {
+    function handleNamedEvent(evt) {
       lastActivityAt = Date.now();
       if (evt.lastEventId) lastCursor = evt.lastEventId;
       scheduleWatchdog();
@@ -83,7 +83,21 @@ export function createSseClient({ url, onEvent, onStatus }) {
       } catch {
         // malformed SSE data; skip
       }
-    };
+    }
+
+    const SSE_EVENT_TYPES = [
+      "task-transitioned",
+      "graph-operation-changed",
+      "run-started",
+      "run-ended",
+      "workflow-status-changed",
+      "provider-event",
+      "merge-phase",
+    ];
+
+    for (const type of SSE_EVENT_TYPES) {
+      es.addEventListener(type, handleNamedEvent);
+    }
   }
 
   function onVisibility() {

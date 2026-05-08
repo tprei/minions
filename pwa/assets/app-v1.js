@@ -29,7 +29,11 @@ function bootstrap() {
 
 function registerSW() {
   if (!("serviceWorker" in navigator)) return;
-  navigator.serviceWorker.register("/sw.js").catch(() => {});
+  navigator.serviceWorker.register("/sw.js").catch((err) => {
+    state.error = `Service worker registration failed: ${err.message}`;
+    render();
+    throw err;
+  });
 }
 
 function onRoute() {
@@ -322,7 +326,7 @@ function enablePushForWorkflow(workflowId) {
 
   fetch("/push/vapid-public-key")
     .then((r) => r.json())
-    .then((data) => subscribePush(data.publicKey))
+    .then((data) => subscribePush(workflowId, data.publicKey))
     .then(() => {
       state.pushStatusByWorkflow[workflowId] = "subscribed";
       renderPushBanner();

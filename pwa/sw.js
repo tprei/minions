@@ -78,16 +78,35 @@ self.addEventListener("fetch", (evt) => {
 });
 
 self.addEventListener("push", (evt) => {
-  const p = evt.data?.json() ?? {};
+  let p;
+  try {
+    p = evt.data?.json();
+  } catch {
+    return;
+  }
+
+  if (!p || typeof p !== "object") return;
+
   const { taskId, kind, code, title, body, urlPath, workflowId } = p;
+  if (
+    typeof taskId !== "string" || taskId === "" ||
+    typeof kind !== "string" || kind === "" ||
+    typeof code !== "string" || code === "" ||
+    typeof title !== "string" || title === "" ||
+    typeof body !== "string" || body === "" ||
+    typeof urlPath !== "string" || urlPath === "" ||
+    typeof workflowId !== "string" || workflowId === ""
+  ) {
+    return;
+  }
 
   evt.waitUntil(
-    self.registration.showNotification(title ?? "Minions", {
-      body: body ?? "",
+    self.registration.showNotification(title, {
+      body,
       tag: `${taskId}:${code}`,
       renotify: true,
       icon: "/icons/icon-192.png",
-      data: { workflowId, taskId, urlPath: urlPath ?? "/" },
+      data: { workflowId, taskId, urlPath },
     })
   );
 });

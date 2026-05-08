@@ -30,9 +30,10 @@ export interface PushPayload {
   body: string;
   workflowId: string;
   taskId: string;
+  kind: string;
   code: NotifyCode;
   cursor: number;
-  url: string;
+  urlPath: string;
 }
 
 export interface PushServiceDeps {
@@ -157,9 +158,10 @@ export class PushService {
       body: decision.body,
       workflowId,
       taskId: decision.taskId,
+      kind: event.kind,
       code: decision.code,
       cursor: event.cursor,
-      url: `/workflows/${workflowId}?task=${decision.taskId}`,
+      urlPath: `/workflows/${workflowId}?task=${decision.taskId}`,
     };
   }
 

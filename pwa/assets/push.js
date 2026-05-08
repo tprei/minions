@@ -1,17 +1,13 @@
 export function setupPush({ onUpdateAvailable, onInstallPromptAvailable }) {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.ready.then((reg) => {
-      if (reg.waiting) {
-        const activate = buildActivate(reg.waiting);
-        onUpdateAvailable?.(activate);
-      }
+      trackRegistration(reg, onUpdateAvailable);
+      reg.addEventListener("updatefound", () => {
+        trackRegistration(reg, onUpdateAvailable);
+      });
     });
 
     navigator.serviceWorker.addEventListener("controllerchange", () => {
-      navigator.serviceWorker.ready.then((reg) => {
-        const activate = buildActivate(reg.active);
-        onUpdateAvailable?.(activate);
-      });
     });
   }
 
@@ -29,6 +25,21 @@ export function setupPush({ onUpdateAvailable, onInstallPromptAvailable }) {
   }
 }
 
+function trackRegistration(reg, onUpdateAvailable) {
+  const worker = reg.installing ?? reg.waiting;
+  if (!worker) return;
+
+  worker.addEventListener("statechange", () => {
+    if (worker.state === "installed" && reg.waiting) {
+      onUpdateAvailable?.(buildActivate(reg.waiting));
+    }
+  });
+
+  if (worker.state === "installed" && reg.waiting) {
+    onUpdateAvailable?.(buildActivate(reg.waiting));
+  }
+}
+
 function buildActivate(swInstance) {
   return function activate() {
     if (swInstance) {
@@ -38,7 +49,7 @@ function buildActivate(swInstance) {
   };
 }
 
-export async function subscribePush(vapidPublicKey) {
+export async function subscribePush(workflowId, vapidPublicKey) {
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
     throw new Error("Push not supported");
   }
@@ -53,11 +64,12 @@ export async function subscribePush(vapidPublicKey) {
     applicationServerKey,
   });
 
-  await fetch("/push/subscribe", {
+  const res = await fetch("/push/subscribe", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(subscription.toJSON()),
+    body: JSON.stringify({ workflowId, subscription: subscription.toJSON() }),
   });
+  if (!res.ok) throw new Error(`Subscribe failed: ${res.status}`);
 
   return subscription;
 }

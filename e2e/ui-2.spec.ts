@@ -20,33 +20,45 @@ async function waitForSwActivated(
   );
 }
 
-test("hashed asset URLs are served from SW cache after first network fetch", async ({
+test("unversioned app-v1.js is never served from SW cache", async ({
   page,
-  context,
 }) => {
+  const networkHits: string[] = [];
+  await page.route("**/assets/app-v1.js", (route) => {
+    networkHits.push(route.request().url());
+    route.fulfill({
+      status: 200,
+      contentType: "application/javascript",
+      body: "/* live network version */",
+    });
+  });
+
   await page.goto("/");
   await waitForSwActivated(page);
 
-  const firstOk = await page.evaluate(async () => {
-    const resp = await fetch("/assets/styles-v2.css?v=2026-05-08");
-    return resp.ok;
-  });
-  expect(firstOk).toBe(true);
-
-  const cachedKeys = await page.evaluate(async () => {
+  // Seed a stale response for app-v1.js into the SW cache
+  await page.evaluate(async () => {
     const keys = await caches.keys();
-    const all: string[] = [];
-    for (const k of keys) {
-      const cache = await caches.open(k);
-      const reqs = await cache.keys();
-      all.push(...reqs.map((r) => r.url));
-    }
-    return all;
+    const cacheName = keys[0] ?? "stale-test";
+    const cache = await caches.open(cacheName);
+    await cache.put(
+      "/assets/app-v1.js",
+      new Response("/* stale cached version */", {
+        headers: { "Content-Type": "application/javascript" },
+      })
+    );
   });
 
-  expect(cachedKeys.some((u) => u.includes("styles-v2.css"))).toBe(true);
+  const hitsBefore = networkHits.length;
 
-  await context.clearCookies();
+  const body = await page.evaluate(async () => {
+    const resp = await fetch("/assets/app-v1.js");
+    return resp.text();
+  });
+
+  // The SW must pass through to network (not serve the stale cache entry)
+  expect(networkHits.length - hitsBefore).toBe(1);
+  expect(body).toBe("/* live network version */");
 });
 
 test("navigate request falls back to offline message when network is unavailable", async ({
