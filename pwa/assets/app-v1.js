@@ -1,3 +1,6 @@
+import { createSseClient } from "./sse.js";
+import { setupPush, subscribePush } from "./push.js";
+
 export const state = {
   workflows: [],
   currentId: null,
@@ -8,20 +11,19 @@ export const state = {
   streamStatus: "closed",
 };
 
-let es = null;
+let sseClient = null;
 let routeGen = 0;
 
 document.addEventListener("DOMContentLoaded", bootstrap);
 
 function bootstrap() {
   registerSW();
+  setupPush({
+    onUpdateAvailable: (_activate) => {},
+    onInstallPromptAvailable: (_evt) => {},
+  });
   loadList();
   window.addEventListener("hashchange", onRoute);
-  navigator.serviceWorker?.addEventListener("message", (evt) => {
-    if (evt.data?.type === "navigate") {
-      window.location.hash = `#/workflow/${evt.data.workflowId}`;
-    }
-  });
   onRoute();
 }
 
@@ -90,50 +92,59 @@ export function loadWorkflowAndSubscribe(id) {
 
 function openStream(id) {
   closeStream();
-  es = new EventSource(`/workflows/${id}/events`);
-  state.streamStatus = "connected";
+  state.streamStatus = "connecting";
   updateLiveIndicator();
 
-  es.addEventListener("task-transitioned", (e) => {
-    const event = JSON.parse(e.data);
-    const payload = event.payload;
-    if (!state.currentWorkflow) return;
-    const nodes = state.currentWorkflow.graph;
-    const task = nodes[payload.taskId];
-    if (task) nodes[payload.taskId] = { ...task, executionStatus: payload.toExecutionStatus };
-    renderKanban();
-  });
+  sseClient = createSseClient({
+    url: `/workflows/${id}/events`,
+    onStatus: (s) => {
+      state.streamStatus = s === "connected" ? "connected" : s === "reconnecting" ? "reconnecting" : "closed";
+      updateLiveIndicator();
+    },
+    onEvent: (event) => {
+      if (event.kind === "navigate") {
+        const { workflowId, urlPath } = event.payload;
+        window.location.hash = urlPath ?? `#/workflow/${workflowId}`;
+        return;
+      }
 
-  es.addEventListener("workflow-status-changed", (e) => {
-    const event = JSON.parse(e.data);
-    const payload = event.payload;
-    if (!state.currentWorkflow) return;
-    state.currentWorkflow = { ...state.currentWorkflow, status: payload.toStatus };
-    renderKanban();
-  });
+      if (event.kind === "task-transitioned") {
+        const payload = event.payload;
+        if (!state.currentWorkflow) return;
+        const nodes = state.currentWorkflow.graph;
+        const task = nodes[payload.taskId];
+        if (task) nodes[payload.taskId] = { ...task, executionStatus: payload.toExecutionStatus };
+        renderKanban();
+        return;
+      }
 
-  es.addEventListener("provider-event", (e) => {
-    const event = JSON.parse(e.data);
-    const payload = event.payload;
-    const node = transcriptNode(payload);
-    state.transcript.push(payload);
-    const container = document.querySelector(".transcript");
-    if (container) {
-      container.appendChild(node);
-      container.scrollTop = container.scrollHeight;
-    }
-  });
+      if (event.kind === "workflow-status-changed") {
+        const payload = event.payload;
+        if (!state.currentWorkflow) return;
+        state.currentWorkflow = { ...state.currentWorkflow, status: payload.toStatus };
+        renderKanban();
+        return;
+      }
 
-  es.onerror = () => {
-    state.streamStatus = "reconnecting";
-    updateLiveIndicator();
-  };
+      if (event.kind === "provider-event") {
+        const payload = event.payload;
+        const node = transcriptNode(payload);
+        state.transcript.push(payload);
+        const container = document.querySelector(".transcript");
+        if (container) {
+          container.appendChild(node);
+          container.scrollTop = container.scrollHeight;
+        }
+        return;
+      }
+    },
+  });
 }
 
 function closeStream() {
-  if (es) {
-    es.close();
-    es = null;
+  if (sseClient) {
+    sseClient.close();
+    sseClient = null;
   }
   state.streamStatus = "closed";
   updateLiveIndicator();
@@ -306,49 +317,20 @@ function submitReply(taskId, prompt, fresh) {
   }).catch(() => {});
 }
 
-function setupPush(workflowId) {
+function enablePushForWorkflow(workflowId) {
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
 
-  navigator.serviceWorker.ready
-    .then((reg) => fetch("/push/vapid-public-key").then((r) => r.json()).then((data) => ({ reg, key: data.publicKey })))
-    .then(({ reg, key }) =>
-      Notification.requestPermission().then((permission) => ({ reg, key, permission }))
-    )
-    .then(({ reg, key, permission }) => {
-      if (permission !== "granted") {
-        state.pushStatusByWorkflow[workflowId] = "denied";
-        renderPushBanner();
-        return;
-      }
-      return reg.pushManager
-        .subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) })
-        .then((sub) =>
-          fetch("/push/subscribe", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ workflowId, subscription: sub.toJSON() }),
-          })
-        )
-        .then(() => {
-          state.pushStatusByWorkflow[workflowId] = "subscribed";
-          renderPushBanner();
-        });
+  fetch("/push/vapid-public-key")
+    .then((r) => r.json())
+    .then((data) => subscribePush(data.publicKey))
+    .then(() => {
+      state.pushStatusByWorkflow[workflowId] = "subscribed";
+      renderPushBanner();
     })
     .catch(() => {
       state.pushStatusByWorkflow[workflowId] = "denied";
       renderPushBanner();
     });
-}
-
-function urlBase64ToUint8Array(base64String) {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; i++) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
 }
 
 function render() {
@@ -457,7 +439,7 @@ function renderPushBanner() {
   const span = document.createElement("span");
   span.textContent = "notifications off · enable →";
   banner.appendChild(span);
-  banner.addEventListener("click", () => setupPush(state.currentId), { once: true });
+  banner.addEventListener("click", () => enablePushForWorkflow(state.currentId), { once: true });
 }
 
 function renderWorkflowList(container) {

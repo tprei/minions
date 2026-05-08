@@ -43,9 +43,13 @@ export interface PushServiceDeps {
   log: Logger;
 }
 
+const DEDUPE_WINDOW_MS = 20_000;
+const DEDUPE_PRUNE_AGE_MS = 60_000;
+
 export class PushService {
   private readonly deps: PushServiceDeps;
   private readonly activeIterators = new Map<string, AsyncIterator<WorkflowEvent>>();
+  private readonly dedupeMap = new Map<string, number>();
 
   constructor(deps: PushServiceDeps) {
     this.deps = deps;
@@ -54,6 +58,25 @@ export class PushService {
         void iter.return?.();
       }
     });
+  }
+
+  private dedupeKey(taskId: string, kind: string, code: string): string {
+    return `${taskId}:${kind}:${code}`;
+  }
+
+  private checkAndRecordSend(taskId: string, kind: string, code: string): boolean {
+    const now = Date.now();
+    const key = this.dedupeKey(taskId, kind, code);
+
+    for (const [k, ts] of this.dedupeMap) {
+      if (now - ts > DEDUPE_PRUNE_AGE_MS) this.dedupeMap.delete(k);
+    }
+
+    const last = this.dedupeMap.get(key);
+    if (last !== undefined && now - last < DEDUPE_WINDOW_MS) return false;
+
+    this.dedupeMap.set(key, now);
+    return true;
   }
 
   attach(workflowId: string): void {
@@ -172,6 +195,8 @@ export class PushService {
         const event = result.value;
         const decision = this.shouldNotify(event);
         if (!decision) continue;
+
+        if (!this.checkAndRecordSend(decision.taskId, event.kind, decision.code)) continue;
 
         const payload = this.buildPayload(workflowId, event, decision);
         const payloadStr = JSON.stringify(payload);

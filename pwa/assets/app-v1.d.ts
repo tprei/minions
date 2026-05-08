@@ -5,7 +5,7 @@ export declare const state: {
   transcript: unknown[];
   pushStatusByWorkflow: Record<string, string>;
   error: string | null;
-  streamStatus: "connected" | "reconnecting" | "closed";
+  streamStatus: "connecting" | "connected" | "reconnecting" | "closed";
 };
 export declare function parseHash(hash: string): string | null;
 export declare function transcriptNode(payload: unknown): HTMLElement;

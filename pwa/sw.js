@@ -1,16 +1,23 @@
-const CACHE = "minions-v2";
-const ASSETS = [
-  "/",
-  "/assets/app-v1.js",
-  "/assets/styles-v1.css",
-  "/manifest.json",
-  "/icons/icon-192.png",
-  "/icons/icon-512.png",
+const CACHE_VERSION = "v2-2026-05-08";
+const MANIFEST_CACHE = `manifest-${CACHE_VERSION}`;
+
+const MANIFEST_PRECACHE = ["/manifest.json", "/icons/icon-192.png", "/icons/icon-512.png"];
+
+const PASSTHROUGH_PREFIXES = [
+  "/workflows",
+  "/commands",
+  "/audit",
+  "/alerts",
+  "/push",
+  "/sse",
 ];
+
+const VERSIONED_ASSET_RE = /\/assets\/.*-v\d+\.(js|css)$/;
+const ICON_RE = /\/icons\/.*/;
 
 self.addEventListener("install", (evt) => {
   evt.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(ASSETS))
+    caches.open(MANIFEST_CACHE).then((c) => c.addAll(MANIFEST_PRECACHE))
   );
   self.skipWaiting();
 });
@@ -18,33 +25,51 @@ self.addEventListener("install", (evt) => {
 self.addEventListener("activate", (evt) => {
   evt.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
-    )
+      Promise.all(
+        keys
+          .filter((k) => k !== MANIFEST_CACHE)
+          .map((k) => caches.delete(k))
+      )
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener("fetch", (evt) => {
   const url = new URL(evt.request.url);
   const path = url.pathname;
 
-  if (
-    path.startsWith("/workflows") ||
-    path.startsWith("/commands") ||
-    path.startsWith("/push") ||
-    path === "/sw.js"
-  ) {
-    return;
-  }
+  if (path === "/sw.js") return;
+
+  if (PASSTHROUGH_PREFIXES.some((prefix) => path.startsWith(prefix))) return;
 
   if (evt.request.mode === "navigate") {
     evt.respondWith(
-      fetch(evt.request).catch(() => caches.match("/"))
+      fetch(evt.request).catch(() =>
+        new Response(
+          "<!doctype html><html><head><meta charset=utf-8><title>Offline</title></head><body><p>Offline — pull to refresh</p></body></html>",
+          { headers: { "Content-Type": "text/html" } }
+        )
+      )
     );
     return;
   }
 
-  if (path.startsWith("/assets/") || path.startsWith("/icons/")) {
+  if (VERSIONED_ASSET_RE.test(path)) {
+    evt.respondWith(
+      caches.open(MANIFEST_CACHE).then((cache) =>
+        cache.match(evt.request).then((cached) => {
+          if (cached) return cached;
+          return fetch(evt.request).then((response) => {
+            cache.put(evt.request, response.clone());
+            return response;
+          });
+        })
+      )
+    );
+    return;
+  }
+
+  if (ICON_RE.test(path) || path === "/manifest.json") {
     evt.respondWith(
       caches.match(evt.request).then((cached) => cached ?? fetch(evt.request))
     );
@@ -54,24 +79,22 @@ self.addEventListener("fetch", (evt) => {
 
 self.addEventListener("push", (evt) => {
   const p = evt.data?.json() ?? {};
+  const { taskId, kind, code, title, body, urlPath, workflowId } = p;
+
   evt.waitUntil(
-    self.registration.showNotification(p.title ?? "Minions", {
-      body: p.body ?? "",
-      tag: p.tag ?? "minions",
+    self.registration.showNotification(title ?? "Minions", {
+      body: body ?? "",
+      tag: `${taskId}:${code}`,
       renotify: true,
       icon: "/icons/icon-192.png",
-      data: {
-        url: p.url ?? "/",
-        workflowId: p.workflowId ?? null,
-        taskId: p.taskId ?? null,
-      },
+      data: { workflowId, taskId, urlPath: urlPath ?? "/" },
     })
   );
 });
 
 self.addEventListener("notificationclick", (evt) => {
   evt.notification.close();
-  const { workflowId, url } = evt.notification.data ?? {};
+  const { workflowId, taskId, urlPath } = evt.notification.data ?? {};
 
   evt.waitUntil(
     self.clients
@@ -79,10 +102,16 @@ self.addEventListener("notificationclick", (evt) => {
       .then((clientList) => {
         const target = clientList.find((c) => c.url.startsWith(self.location.origin));
         if (target) {
-          target.postMessage({ type: "navigate", url, workflowId });
+          target.postMessage({ type: "notification:navigate", workflowId, taskId, urlPath });
           return target.focus();
         }
-        return self.clients.openWindow(`/#/workflow/${workflowId}`);
+        return self.clients.openWindow(urlPath ?? "/");
       })
   );
+});
+
+self.addEventListener("message", (evt) => {
+  if (evt.data?.type === "sw:skip-waiting") {
+    self.skipWaiting();
+  }
 });

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Clear cache</title>
+  <style>
+    body { font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #0a0908; color: #f5f5f5; }
+    button { padding: 12px 24px; font-size: 1rem; border: 1px solid #f5f5f5; background: transparent; color: #f5f5f5; cursor: pointer; border-radius: 4px; }
+    button:hover { background: rgba(255,255,255,0.1); }
+    #status { margin-top: 16px; font-size: 0.9rem; opacity: 0.7; }
+  </style>
+</head>
+<body>
+  <h1>Clear cache</h1>
+  <button id="clear-btn">Clear all caches and reload</button>
+  <div id="status"></div>
+  <script>
+    document.getElementById("clear-btn").addEventListener("click", async () => {
+      const status = document.getElementById("status");
+      status.textContent = "Clearing…";
+
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+
+      localStorage.clear();
+
+      status.textContent = "Done. Redirecting…";
+      location.replace("/");
+    });
+  </script>
+</body>
+</html>
