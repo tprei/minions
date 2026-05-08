@@ -401,6 +401,9 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   serverDeps.observability = observability;
   serverDeps.log = log.child({ component: "transport" });
   serverDeps.supervisor = supervisor;
+  if (githubToken) {
+    serverDeps.githubToken = githubToken;
+  }
 
   const server = createServer(serverDeps);
 

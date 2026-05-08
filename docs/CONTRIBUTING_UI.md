@@ -226,3 +226,46 @@ The jump button is appended as a sibling of the scroller (inside the scroller-wr
 3. Add the kind to the `DISPATCH` table in `pwa/assets/transcript/pipeline.js`.
 4. Add render tests in `test/pwa/transcript/events.test.ts` (mock the vendor deps with `vi.mock`).
 5. If the new kind should cluster, add it to `CLUSTER_KINDS` and `CLUSTER_TOOL_NAMES` in `pipeline.js`.
+
+## DAG panel + artifacts
+
+### Task focus
+
+`createDagPanel({ workflow, onTaskFocus })` in `pwa/assets/views/dag-panel.js` returns `{ open(container?), update(workflow), destroy() }`.
+
+- On mobile (`window.innerWidth ≤ 768px`), `open()` creates a bottom `Sheet` (from `pwa/assets/components/sheet.js`).
+- On desktop (`min-width: 768px`), `open(container)` appends an inline `div.dag-inline-panel` to the given container.
+
+Each task row has a `dag-task-header` div wired to `onTaskFocus(taskId)`. Dependency chips (`.dag-dep-chip`) call `onTaskFocus` with the upstream task id.
+
+The `update(workflow)` method replaces the panel body without destroying the sheet or inline container, so open/closed state is preserved across live updates.
+
+### Artifact dispatch convention
+
+Artifact renderers live in `pwa/assets/artifacts/`. Each file exports a single:
+
+```js
+export function render(artifact, ctx?) → HTMLElement
+```
+
+where `ctx` is `{ workflowId?, taskId?, githubProxy? }`.
+
+The `ARTIFACT_RENDERERS` dispatch table in `dag-panel.js` maps `ArtifactKind → render` function. To add a new kind:
+
+1. Create `pwa/assets/artifacts/<kind>.js` and `.d.ts`.
+2. Import and add it to `ARTIFACT_RENDERERS` in `dag-panel.js`.
+3. Add tests in `test/pwa/artifacts/<kind>.test.ts`.
+
+Renderers for `ci-report` and `quality-report` parse `artifact.ref` as JSON and throw a descriptive error on parse failure — no silent fallbacks.
+
+The `pr` renderer lazy-fetches GitHub API data via the engine CORS proxy (`/github/pr-detail?url=<encoded url>`) and caches results for 30 seconds. The cache key is the PR URL. Results are refreshed on window focus if the entry is stale.
+
+### City-alias entropy
+
+`cityAlias(workflowId)` in `pwa/assets/utils/city-alias.js` hashes the workflow id with FNV-1a (32-bit) and derives:
+
+- adjective index: `hash % 35` (35 adjectives)
+- city index: `floor(hash / 35) % 35` (35 cities)
+- number: `hash % 1000` (zero-padded to 3 digits)
+
+Total combinations: 35 × 35 × 1000 = 1,225,000 — well above the 10k floor. The alias is stable for the same id and statistically unique across the typical workflow population (tens to hundreds per operator).

@@ -1,6 +1,9 @@
 import { createSseClient } from "./sse.js";
 import { setupPush, subscribePush } from "./push.js";
 import { createWorkspaceShell } from "./views/workspace-shell.js";
+import { createDagPanel } from "./views/dag-panel.js";
+import { createTasksPill } from "./components/header.js";
+import { cityAlias } from "./utils/city-alias.js";
 
 export const state = {
   workflows: [],
@@ -16,6 +19,7 @@ let sseClient = null;
 let routeGen = 0;
 let currentShell = null;
 let currentShellKey = null;
+let currentDagPanel = null;
 
 document.addEventListener("DOMContentLoaded", bootstrap);
 
@@ -49,6 +53,7 @@ function onRoute() {
     state.currentWorkflow = null;
     state.transcript = [];
     destroyShell();
+    destroyDagPanel();
     closeStream();
     render();
   }
@@ -59,6 +64,13 @@ function destroyShell() {
     currentShell.destroy();
     currentShell = null;
     currentShellKey = null;
+  }
+}
+
+function destroyDagPanel() {
+  if (currentDagPanel) {
+    currentDagPanel.destroy();
+    currentDagPanel = null;
   }
 }
 
@@ -84,6 +96,7 @@ function loadList() {
 export function loadWorkflowAndSubscribe(id) {
   const myGen = ++routeGen;
   destroyShell();
+  destroyDagPanel();
   closeStream();
   state.currentWorkflow = null;
   state.transcript = [];
@@ -144,6 +157,9 @@ function openStream(id) {
             const updatedTask = wf.graph[payload.taskId];
             if (currentShell && currentShellKey === `${wfId}:${payload.taskId}` && updatedTask?.artifacts) {
               currentShell.setArtifacts(updatedTask.artifacts);
+            }
+            if (currentDagPanel) {
+              currentDagPanel.update(wf);
             }
           })
           .catch(() => {});
@@ -426,11 +442,52 @@ function mountWorkspaceShell(container) {
 function renderHeader(container) {
   const hdr = document.createElement("header");
 
+  const left = document.createElement("div");
+  left.style.cssText = "display:flex;align-items:center;gap:8px;";
+
   const h1 = document.createElement("h1");
   h1.textContent = "Minions";
-  hdr.appendChild(h1);
+  left.appendChild(h1);
 
   if (state.currentWorkflow) {
+    const alias = document.createElement("span");
+    alias.className = "workflow-alias";
+    alias.textContent = cityAlias(state.currentWorkflow.id);
+    left.appendChild(alias);
+  }
+
+  hdr.appendChild(left);
+
+  if (state.currentWorkflow) {
+    const right = document.createElement("div");
+    right.style.cssText = "display:flex;align-items:center;gap:8px;";
+
+    const wf = state.currentWorkflow;
+    const graph = wf.graph ?? {};
+    const taskCount = Object.keys(graph).length;
+    const hasNonClean = Object.values(graph).some(
+      (t) => t.stackStatus && t.stackStatus !== "clean"
+    );
+
+    const tasksPill = createTasksPill({
+      taskCount,
+      hasNonClean,
+      onClick: () => {
+        if (!state.currentWorkflow) return;
+        if (!currentDagPanel) {
+          currentDagPanel = createDagPanel({
+            workflow: state.currentWorkflow,
+            onTaskFocus: (taskId) => {
+              window.location.hash = `#/workflow/${state.currentWorkflow.id}/task/${taskId}`;
+            },
+          });
+        }
+        const railEl = document.querySelector(".workspace-right-rail");
+        currentDagPanel.open(railEl ?? undefined);
+      },
+    });
+    right.appendChild(tasksPill);
+
     const indicator = document.createElement("div");
     indicator.className = `live-indicator ${state.streamStatus}`;
 
@@ -447,7 +504,9 @@ function renderHeader(container) {
 
     indicator.appendChild(label);
     indicator.appendChild(dot);
-    hdr.appendChild(indicator);
+    right.appendChild(indicator);
+
+    hdr.appendChild(right);
   }
 
   container.appendChild(hdr);

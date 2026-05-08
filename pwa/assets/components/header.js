@@ -1,3 +1,24 @@
+export function createTasksPill({ taskCount = 0, hasNonClean = false, onClick } = {}) {
+  const btn = document.createElement("button");
+  btn.className = `tasks-pill${hasNonClean ? " tasks-pill-dirty" : ""}`;
+  btn.setAttribute("aria-label", `Tasks (${taskCount})`);
+
+  const label = document.createTextNode(`Tasks · ${taskCount}`);
+  btn.appendChild(label);
+
+  if (hasNonClean) {
+    const dot = document.createElement("span");
+    dot.className = "tasks-pill-alert";
+    btn.appendChild(dot);
+  }
+
+  if (onClick) {
+    btn.addEventListener("click", onClick);
+  }
+
+  return btn;
+}
+
 export function createAppHeader({ title, statusBadgeNode = null, rightSlot = null } = {}) {
   const el = document.createElement('header');
   el.className = 'app-header';

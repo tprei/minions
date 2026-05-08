@@ -41,6 +41,7 @@ export interface ServerDeps {
   observability?: ObservabilityService;
   log?: Logger;
   supervisor?: SupervisorWithRepos;
+  githubToken?: string;
 }
 
 type AcceptedCommandKind = CommandKind | "continue-task" | "retry-task";
@@ -444,6 +445,33 @@ export function createServer(deps: ServerDeps): Hono {
     const b = body as Record<string, unknown>;
     deps.supervisor.subRepo.remove(b["endpoint"] as string);
     return c.json({ ok: true });
+  });
+
+  const PR_URL_RE = /^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+\/pulls\/\d+$/;
+
+  app.get("/github/pr-detail", async (c) => {
+    const url = c.req.query("url");
+    if (!url || !PR_URL_RE.test(url)) {
+      return c.json({ code: "invalid_request", message: "url query param missing or invalid" }, 400);
+    }
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    };
+    if (deps.githubToken) {
+      headers["Authorization"] = `Bearer ${deps.githubToken}`;
+    }
+    let upstreamRes: Response;
+    try {
+      upstreamRes = await fetch(url, { headers });
+    } catch (err) {
+      return c.json({ code: "upstream_error", message: `upstream fetch failed: ${(err as Error).message}` }, 502);
+    }
+    if (!upstreamRes.ok) {
+      return c.json({ code: "upstream_error", message: `upstream responded ${upstreamRes.status}` }, 502);
+    }
+    const data: unknown = await upstreamRes.json();
+    return c.json(data);
   });
 
   if (deps.pwaRoot !== undefined) {
