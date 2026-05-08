@@ -91,6 +91,7 @@ describe("createWorkspaceShell", () => {
     const { element, setExecutionStatus, appendTranscriptEvent } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
     setExecutionStatus("running");
     appendTranscriptEvent({ providerEvent: { kind: "assistant_text", text: "hello" } });
+    appendTranscriptEvent({ providerEvent: { kind: "final" } });
 
     setExecutionStatus("quality-pending");
     const transcript = element.querySelector(".transcript");
@@ -190,12 +191,13 @@ describe("createWorkspaceShell", () => {
         return () => {};
       },
     };
-    const { element, setExecutionStatus } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus });
+    const { element, setExecutionStatus, appendTranscriptEvent } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus });
     setExecutionStatus("running");
 
     handlers["provider-event"]?.forEach((h) =>
       h({ payload: { taskId: "t1", providerEvent: { kind: "assistant_text", text: "correct task event" } } })
     );
+    appendTranscriptEvent({ providerEvent: { kind: "final" } });
     const transcript = element.querySelector(".transcript") as HTMLElement;
     expect(transcript.textContent).toContain("correct task event");
   });
