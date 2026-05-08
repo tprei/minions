@@ -119,4 +119,47 @@ describe("validateCommand approve-permission", () => {
       expect(result.failure.field).toBe("workflowId");
     }
   });
+
+  it("non-string reason is rejected on approve", () => {
+    const result = validateCommand({
+      kind: "approve-permission",
+      workflowId: "wf-1",
+      taskId: "task-1",
+      requestId: "req-abc",
+      decision: "approve",
+      reason: 99,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.field).toBe("reason");
+      expect(result.failure.expected).toBe("string");
+    }
+  });
+
+  it("empty string reason is rejected on deny", () => {
+    const result = validateCommand({
+      kind: "approve-permission",
+      workflowId: "wf-1",
+      taskId: "task-1",
+      requestId: "req-abc",
+      decision: "deny",
+      reason: "",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.field).toBe("reason");
+    }
+  });
+
+  it("valid string reason is accepted on approve", () => {
+    const result = validateCommand({
+      kind: "approve-permission",
+      workflowId: "wf-1",
+      taskId: "task-1",
+      requestId: "req-abc",
+      decision: "approve",
+      reason: "looks good",
+    });
+    expect(result.ok).toBe(true);
+  });
 });

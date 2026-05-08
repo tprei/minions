@@ -12,6 +12,7 @@ import { applyCommand } from "../src/application/commands.js";
 import { createSingleTaskWorkflow } from "../src/domain/workflow.js";
 import { StubProviderPlugin } from "../src/plugins/providers/stub.js";
 import { StubRuntimeBackend } from "../src/plugins/stub-runtime.js";
+import type { ProviderPlugin } from "../src/plugins/provider-plugin.js";
 
 function makeTempPath(): string {
   const dir = mkdtempSync(join(tmpdir(), "engine-test-"));
@@ -223,5 +224,58 @@ describe("createEngine — close() aborts service-spawned orchestrators", () => 
     await eng.close();
 
     expect(capturedSignal?.aborted).toBe(true);
+  });
+});
+
+describe("spawnTracked deregister race safety", () => {
+  it("deregistering provider A does not evict provider B registered for the same (workflowId, taskId)", () => {
+    // Replicate the activeProviders map and the spawnTracked finally predicate
+    // to verify that identity-checked deletion is safe.
+    const activeProviders = new Map<string, Map<string, ProviderPlugin>>();
+
+    const workflowId = "wf-race";
+    const taskId = "wf-race:t1";
+
+    const providerA = new StubProviderPlugin({ frames: [] });
+    const providerB = new StubProviderPlugin({ frames: [] });
+
+    // Register provider A (first run)
+    if (!activeProviders.has(workflowId)) activeProviders.set(workflowId, new Map());
+    activeProviders.get(workflowId)!.set(taskId, providerA);
+
+    // Register provider B for the same slot (second run starts before A tears down)
+    activeProviders.get(workflowId)!.set(taskId, providerB);
+
+    // Simulate the finally block for provider A's orchestrator (the old run finishing)
+    const taskMap = activeProviders.get(workflowId);
+    if (taskMap !== undefined && taskMap.get(taskId) === providerA) {
+      taskMap.delete(taskId);
+      if (taskMap.size === 0) activeProviders.delete(workflowId);
+    }
+
+    // Provider B must still be registered
+    expect(activeProviders.has(workflowId)).toBe(true);
+    expect(activeProviders.get(workflowId)!.get(taskId)).toBe(providerB);
+  });
+
+  it("deregistering the current provider removes the slot when no replacement exists", () => {
+    const activeProviders = new Map<string, Map<string, ProviderPlugin>>();
+
+    const workflowId = "wf-solo";
+    const taskId = "wf-solo:t1";
+    const providerA = new StubProviderPlugin({ frames: [] });
+
+    if (!activeProviders.has(workflowId)) activeProviders.set(workflowId, new Map());
+    activeProviders.get(workflowId)!.set(taskId, providerA);
+
+    // Simulate the finally block — providerA is still current
+    const taskMap = activeProviders.get(workflowId);
+    if (taskMap !== undefined && taskMap.get(taskId) === providerA) {
+      taskMap.delete(taskId);
+      if (taskMap.size === 0) activeProviders.delete(workflowId);
+    }
+
+    // Slot and workflow bucket must both be gone
+    expect(activeProviders.has(workflowId)).toBe(false);
   });
 });

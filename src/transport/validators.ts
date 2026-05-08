@@ -139,6 +139,16 @@ export function validateCommand(body: unknown): ValidationResult {
   if (!base.ok) return base;
   if (kind === "approve-permission") {
     const b = body as Record<string, unknown>;
+    if (b["reason"] !== undefined && typeof b["reason"] !== "string") {
+      return {
+        ok: false,
+        failure: {
+          field: "reason",
+          expected: "string",
+          message: 'field "reason" must be a string',
+        },
+      };
+    }
     if (b["decision"] === "deny" && !isNonEmptyString(b["reason"])) {
       return {
         ok: false,

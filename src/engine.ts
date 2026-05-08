@@ -188,7 +188,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       .finally(() => {
         activeOrchestrators.delete(entry);
         const taskMap = activeProviders.get(deps.workflowId);
-        if (taskMap !== undefined) {
+        if (taskMap !== undefined && taskMap.get(deps.taskId) === deps.provider) {
           taskMap.delete(deps.taskId);
           if (taskMap.size === 0) {
             activeProviders.delete(deps.workflowId);
