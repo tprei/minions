@@ -80,3 +80,31 @@ Tests that need real database state are explicit opt-in: they must set up fixtur
 ## iOS push caveat
 
 Push notification specs require a browser with `PushManager` support and a valid VAPID key pair. Linux CI has neither a real device nor Safari. Push specs carry a `test.skip(process.env.CI === "true", "push requires real device")` guard. Manual phone smoke is the only verification path for push behavior.
+
+## Test hooks
+
+Shell components (Sheet, StatusDot, AppHeader, BottomTabs, ThemeToggle) are available to Playwright specs via `window.__ui`, a registry populated at runtime when the page URL includes `?test=1`.
+
+**Activation:** navigate to `/?test=1`. The engine serves this URL the same as `/` — no special route needed.
+
+**Available factories:**
+
+| Key | Signature | Returns |
+|-----|-----------|---------|
+| `createSheet` | `(opts: {title, body, side?})` | `{open, close, destroy, panel, overlay}` |
+| `createStatusDot` | `(status, {busy?, size?})` | `HTMLElement` (a `<span>`) |
+| `createAppHeader` | `({title, statusBadgeNode?, rightSlot?})` | `HTMLElement` (a `<header>`) |
+| `createBottomTabs` | `(tabs, activeId)` | `HTMLElement` (a `<nav>`) |
+| `createThemeToggle` | `()` | `HTMLElement` (a `<div.theme-toggle>`) |
+
+**Usage in a spec:**
+
+```ts
+const result = await page.evaluate(() => {
+  const sheet = window.__ui.createSheet({ title: 'Test', body: 'Content' });
+  return { visible: sheet.panel.classList.contains('open') };
+});
+expect(result.visible).toBe(true);
+```
+
+The registry is defined in `pwa/assets/test-hooks.js` and loaded as a `<script type="module">` in `index.html`. It has no effect when `?test=1` is absent — the `window.__ui` property is not set.

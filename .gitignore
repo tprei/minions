@@ -6,3 +6,4 @@ playwright-report/
 test-results/
 .cache/ms-playwright/
 .e2e-db.sqlite*
+node_modules
