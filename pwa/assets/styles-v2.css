@@ -2,93 +2,93 @@
 
 :root {
   /* Default: respect system preference */
-  --bg: 20 17 14;
-  --bg-elevated: 26 22 18;
-  --fg: 232 226 214;
-  --fg-muted: 138 133 122;
-  --border: 42 38 34;
-  --accent: 245 158 11;
-  --accent-fg: 20 17 14;
-  --tone-info: 91 155 213;
-  --tone-info-bg: 91 155 213;
-  --tone-info-fg: 20 17 14;
-  --tone-warn: 245 158 11;
-  --tone-warn-bg: 245 158 11;
-  --tone-warn-fg: 20 17 14;
-  --tone-err: 193 71 62;
-  --tone-err-bg: 193 71 62;
-  --tone-err-fg: 232 226 214;
-  --tone-ok: 95 180 127;
-  --tone-ok-bg: 95 180 127;
-  --tone-ok-fg: 20 17 14;
+  --bg: 30 18% 7%;
+  --bg-elevated: 30 18% 9%;
+  --fg: 40 28% 87%;
+  --fg-muted: 41 6% 51%;
+  --border: 30 11% 15%;
+  --accent: 38 92% 50%;
+  --accent-fg: 30 18% 7%;
+  --tone-info: 209 59% 60%;
+  --tone-info-bg: 209 59% 60%;
+  --tone-info-fg: 30 18% 7%;
+  --tone-warn: 38 92% 50%;
+  --tone-warn-bg: 38 92% 50%;
+  --tone-warn-fg: 30 18% 7%;
+  --tone-err: 4 51% 50%;
+  --tone-err-bg: 4 51% 50%;
+  --tone-err-fg: 40 28% 87%;
+  --tone-ok: 143 36% 54%;
+  --tone-ok-bg: 143 36% 54%;
+  --tone-ok-fg: 30 18% 7%;
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
-    --bg: 252 250 247;
-    --bg-elevated: 245 242 238;
-    --fg: 28 24 20;
-    --fg-muted: 110 102 92;
-    --border: 214 208 198;
-    --accent: 217 119 6;
-    --accent-fg: 252 250 247;
-    --tone-info: 37 99 235;
-    --tone-info-bg: 219 234 254;
-    --tone-info-fg: 30 58 138;
-    --tone-warn: 217 119 6;
-    --tone-warn-bg: 254 243 199;
-    --tone-warn-fg: 120 53 15;
-    --tone-err: 185 28 28;
-    --tone-err-bg: 254 226 226;
-    --tone-err-fg: 127 29 29;
-    --tone-ok: 21 128 61;
-    --tone-ok-bg: 220 252 231;
-    --tone-ok-fg: 20 83 45;
+    --bg: 36 45% 98%;
+    --bg-elevated: 34 26% 95%;
+    --fg: 30 17% 9%;
+    --fg-muted: 33 9% 40%;
+    --border: 37 16% 81%;
+    --accent: 32 95% 44%;
+    --accent-fg: 36 45% 98%;
+    --tone-info: 221 83% 53%;
+    --tone-info-bg: 214 95% 93%;
+    --tone-info-fg: 224 64% 33%;
+    --tone-warn: 32 95% 44%;
+    --tone-warn-bg: 48 96% 89%;
+    --tone-warn-fg: 22 78% 26%;
+    --tone-err: 0 74% 42%;
+    --tone-err-bg: 0 93% 94%;
+    --tone-err-fg: 0 63% 31%;
+    --tone-ok: 142 72% 29%;
+    --tone-ok-bg: 141 84% 93%;
+    --tone-ok-fg: 144 61% 20%;
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: 20 17 14;
-  --bg-elevated: 26 22 18;
-  --fg: 232 226 214;
-  --fg-muted: 138 133 122;
-  --border: 42 38 34;
-  --accent: 245 158 11;
-  --accent-fg: 20 17 14;
-  --tone-info: 91 155 213;
-  --tone-info-bg: 91 155 213;
-  --tone-info-fg: 20 17 14;
-  --tone-warn: 245 158 11;
-  --tone-warn-bg: 245 158 11;
-  --tone-warn-fg: 20 17 14;
-  --tone-err: 193 71 62;
-  --tone-err-bg: 193 71 62;
-  --tone-err-fg: 232 226 214;
-  --tone-ok: 95 180 127;
-  --tone-ok-bg: 95 180 127;
-  --tone-ok-fg: 20 17 14;
+  --bg: 30 18% 7%;
+  --bg-elevated: 30 18% 9%;
+  --fg: 40 28% 87%;
+  --fg-muted: 41 6% 51%;
+  --border: 30 11% 15%;
+  --accent: 38 92% 50%;
+  --accent-fg: 30 18% 7%;
+  --tone-info: 209 59% 60%;
+  --tone-info-bg: 209 59% 60%;
+  --tone-info-fg: 30 18% 7%;
+  --tone-warn: 38 92% 50%;
+  --tone-warn-bg: 38 92% 50%;
+  --tone-warn-fg: 30 18% 7%;
+  --tone-err: 4 51% 50%;
+  --tone-err-bg: 4 51% 50%;
+  --tone-err-fg: 40 28% 87%;
+  --tone-ok: 143 36% 54%;
+  --tone-ok-bg: 143 36% 54%;
+  --tone-ok-fg: 30 18% 7%;
 }
 
 :root[data-theme="light"] {
-  --bg: 252 250 247;
-  --bg-elevated: 245 242 238;
-  --fg: 28 24 20;
-  --fg-muted: 110 102 92;
-  --border: 214 208 198;
-  --accent: 217 119 6;
-  --accent-fg: 252 250 247;
-  --tone-info: 37 99 235;
-  --tone-info-bg: 219 234 254;
-  --tone-info-fg: 30 58 138;
-  --tone-warn: 217 119 6;
-  --tone-warn-bg: 254 243 199;
-  --tone-warn-fg: 120 53 15;
-  --tone-err: 185 28 28;
-  --tone-err-bg: 254 226 226;
-  --tone-err-fg: 127 29 29;
-  --tone-ok: 21 128 61;
-  --tone-ok-bg: 220 252 231;
-  --tone-ok-fg: 20 83 45;
+  --bg: 36 45% 98%;
+  --bg-elevated: 34 26% 95%;
+  --fg: 30 17% 9%;
+  --fg-muted: 33 9% 40%;
+  --border: 37 16% 81%;
+  --accent: 32 95% 44%;
+  --accent-fg: 36 45% 98%;
+  --tone-info: 221 83% 53%;
+  --tone-info-bg: 214 95% 93%;
+  --tone-info-fg: 224 64% 33%;
+  --tone-warn: 32 95% 44%;
+  --tone-warn-bg: 48 96% 89%;
+  --tone-warn-fg: 22 78% 26%;
+  --tone-err: 0 74% 42%;
+  --tone-err-bg: 0 93% 94%;
+  --tone-err-fg: 0 63% 31%;
+  --tone-ok: 142 72% 29%;
+  --tone-ok-bg: 141 84% 93%;
+  --tone-ok-fg: 144 61% 20%;
 }
 
 /* ── Keyframes ── */
@@ -195,7 +195,7 @@ body::before {
 
 /* ── Frosted app header ── */
 
-.app-header {
+header, .app-header {
   backdrop-filter: blur(12px);
   background: hsl(var(--bg) / 0.85);
 }
@@ -214,7 +214,6 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: hsl(var(--bg));
   position: sticky;
   top: 0;
   z-index: 10;

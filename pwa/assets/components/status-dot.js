@@ -14,7 +14,7 @@ export function createStatusDot(executionStatus, { busy = false, size = 'md' } =
   if (VALID_STATUSES.includes(executionStatus)) {
     classes.push(`status-dot-${executionStatus}`);
   } else {
-    classes.push('status-dot-pending');
+    throw new Error(`unknown executionStatus: ${executionStatus}`);
   }
 
   if (busy) {

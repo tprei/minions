@@ -4,6 +4,6 @@ import { createAppHeader } from './components/header.js';
 import { createBottomTabs } from './components/bottom-tabs.js';
 import { createThemeToggle } from './components/theme-toggle.js';
 
-if (window.location.search.includes('test=1')) {
+if (new URLSearchParams(location.search).get('test') === '1') {
   window.__ui = { createSheet, createStatusDot, createAppHeader, createBottomTabs, createThemeToggle };
 }

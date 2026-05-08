@@ -49,7 +49,18 @@ test("Sheet open/close + drag dismiss", async ({ page }) => {
 
   await expect(page.getByText("Test Sheet")).toBeVisible();
 
-  await page.locator(".sheet-close").dispatchEvent("click");
+  const panelBox = await panel.boundingBox();
+  if (!panelBox) throw new Error("sheet-panel has no bounding box");
+
+  const startX = panelBox.x + panelBox.width / 2;
+  const startY = panelBox.y + 8;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX, startY + 30, { steps: 5 });
+  await page.mouse.move(startX, startY + 60, { steps: 5 });
+  await page.mouse.move(startX, startY + 100, { steps: 5 });
+  await page.mouse.up();
 
   await expect(panel).not.toBeVisible({ timeout: 2000 });
 });
@@ -112,4 +123,18 @@ test("Frosted header in light + dark", async ({ page }) => {
   await expect(page).toHaveScreenshot("frosted-header-dark.png", {
     clip: { x: 0, y: 0, width: 1280, height: 80 },
   });
+});
+
+test("test-hooks gate: ?test=1 enables, ?test=0 and ?notest=1 do not", async ({ page }) => {
+  await page.goto("/?test=1");
+  const enabled = await page.evaluate(() => typeof (window as unknown as { __ui?: unknown }).__ui !== "undefined");
+  expect(enabled).toBe(true);
+
+  await page.goto("/?test=0");
+  const disabledByZero = await page.evaluate(() => typeof (window as unknown as { __ui?: unknown }).__ui !== "undefined");
+  expect(disabledByZero).toBe(false);
+
+  await page.goto("/?notest=1");
+  const disabledByNotest = await page.evaluate(() => typeof (window as unknown as { __ui?: unknown }).__ui !== "undefined");
+  expect(disabledByNotest).toBe(false);
 });

@@ -9,14 +9,13 @@ function getSystemTheme() {
 }
 
 function applyTheme(pref) {
-  const resolved = pref === 'system' ? getSystemTheme() : pref;
-
-  if (resolved === 'light') {
-    document.documentElement.dataset.theme = 'light';
+  if (pref === 'system') {
+    delete document.documentElement.dataset.theme;
   } else {
-    document.documentElement.dataset.theme = 'dark';
+    document.documentElement.dataset.theme = pref;
   }
 
+  const resolved = pref === 'system' ? getSystemTheme() : pref;
   const metaThemeColor = document.querySelector('meta[name="theme-color"]');
   if (metaThemeColor) {
     metaThemeColor.setAttribute('content', THEME_COLORS[resolved]);
