@@ -206,4 +206,38 @@ describe("draftPr", () => {
       draftPr({ workflowId: "wf-1", taskId: "wf-1:no-such-task", deps }),
     ).rejects.toMatchObject({ code: "not_found" });
   });
+
+  it("providerFactory throws → workspace is still cleaned up", async () => {
+    const repo = new InMemoryWorkflowRepository();
+    await makeWorkflowWithBranch(repo);
+
+    const workspace = new StubWorkspaceBackend();
+    const cleanupSpy = vi.spyOn(workspace, "cleanup");
+
+    const runtime: RuntimeBackend = {
+      start: vi.fn().mockResolvedValue({ sessionId: "stub-1", runtimeType: "stub" }),
+      stop: vi.fn().mockResolvedValue(undefined),
+      probe: vi.fn().mockResolvedValue("live" as RuntimeProbeState),
+      attach(_sessionId: string, _opts?: RuntimeAttachOptions): AsyncIterable<RuntimeOutputChunk> {
+        return {
+          [Symbol.asyncIterator]: async function* () {},
+        };
+      },
+    };
+
+    const deps = {
+      repo,
+      providerFactory: () => {
+        throw new Error("provider factory failed");
+      },
+      runtime,
+      workspace,
+    };
+
+    await expect(
+      draftPr({ workflowId: "wf-1", taskId: "wf-1:task", deps }),
+    ).rejects.toThrow("provider factory failed");
+
+    expect(cleanupSpy).toHaveBeenCalledOnce();
+  });
 });

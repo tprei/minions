@@ -66,31 +66,35 @@ export async function draftPr({
     resetBranch: false,
   });
 
-  const provider = providerFactory();
-  const invocation = await provider.prepare({
-    taskId,
-    workflowId,
-    prompt: DRAFT_PR_PROMPT,
-    dependencyArtifacts: [],
-  });
-
-  const startResult = await runtime.start({
-    taskId,
-    workflowId,
-    command: invocation.command,
-    workspacePath: handle.containerPath,
-    ...(invocation.env !== undefined ? { env: invocation.env } : {}),
-  });
-
-  const runtimeSessionId = startResult.sessionId;
+  let runtimeSessionId: string | undefined;
 
   try {
+    const provider = providerFactory();
+    const invocation = await provider.prepare({
+      taskId,
+      workflowId,
+      prompt: DRAFT_PR_PROMPT,
+      dependencyArtifacts: [],
+    });
+
+    const startResult = await runtime.start({
+      taskId,
+      workflowId,
+      command: invocation.command,
+      workspacePath: handle.containerPath,
+      ...(invocation.env !== undefined ? { env: invocation.env } : {}),
+    });
+
+    runtimeSessionId = startResult.sessionId;
+
     return await runWithTimeout(
-      (signal) => collectProviderOutput(runtime, runtimeSessionId, provider, signal),
+      (signal) => collectProviderOutput(runtime, runtimeSessionId!, provider, signal),
       TIMEOUT_MS,
     );
   } finally {
-    await runtime.stop(runtimeSessionId).catch(() => {});
+    if (runtimeSessionId !== undefined) {
+      await runtime.stop(runtimeSessionId).catch(() => {});
+    }
     await workspace.cleanup(handle.workspaceId).catch(() => {});
   }
 }
