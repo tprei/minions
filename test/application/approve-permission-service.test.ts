@@ -7,6 +7,15 @@ import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
 import { StubProviderPlugin } from "../../src/plugins/providers/stub.js";
 import type { ProviderPlugin } from "../../src/plugins/provider-plugin.js";
 
+function makeActiveProviders(entries: Array<[workflowId: string, taskId: string, provider: ProviderPlugin]>): Map<string, Map<string, ProviderPlugin>> {
+  const map = new Map<string, Map<string, ProviderPlugin>>();
+  for (const [workflowId, taskId, provider] of entries) {
+    if (!map.has(workflowId)) map.set(workflowId, new Map());
+    map.get(workflowId)!.set(taskId, provider);
+  }
+  return map;
+}
+
 const now = "2026-05-08T12:00:00.000Z";
 
 async function makeRunningTask(repo: InMemoryWorkflowRepository): Promise<void> {
@@ -30,7 +39,7 @@ describe("ApprovePermissionService", () => {
     await makeRunningTask(repo);
 
     const provider = new StubProviderPlugin({ frames: [] });
-    const activeProviders = new Map<string, ProviderPlugin>([["wf-1:wf-1:task", provider]]);
+    const activeProviders = makeActiveProviders([["wf-1", "wf-1:task", provider]]);
     const service = new ApprovePermissionService({ repo, activeProviders });
 
     const result = await service.run({
@@ -54,7 +63,7 @@ describe("ApprovePermissionService", () => {
     await makeRunningTask(repo);
 
     const provider = new StubProviderPlugin({ frames: [] });
-    const activeProviders = new Map<string, ProviderPlugin>([["wf-1:wf-1:task", provider]]);
+    const activeProviders = makeActiveProviders([["wf-1", "wf-1:task", provider]]);
     const service = new ApprovePermissionService({ repo, activeProviders });
 
     const result = await service.run({
@@ -77,7 +86,7 @@ describe("ApprovePermissionService", () => {
     const repo = new InMemoryWorkflowRepository();
     await makeRunningTask(repo);
 
-    const activeProviders = new Map<string, ProviderPlugin>();
+    const activeProviders = new Map<string, Map<string, ProviderPlugin>>();
     const service = new ApprovePermissionService({ repo, activeProviders });
 
     let caughtErr: unknown;
@@ -116,7 +125,7 @@ describe("ApprovePermissionService", () => {
       async loginStatus() { return { loggedIn: true }; },
     };
 
-    const activeProviders = new Map<string, ProviderPlugin>([["wf-1:wf-1:task", provider]]);
+    const activeProviders = makeActiveProviders([["wf-1", "wf-1:task", provider]]);
     const service = new ApprovePermissionService({ repo, activeProviders });
 
     let caughtErr: unknown;
@@ -137,7 +146,7 @@ describe("ApprovePermissionService", () => {
 
   it("returns not_found when workflow does not exist", async () => {
     const repo = new InMemoryWorkflowRepository();
-    const activeProviders = new Map<string, ProviderPlugin>();
+    const activeProviders = new Map<string, Map<string, ProviderPlugin>>();
     const service = new ApprovePermissionService({ repo, activeProviders });
 
     let caughtErr: unknown;
@@ -161,7 +170,7 @@ describe("ApprovePermissionService", () => {
     const wf = createSingleTaskWorkflow("wf-1", { title: "T", prompt: "P" }, () => now);
     await repo.save(wf, []);
 
-    const activeProviders = new Map<string, ProviderPlugin>();
+    const activeProviders = new Map<string, Map<string, ProviderPlugin>>();
     const service = new ApprovePermissionService({ repo, activeProviders });
 
     let caughtErr: unknown;
@@ -186,7 +195,7 @@ describe("ApprovePermissionService", () => {
     await repo.save(wf, []);
 
     const provider = new StubProviderPlugin({ frames: [] });
-    const activeProviders = new Map<string, ProviderPlugin>([["wf-1:wf-1:task", provider]]);
+    const activeProviders = makeActiveProviders([["wf-1", "wf-1:task", provider]]);
     const service = new ApprovePermissionService({ repo, activeProviders });
 
     let caughtErr: unknown;
@@ -203,5 +212,51 @@ describe("ApprovePermissionService", () => {
     expect(caughtErr).toBeInstanceOf(DomainError);
     expect((caughtErr as DomainError).code).toBe("invalid_transition");
     expect((caughtErr as DomainError).message).toContain("running");
+  });
+
+  it("routes to correct provider when workflowId and taskId contain colons that would collide as flat keys", async () => {
+    const repo = new InMemoryWorkflowRepository();
+
+    // workflow "a:b" with task "c" — old flat key would be "a:b:c"
+    const wfAB = createSingleTaskWorkflow("a:b", { id: "c", title: "T", prompt: "P" }, () => now);
+    await repo.save(wfAB, []);
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "a:b",
+      transition: { kind: "mark-ready", taskId: "c", now },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "a:b",
+      transition: { kind: "mark-running", taskId: "c", sessionId: "s-ab", now },
+    });
+
+    // workflow "a" with task "b:c" — old flat key would also be "a:b:c"
+    const wfA = createSingleTaskWorkflow("a", { id: "b:c", title: "T", prompt: "P" }, () => now);
+    await repo.save(wfA, []);
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "a",
+      transition: { kind: "mark-ready", taskId: "b:c", now },
+    });
+    await applyCommand(repo, {
+      kind: "transition-task",
+      workflowId: "a",
+      transition: { kind: "mark-running", taskId: "b:c", sessionId: "s-a", now },
+    });
+
+    const providerAB = new StubProviderPlugin({ frames: [] });
+    const providerA = new StubProviderPlugin({ frames: [] });
+    const activeProviders = makeActiveProviders([
+      ["a:b", "c", providerAB],
+      ["a", "b:c", providerA],
+    ]);
+    const service = new ApprovePermissionService({ repo, activeProviders });
+
+    await service.run({ workflowId: "a:b", taskId: "c", requestId: "req-ab", decision: "approve" });
+
+    expect(providerAB.approvalCalls).toHaveLength(1);
+    expect(providerAB.approvalCalls[0]).toMatchObject({ requestId: "req-ab", decision: "approve" });
+    expect(providerA.approvalCalls).toHaveLength(0);
   });
 });

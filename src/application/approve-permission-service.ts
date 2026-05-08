@@ -4,7 +4,7 @@ import type { WorkflowRepository } from "./repository.js";
 
 export interface ApprovePermissionServiceDeps {
   repo: WorkflowRepository;
-  activeProviders: Map<string, ProviderPlugin>;
+  activeProviders: Map<string, Map<string, ProviderPlugin>>;
 }
 
 export interface ApprovePermissionInput {
@@ -17,10 +17,6 @@ export interface ApprovePermissionInput {
 
 export interface ApprovePermissionResult {
   ok: true;
-}
-
-function providerKey(workflowId: string, taskId: string): string {
-  return `${workflowId}:${taskId}`;
 }
 
 export class ApprovePermissionService {
@@ -52,8 +48,7 @@ export class ApprovePermissionService {
       );
     }
 
-    const key = providerKey(workflowId, taskId);
-    const provider = activeProviders.get(key);
+    const provider = activeProviders.get(workflowId)?.get(taskId);
     if (!provider) {
       throw new DomainError(
         "not_found",
