@@ -26,6 +26,7 @@ export interface HarnessOptions {
   githubClient?: GitHubClient;
   ciBabysitterCadence?: PollCadence;
   providerFactory?: EngineConfig["providerFactory"];
+  automationDisabled?: boolean;
   now?: () => string;
   baseDir?: string;
   dbPath?: string;
@@ -102,6 +103,7 @@ export async function makeHarness(opts: HarnessOptions = {}): Promise<PipelineHa
     ...(opts.githubClient !== undefined ? { githubClient: opts.githubClient } : {}),
     ...(opts.ciBabysitterCadence !== undefined ? { ciBabysitterCadence: opts.ciBabysitterCadence } : {}),
     ...(opts.providerFactory !== undefined ? { providerFactory: opts.providerFactory } : {}),
+    ...(opts.automationDisabled !== undefined ? { automationDisabled: opts.automationDisabled } : {}),
   };
 
   if (opts.withRealQuality) {

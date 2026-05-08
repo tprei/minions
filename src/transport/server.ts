@@ -41,6 +41,7 @@ export interface ServerDeps {
   observability?: ObservabilityService;
   log?: Logger;
   supervisor?: SupervisorWithRepos;
+  automationRunner?: { notify(workflowId: string): void };
 }
 
 type AcceptedCommandKind = CommandKind | "continue-task" | "retry-task";
@@ -128,6 +129,7 @@ export function createServer(deps: ServerDeps): Hono {
     deps.qualityGateService?.attach(workflow.id);
     deps.completionDispatcher?.attach(workflow.id);
     deps.observability?.attach(workflow.id);
+    deps.automationRunner?.notify(workflow.id);
     return c.json(workflow, 201);
   });
 
@@ -195,6 +197,7 @@ export function createServer(deps: ServerDeps): Hono {
     }
 
     const result = await applyCommand(repo, body as unknown as Command);
+    deps.automationRunner?.notify((body as { workflowId: string }).workflowId);
     return c.json(result);
   });
 

@@ -12,6 +12,7 @@ import { applyCommand } from "../src/application/commands.js";
 import { createSingleTaskWorkflow } from "../src/domain/workflow.js";
 import { StubProviderPlugin } from "../src/plugins/providers/stub.js";
 import { StubRuntimeBackend } from "../src/plugins/stub-runtime.js";
+import type { ProviderEvent } from "../src/plugins/provider-plugin.js";
 
 function makeTempPath(): string {
   const dir = mkdtempSync(join(tmpdir(), "engine-test-"));
@@ -223,5 +224,105 @@ describe("createEngine — close() aborts service-spawned orchestrators", () => 
     await eng.close();
 
     expect(capturedSignal?.aborted).toBe(true);
+  });
+});
+
+describe("AutomationRunner integration: auto-dispatch on POST /workflows", () => {
+  it("POST /workflows with one pending task → task transitions to running within 2s via event trigger", async () => {
+    const dbPath = makeTempPath();
+    const now = "2026-05-08T12:00:00.000Z";
+
+    const finalEvent: ProviderEvent = { kind: "final", sessionRef: "s-auto" };
+    const stubRuntime = new StubRuntimeBackend();
+    const stubProvider = new StubProviderPlugin({ frames: [[finalEvent]] });
+
+    const config: EngineConfig = {
+      dbPath,
+      runtime: stubRuntime,
+      now: () => now,
+      providerFactory: () => stubProvider,
+      automationScanIntervalMs: 50,
+      log: silentLogger(),
+    };
+
+    const eng = await createEngine(config);
+
+    const res = await eng.server.fetch(new Request("http://localhost/workflows", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: "wf-auto-1",
+        kind: "single-task",
+        tasks: [{ id: "wf-auto-1:task", title: "T", prompt: "Do it" }],
+      }),
+    }));
+    expect(res.status).toBe(201);
+
+    const repo = new SQLiteWorkflowRepository(dbPath);
+
+    const deadline = Date.now() + 2000;
+    let finalStatus: string | undefined;
+    while (Date.now() < deadline) {
+      const wf = await repo.get("wf-auto-1");
+      const status = wf?.graph["wf-auto-1:task"]?.executionStatus;
+      if (status === "running" || status === "needs-review" || status === "completed") {
+        finalStatus = status;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 30));
+    }
+
+    repo.close();
+    await eng.close();
+
+    expect(["running", "needs-review", "completed"]).toContain(finalStatus);
+  });
+});
+
+describe("AutomationRunner integration: stale-ready recycled by periodic scan", () => {
+  it("task stuck in ready with no session is recycled to pending by periodic recovery scan", async () => {
+    const dbPath = makeTempPath();
+
+    let mockNow = "2026-05-08T12:00:00.000Z";
+
+    const seedRepo = new SQLiteWorkflowRepository(dbPath);
+    const wf = createSingleTaskWorkflow("wf-stale-1", { title: "T", prompt: "P" }, () => mockNow);
+    await seedRepo.save(wf, []);
+    await applyCommand(seedRepo, {
+      kind: "transition-task",
+      workflowId: "wf-stale-1",
+      transition: { kind: "mark-ready", taskId: "wf-stale-1:task", now: mockNow },
+    });
+    seedRepo.close();
+
+    mockNow = new Date(Date.parse("2026-05-08T12:00:00.000Z") + 6 * 60 * 1000).toISOString();
+
+    const config: EngineConfig = {
+      dbPath,
+      now: () => mockNow,
+      providerFactory: () => new StubProviderPlugin({ frames: [] }),
+      automationScanIntervalMs: 50,
+      staleReadyMs: 5 * 60 * 1000,
+      log: silentLogger(),
+    };
+
+    const eng = await createEngine(config);
+
+    const repo = new SQLiteWorkflowRepository(dbPath);
+    const deadline = Date.now() + 2000;
+    let recycled = false;
+    while (Date.now() < deadline) {
+      const wfCurrent = await repo.get("wf-stale-1");
+      if (wfCurrent?.graph["wf-stale-1:task"]?.executionStatus === "pending") {
+        recycled = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 30));
+    }
+
+    repo.close();
+    await eng.close();
+
+    expect(recycled).toBe(true);
   });
 });

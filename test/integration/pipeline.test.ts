@@ -198,6 +198,7 @@ describe.skipIf(!HAS_GIT)("integration: pipeline", () => {
       githubClient: asGitHubClient(fakeGhClient),
       ciBabysitterCadence: FAST_CADENCE,
       providerFactory: () => new StubProviderPlugin({ frames: [] }),
+      automationDisabled: true,
     });
 
     try {
