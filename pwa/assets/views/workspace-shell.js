@@ -1,5 +1,5 @@
-import { transcriptNode } from "../app-v1.js";
 import { createComposer } from "../components/composer.js";
+import { createTranscriptPipeline } from "../transcript/pipeline.js";
 
 const PHASE_MAP = {
   "pending":         "input",
@@ -62,6 +62,7 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
   root.className = "workspace-shell";
 
   const transcriptScroller = createTranscriptScroller();
+  const transcriptPipeline = createTranscriptPipeline(transcriptScroller);
 
   let currentPhase = null;
   let currentStatus = null;
@@ -402,9 +403,8 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
   }
 
   function appendTranscriptEvent(payload) {
-    const node = transcriptNode(payload);
-    transcriptScroller.appendChild(node);
-    transcriptScroller.scrollTop = transcriptScroller.scrollHeight;
+    const providerEvent = payload?.providerEvent ?? payload;
+    transcriptPipeline.appendEvent(providerEvent);
   }
 
   function setArtifacts(artifacts) {

@@ -162,3 +162,67 @@ Without the invariant, each phase switch would tear down and recreate the transc
 5. If the phase needs composer-mode logic, add a branch in `deriveComposerMode`.
 
 Do not use `innerHTML = ""` or `replaceChildren` to swap phase content — that would unmount any shared nodes (transcript scroller, composer) if they happen to be inside the target container.
+
+## Transcript event pipeline
+
+The transcript phase renders a typed activity stream driven by the engine's `provider-event` SSE stream. The pipeline lives under `pwa/assets/transcript/`.
+
+### Dispatch table
+
+Each `provider-event` carries a `providerEvent` object with a `kind` field. The pipeline maps each kind to a per-kind renderer in `pwa/assets/transcript/events/`:
+
+| kind | renderer file | notes |
+|------|--------------|-------|
+| `assistant_text` | `assistant-text.js` | Markdown via `marked`, sanitized via `DOMPurify` |
+| `thinking` | `thinking.js` | Collapsible card, default-collapsed |
+| `tool_call` | `tool-call.js` | Single-line header + click-to-expand details; status dot from UI-1 |
+| `tool_result` | `tool-result.js` | Adopts parent group's expansion state |
+| `usage` | `usage.js` | Cost tier pill (green/yellow/orange/red) based on `costUsd`; falls back to token counts |
+| `error` | `error.js` | Red-bordered card; optional stack trace toggle |
+| `final` | `final.js` | Highlighted summary panel |
+
+Renderers export a single `render(event, ctx?)` function that returns an `HTMLElement`. No framework.
+
+The `permission_request` kind is intentionally absent — it is handled in UI-4.5 (approval card slice).
+
+### Aggregation
+
+`pwa/assets/transcript/aggregate.js` exports `aggregateConsecutive(events, kindsToCluster, previousGroups)`.
+
+Rules:
+- N≥3 consecutive `tool_call` events with the **same `name`** (e.g., three `Read` calls in a row) are collapsed into a `ClusterGroup`.
+- The cluster renders as a `+N <toolName> calls` button (collapsed by default).
+- Clicking the chevron or scrolling the cluster into view (via `IntersectionObserver`, threshold 0.5) expands the group inline.
+- Re-clustering runs on every event append. `previousGroups` carries the existing groups so expansion state is preserved across re-clusters.
+
+Currently clustered tool names: `Read`, `Edit`, `Glob`, `Grep`.
+
+To add a new tool to the cluster set, add its name to `CLUSTER_TOOL_NAMES` in `pwa/assets/transcript/pipeline.js`.
+
+### Streaming throttle
+
+`pwa/assets/transcript/streaming.js` exports `createStreamBuffer(onFlush)`.
+
+- `appendDelta(text)` — buffers text and schedules a flush (33ms / ~30fps).
+- `flush()` — forces an immediate flush and clears the timer.
+- `reset()` — clears buffer and accumulated text.
+- `getAccumulated()` — returns flushed accumulated text.
+
+The pipeline accumulates `assistant_text` deltas synchronously for DOM correctness, and uses the stream buffer to coalesce markdown re-renders during rapid streaming.
+
+### Auto-scroll and jump button
+
+The transcript scroller tracks scroll position on every `scroll` event:
+- Within 64px of the bottom → auto-scroll is enabled; new events scroll the view to the bottom.
+- User scrolls up beyond that threshold → auto-scroll suspends and a floating "Jump to latest ↓" button appears.
+- Clicking the button scrolls to bottom and re-enables auto-scroll.
+
+The jump button is appended as a sibling of the scroller (inside the scroller-wrap), styled with `position: absolute`.
+
+### Adding a new event kind
+
+1. Create `pwa/assets/transcript/events/<kind>.js` exporting `render(event, ctx?) → HTMLElement`.
+2. Add a corresponding `pwa/assets/transcript/events/<kind>.d.ts` declaring the `render` export so TypeScript tests can import it.
+3. Add the kind to the `DISPATCH` table in `pwa/assets/transcript/pipeline.js`.
+4. Add render tests in `test/pwa/transcript/events.test.ts` (mock the vendor deps with `vi.mock`).
+5. If the new kind should cluster, add it to `CLUSTER_KINDS` and `CLUSTER_TOOL_NAMES` in `pipeline.js`.

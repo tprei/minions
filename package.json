@@ -24,7 +24,9 @@
     "@hono/node-server": "^2.0.1",
     "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.9.0",
+    "dompurify": "^3.4.2",
     "hono": "^4.12.17",
+    "marked": "^15.0.12",
     "web-push": "^3.6.7"
   }
 }

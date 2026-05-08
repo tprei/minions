@@ -1,4 +1,7 @@
 import { defineConfig, configDefaults } from "vitest/config";
+import { resolve } from "path";
+
+const pwaRoot = resolve(__dirname, "pwa");
 
 export default defineConfig({
   test: {
@@ -13,6 +16,11 @@ export default defineConfig({
         },
       },
       {
+        resolve: {
+          alias: [
+            { find: /^\/assets\/(.*)$/, replacement: `${pwaRoot}/assets/$1` },
+          ],
+        },
         test: {
           name: "pwa",
           environment: "jsdom",
