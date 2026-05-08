@@ -1,6 +1,12 @@
 # minions-workflow-core
 
+[![CI](https://github.com/tprei/minions/actions/workflows/ci.yml/badge.svg)](https://github.com/tprei/minions/actions/workflows/ci.yml)
+
 Core workflow engine for the Minions system: domain types, runtime backends, persistence, and HTTP/SSE transport.
+
+## Quick start
+
+End-to-end walkthrough from a clean box to a phone-driven workflow that opens real PRs: see [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md).
 
 ## Running with the Docker worker
 
