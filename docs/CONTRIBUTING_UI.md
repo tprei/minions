@@ -135,3 +135,30 @@ expect(result.visible).toBe(true);
 ```
 
 The registry is defined in `pwa/assets/test-hooks.js` and loaded as a `<script type="module">` in `index.html`. It has no effect when `?test=1` is absent — the `window.__ui` property is not set.
+
+## Phase containers
+
+### The display:none / no-unmount invariant
+
+`WorkspaceShell` (`pwa/assets/views/workspace-shell.js`) renders all seven phase containers as children of the shell element at mount time. Phase switching is done exclusively by toggling `element.style.display`:
+
+- The active phase container has `display` cleared (reverts to its CSS value, which defaults to `block`).
+- All other phase containers have `display: "none"`.
+
+Hidden containers stay in the DOM. They are never removed, replaced, or re-created on phase transitions. This is the **no-unmount invariant**.
+
+The load-bearing consequence: the transcript scroller (`<div class="transcript">`) and the composer element are long-lived DOM nodes. They are re-parented (moved between phase containers) when the active phase changes, but are never discarded. SSE handlers that append to the transcript scroller continue to work regardless of which phase is active, because the scroller stays in the tree.
+
+### Why this matters
+
+Without the invariant, each phase switch would tear down and recreate the transcript scroller. Any SSE messages that arrived during an intermediate phase (e.g., progress) would be lost. Scroll position would reset. LocalStorage drafts would survive (they are in storage, not DOM), but the textarea's in-memory cursor and selection would not.
+
+### Adding a new phase
+
+1. Add a row to the `PHASE_MAP` constant in `workspace-shell.js` mapping the new `executionStatus` to a new phase id.
+2. Add the phase id to the `phases` object initializer — call a `buildPhaseXxx()` factory function that returns the root element for that phase.
+3. Add the phase to the `ALL_PHASES` array in `e2e/ui-3.spec.ts` so the "all containers stay in DOM" assertion covers it.
+4. If the phase should host the transcript scroller or composer, add a branch in `placeTranscriptScroller` and `placeComposer`.
+5. If the phase needs composer-mode logic, add a branch in `deriveComposerMode`.
+
+Do not use `innerHTML = ""` or `replaceChildren` to swap phase content — that would unmount any shared nodes (transcript scroller, composer) if they happen to be inside the target container.

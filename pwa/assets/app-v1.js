@@ -1,5 +1,6 @@
 import { createSseClient } from "./sse.js";
 import { setupPush, subscribePush } from "./push.js";
+import { createWorkspaceShell } from "./views/workspace-shell.js";
 
 export const state = {
   workflows: [],
@@ -13,6 +14,7 @@ export const state = {
 
 let sseClient = null;
 let routeGen = 0;
+let currentShell = null;
 
 document.addEventListener("DOMContentLoaded", bootstrap);
 
@@ -45,8 +47,16 @@ function onRoute() {
     state.currentId = null;
     state.currentWorkflow = null;
     state.transcript = [];
+    destroyShell();
     closeStream();
     render();
+  }
+}
+
+function destroyShell() {
+  if (currentShell) {
+    currentShell.destroy();
+    currentShell = null;
   }
 }
 
@@ -71,6 +81,7 @@ function loadList() {
 
 export function loadWorkflowAndSubscribe(id) {
   const myGen = ++routeGen;
+  destroyShell();
   closeStream();
   state.currentWorkflow = null;
   state.transcript = [];
@@ -119,6 +130,7 @@ function openStream(id) {
         const task = nodes[payload.taskId];
         if (task) nodes[payload.taskId] = { ...task, executionStatus: payload.toExecutionStatus };
         renderKanban();
+        if (currentShell) currentShell.setExecutionStatus(payload.toExecutionStatus);
         return;
       }
 
@@ -132,12 +144,16 @@ function openStream(id) {
 
       if (event.kind === "provider-event") {
         const payload = event.payload;
-        const node = transcriptNode(payload);
         state.transcript.push(payload);
-        const container = document.querySelector(".transcript");
-        if (container) {
-          container.appendChild(node);
-          container.scrollTop = container.scrollHeight;
+        if (currentShell) {
+          currentShell.appendTranscriptEvent(payload);
+        } else {
+          const node = transcriptNode(payload);
+          const container = document.querySelector(".transcript");
+          if (container) {
+            container.appendChild(node);
+            container.scrollTop = container.scrollHeight;
+          }
         }
         return;
       }
@@ -357,11 +373,29 @@ function render() {
     renderPushBanner();
     const main = document.createElement("main");
     renderKanban(main);
-    renderTranscript(main);
-    renderReply(main);
+    mountWorkspaceShell(main);
     app.appendChild(main);
   } else {
     renderWorkflowList(app);
+  }
+}
+
+function mountWorkspaceShell(container) {
+  const wf = state.currentWorkflow;
+  if (!wf) return;
+
+  const taskIds = Object.keys(wf.graph);
+  const taskId = taskIds[0] ?? "default";
+  const task = wf.graph[taskId];
+  const status = task?.executionStatus ?? "pending";
+
+  destroyShell();
+  currentShell = createWorkspaceShell({ workflowId: wf.id, taskId, eventBus: null });
+  currentShell.setExecutionStatus(status);
+  container.appendChild(currentShell.element);
+
+  if (new URLSearchParams(location.search).get("test") === "1") {
+    window.__shell = currentShell;
   }
 }
 
