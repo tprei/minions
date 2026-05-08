@@ -5,6 +5,7 @@ import { applyCommand } from "../../src/application/commands.js";
 import { DomainError } from "../../src/domain/errors.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
 import { StubProviderPlugin } from "../../src/plugins/providers/stub.js";
+import { StubWorkspaceBackend } from "../../src/plugins/workspace/stub-workspace.js";
 import type { ProviderEvent } from "../../src/plugins/provider-plugin.js";
 import type { RuntimeBackend, RuntimeAttachOptions, RuntimeOutputChunk } from "../../src/plugins/runtime-backend.js";
 import type { RuntimeProbeState } from "../../src/application/recovery.js";
@@ -47,7 +48,8 @@ function makeDeps(
 ) {
   const provider = new StubProviderPlugin({ frames: providerFrames });
   const runtime = makeRuntime(chunks);
-  return { repo, providerFactory: () => provider, runtime };
+  const workspace = new StubWorkspaceBackend();
+  return { repo, providerFactory: () => provider, runtime, workspace };
 }
 
 async function makeWorkflowWithBranch(repo: InMemoryWorkflowRepository): Promise<void> {
@@ -95,7 +97,7 @@ describe("draftPr", () => {
     const chunks = makeChunks(["line-1", "line-2"]);
     const deps = makeDeps(repo, [[textEvent], [finalEvent]], chunks);
 
-    const result = await draftPr({ workflowId: "wf-1", taskId: "wf-1:task" }, deps);
+    const result = await draftPr({ workflowId: "wf-1", taskId: "wf-1:task", deps });
 
     expect(result.title).toBe("My PR");
     expect(result.body).toBe("Details here");
@@ -112,7 +114,7 @@ describe("draftPr", () => {
 
     let caught: unknown;
     try {
-      await draftPr({ workflowId: "wf-1", taskId: "wf-1:task" }, deps);
+      await draftPr({ workflowId: "wf-1", taskId: "wf-1:task", deps });
     } catch (e) {
       caught = e;
     }
@@ -147,9 +149,9 @@ describe("draftPr", () => {
       },
     };
 
-    const deps = { repo, providerFactory: () => provider, runtime };
+    const deps = { repo, providerFactory: () => provider, runtime, workspace: new StubWorkspaceBackend() };
 
-    const resultPromise = draftPr({ workflowId: "wf-1", taskId: "wf-1:task" }, deps);
+    const resultPromise = draftPr({ workflowId: "wf-1", taskId: "wf-1:task", deps });
     resultPromise.catch(() => {});
 
     await vi.advanceTimersByTimeAsync(30_000);
@@ -174,7 +176,7 @@ describe("draftPr", () => {
 
     let caught: unknown;
     try {
-      await draftPr({ workflowId: "wf-1", taskId: "wf-1:task" }, deps);
+      await draftPr({ workflowId: "wf-1", taskId: "wf-1:task", deps });
     } catch (e) {
       caught = e;
     }
@@ -189,7 +191,7 @@ describe("draftPr", () => {
     const deps = makeDeps(repo, [], []);
 
     await expect(
-      draftPr({ workflowId: "missing-wf", taskId: "missing-wf:task" }, deps),
+      draftPr({ workflowId: "missing-wf", taskId: "missing-wf:task", deps }),
     ).rejects.toMatchObject({ code: "not_found" });
   });
 
@@ -201,7 +203,7 @@ describe("draftPr", () => {
     const deps = makeDeps(repo, [], []);
 
     await expect(
-      draftPr({ workflowId: "wf-1", taskId: "wf-1:no-such-task" }, deps),
+      draftPr({ workflowId: "wf-1", taskId: "wf-1:no-such-task", deps }),
     ).rejects.toMatchObject({ code: "not_found" });
   });
 });

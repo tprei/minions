@@ -4,6 +4,7 @@ import { NoopRestackExecutor } from "../../src/application/restack-executor.js";
 import { createRecoveryService } from "../../src/application/recovery-service.js";
 import { silentLogger } from "../test-helpers.js";
 import { StubRuntimeBackend } from "../../src/plugins/stub-runtime.js";
+import { StubWorkspaceBackend } from "../../src/plugins/workspace/stub-workspace.js";
 import { createServer } from "../../src/transport/server.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
 import { DomainError } from "../../src/domain/errors.js";
@@ -74,6 +75,7 @@ describe("POST /workflows/:id/tasks/:taskId/draft-pr", () => {
       repo,
       providerFactory: vi.fn(),
       runtime: new StubRuntimeBackend(),
+      workspace: new StubWorkspaceBackend(),
     };
 
     vi.spyOn(mockDraftPrDeps, "providerFactory");
@@ -112,6 +114,7 @@ describe("POST /workflows/:id/tasks/:taskId/draft-pr", () => {
       repo,
       providerFactory: vi.fn(),
       runtime: new StubRuntimeBackend(),
+      workspace: new StubWorkspaceBackend(),
     };
 
     const draftPrModule = await import("../../src/application/draft-pr-service.js");
@@ -146,6 +149,7 @@ describe("POST /workflows/:id/tasks/:taskId/draft-pr", () => {
       repo,
       providerFactory: vi.fn(),
       runtime: new StubRuntimeBackend(),
+      workspace: new StubWorkspaceBackend(),
     };
 
     const draftPrModule = await import("../../src/application/draft-pr-service.js");
@@ -180,6 +184,7 @@ describe("POST /workflows/:id/tasks/:taskId/draft-pr", () => {
       repo,
       providerFactory: vi.fn(),
       runtime: new StubRuntimeBackend(),
+      workspace: new StubWorkspaceBackend(),
     };
 
     const draftPrModule = await import("../../src/application/draft-pr-service.js");
@@ -214,6 +219,7 @@ describe("POST /workflows/:id/tasks/:taskId/draft-pr", () => {
       repo,
       providerFactory: vi.fn(),
       runtime: new StubRuntimeBackend(),
+      workspace: new StubWorkspaceBackend(),
     };
 
     const draftPrModule = await import("../../src/application/draft-pr-service.js");

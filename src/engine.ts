@@ -283,6 +283,12 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       now,
       spawnOrchestrator: spawnTracked,
     });
+    serverDeps.draftPrDeps = {
+      repo,
+      providerFactory: config.providerFactory,
+      runtime,
+      workspace,
+    };
   }
 
   let ciBabysitterAbort: AbortController | undefined;

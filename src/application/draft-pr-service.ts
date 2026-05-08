@@ -2,6 +2,8 @@ import { DomainError } from "../domain/errors.js";
 import type { ProviderPlugin } from "../plugins/provider-plugin.js";
 import type { RuntimeBackend } from "../plugins/runtime-backend.js";
 import { runProvider } from "../plugins/providers/run-provider.js";
+import type { WorkspaceBackend } from "../plugins/workspace-backend.js";
+import { slugify } from "../plugins/workspace-backend.js";
 import type { WorkflowRepository } from "./repository.js";
 
 export class DraftPrError extends Error {
@@ -18,11 +20,7 @@ export interface DraftPrServiceDeps {
   repo: WorkflowRepository;
   providerFactory: () => ProviderPlugin;
   runtime: RuntimeBackend;
-}
-
-export interface DraftPrInput {
-  workflowId: string;
-  taskId: string;
+  workspace: WorkspaceBackend;
 }
 
 const DRAFT_PR_PROMPT =
@@ -30,12 +28,20 @@ const DRAFT_PR_PROMPT =
 
 const TIMEOUT_MS = 30_000;
 
-export async function draftPr(
-  input: DraftPrInput,
-  deps: DraftPrServiceDeps,
-): Promise<{ title: string; body: string }> {
-  const { workflowId, taskId } = input;
-  const { repo, providerFactory, runtime } = deps;
+function deriveBranch(workflowId: string, taskId: string): string {
+  return `minions/${slugify(workflowId)}_${slugify(taskId)}`;
+}
+
+export async function draftPr({
+  workflowId,
+  taskId,
+  deps,
+}: {
+  workflowId: string;
+  taskId: string;
+  deps: DraftPrServiceDeps;
+}): Promise<{ title: string; body: string }> {
+  const { repo, providerFactory, runtime, workspace } = deps;
 
   const workflow = await repo.get(workflowId);
   if (!workflow) {
@@ -52,6 +58,14 @@ export async function draftPr(
     throw new DomainError("invalid_transition", "task has no branch artifact", { taskId });
   }
 
+  const handle = await workspace.create({
+    workflowId,
+    taskId,
+    branch: deriveBranch(workflowId, taskId),
+    mode: "worktree",
+    resetBranch: false,
+  });
+
   const provider = providerFactory();
   const invocation = await provider.prepare({
     taskId,
@@ -64,6 +78,7 @@ export async function draftPr(
     taskId,
     workflowId,
     command: invocation.command,
+    workspacePath: handle.containerPath,
     ...(invocation.env !== undefined ? { env: invocation.env } : {}),
   });
 
@@ -76,6 +91,7 @@ export async function draftPr(
     );
   } finally {
     await runtime.stop(runtimeSessionId).catch(() => {});
+    await workspace.cleanup(handle.workspaceId).catch(() => {});
   }
 }
 

@@ -228,7 +228,7 @@ export function createServer(deps: ServerDeps): Hono {
     const workflowId = c.req.param("id");
     const taskId = c.req.param("taskId");
     try {
-      const result = await draftPr({ workflowId, taskId }, deps.draftPrDeps);
+      const result = await draftPr({ workflowId, taskId, deps: deps.draftPrDeps });
       return c.json(result);
     } catch (err) {
       if (err instanceof DraftPrError) {
