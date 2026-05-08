@@ -4,6 +4,8 @@ import { createWorkspaceShell } from "./views/workspace-shell.js";
 import { createDagPanel } from "./views/dag-panel.js";
 import { createTasksPill } from "./components/header.js";
 import { cityAlias } from "./utils/city-alias.js";
+import { createFab } from "./components/fab.js";
+import { createNewWorkflowSheet } from "./views/new-workflow-sheet.js";
 
 export const state = {
   workflows: [],
@@ -20,6 +22,8 @@ let routeGen = 0;
 let currentShell = null;
 let currentShellKey = null;
 let currentDagPanel = null;
+let newWorkflowSheet = null;
+let fab = null;
 
 document.addEventListener("DOMContentLoaded", bootstrap);
 
@@ -29,6 +33,24 @@ function bootstrap() {
     onUpdateAvailable: (_activate) => {},
     onInstallPromptAvailable: (_evt) => {},
   });
+
+  fab = createFab({
+    label: '+ New Workflow',
+    icon: '+',
+    onClick: () => {
+      if (!newWorkflowSheet) {
+        newWorkflowSheet = createNewWorkflowSheet({
+          onSubmit: (workflowId) => {
+            loadList();
+            window.location.hash = `#/workflow/${workflowId}`;
+          },
+          onClose: () => {},
+        });
+      }
+      newWorkflowSheet.open();
+    },
+  });
+
   loadList();
   window.addEventListener("hashchange", onRoute);
   onRoute();
@@ -574,50 +596,53 @@ function renderWorkflowList(container) {
     loading.className = "loading";
     loading.textContent = "No active workflows.";
     container.appendChild(loading);
-    return;
+  } else {
+    const list = document.createElement("div");
+    list.className = "workflow-list";
+
+    for (const wf of state.workflows) {
+      const item = document.createElement("div");
+      const isActive = wf.id === state.currentId;
+      item.className = `workflow-item${isActive ? " active" : ""}`;
+      item.addEventListener("click", () => {
+        window.location.hash = `#/workflow/${wf.id}`;
+      });
+
+      const titleEl = document.createElement("div");
+      titleEl.className = "wf-title";
+      titleEl.textContent = wf.title || wf.id;
+
+      const idEl = document.createElement("div");
+      idEl.className = "wf-id";
+      idEl.textContent = wf.id;
+
+      const meta = document.createElement("div");
+      meta.className = "wf-meta";
+
+      const statusEl = document.createElement("div");
+      const sc = statusColorClass(wf.status ?? "pending");
+      statusEl.className = `wf-status ${sc}`;
+      statusEl.textContent = `[${wf.status ?? "unknown"}]`;
+
+      const timeEl = document.createElement("div");
+      timeEl.className = "wf-time";
+      timeEl.textContent = wf.updatedAt ? formatTime(wf.updatedAt) : "";
+
+      meta.appendChild(statusEl);
+      meta.appendChild(timeEl);
+
+      item.appendChild(titleEl);
+      item.appendChild(idEl);
+      item.appendChild(meta);
+      list.appendChild(item);
+    }
+
+    container.appendChild(list);
   }
 
-  const list = document.createElement("div");
-  list.className = "workflow-list";
-
-  for (const wf of state.workflows) {
-    const item = document.createElement("div");
-    const isActive = wf.id === state.currentId;
-    item.className = `workflow-item${isActive ? " active" : ""}`;
-    item.addEventListener("click", () => {
-      window.location.hash = `#/workflow/${wf.id}`;
-    });
-
-    const titleEl = document.createElement("div");
-    titleEl.className = "wf-title";
-    titleEl.textContent = wf.title || wf.id;
-
-    const idEl = document.createElement("div");
-    idEl.className = "wf-id";
-    idEl.textContent = wf.id;
-
-    const meta = document.createElement("div");
-    meta.className = "wf-meta";
-
-    const statusEl = document.createElement("div");
-    const sc = statusColorClass(wf.status ?? "pending");
-    statusEl.className = `wf-status ${sc}`;
-    statusEl.textContent = `[${wf.status ?? "unknown"}]`;
-
-    const timeEl = document.createElement("div");
-    timeEl.className = "wf-time";
-    timeEl.textContent = wf.updatedAt ? formatTime(wf.updatedAt) : "";
-
-    meta.appendChild(statusEl);
-    meta.appendChild(timeEl);
-
-    item.appendChild(titleEl);
-    item.appendChild(idEl);
-    item.appendChild(meta);
-    list.appendChild(item);
+  if (fab) {
+    container.appendChild(fab.element);
   }
-
-  container.appendChild(list);
 }
 
 function renderKanban(container) {

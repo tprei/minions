@@ -268,4 +268,59 @@ The `pr` renderer lazy-fetches GitHub API data via the engine CORS proxy (`/gith
 - city index: `floor(hash / 35) % 35` (35 cities)
 - number: `hash % 1000` (zero-padded to 3 digits)
 
+## New workflow sheet (UI-6)
+
+### FAB placement
+
+`pwa/assets/components/fab.js` exports `createFab({ label, icon, onClick }) → { element }`.
+
+- **Mobile (< 768px):** `position: fixed` at `bottom: calc(1rem + env(safe-area-inset-bottom)); right: 1rem`, 56 px circular with shadow, class `fab-mobile`. Displays `icon` as text content.
+- **Desktop (≥ 768px):** `position: static`, rendered inline inside the workflow list container as a block-level button, class `fab-desktop`. Displays `label` as text content.
+
+The FAB is mounted by `app-v1.js` in `renderWorkflowList`. It is not shown on the workflow detail view.
+
+### New-workflow sheet
+
+`pwa/assets/views/new-workflow-sheet.js` exports `createNewWorkflowSheet({ onSubmit, onClose }) → { element, open(), close() }`.
+
+Uses the `Sheet` component with `side: 'right'` (on desktop the sheet slides in from the right; on mobile it opens from the bottom per the Sheet component's responsive logic).
+
+**Fields:**
+
+| Field | Control | Required |
+|-------|---------|----------|
+| Prompt | `<textarea>` (auto-grow) | Yes (single-task), yes per task (multi-task) |
+| Title | `<input type="text">` | No |
+| Kind | Segmented control: `single-task` / `multi-task` | Yes (defaults to `single-task`) |
+| autoLand | Checkbox | No (defaults false) |
+| autoMergeOnGreen | Checkbox | No (defaults false) |
+| maxConcurrent | Number stepper | No (defaults 1) |
+
+In `multi-task` mode, a task list appears. Each task row has: local ID label (T1, T2, …), optional title input, prompt textarea, and depends-on chip selector (shows prior task IDs as toggleable chips).
+
+**POST body shape** matches `WorkflowSpec` exactly:
+
+```json
+{
+  "id": "<nanoid>",
+  "kind": "single-task",
+  "tasks": [{ "id": "T1", "title": "", "prompt": "..." }],
+  "policy": { "autoLand": false, "autoMergeOnGreen": false, "maxConcurrent": 1 }
+}
+```
+
+`policy` is omitted when all values are default (both booleans false, maxConcurrent falsy). `title` on the workflow is omitted when empty.
+
+**Validation:** prompt required (single-task), each task prompt required (multi-task). Errors render in `.nwf-error` at the top of the form; the sheet stays open.
+
+**On success:** closes the sheet, calls `onSubmit(workflowId)`, navigates to `#/workflow/<id>`.
+
+### Deferred fields (UI-6.5)
+
+The following fields are intentionally absent from this sheet and will be added in UI-6.5 (gated on slice E2):
+
+- Repo picker
+- Provider selector
+- Image attachments
+
 Total combinations: 35 × 35 × 1000 = 1,225,000 — well above the 10k floor. The alias is stable for the same id and statistically unique across the typical workflow population (tens to hundreds per operator).

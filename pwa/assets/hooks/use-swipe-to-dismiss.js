@@ -5,6 +5,9 @@ export function attachSwipeToDismiss(panel, { direction = 'down', threshold = 80
   let startTime = 0;
 
   function onPointerDown(e) {
+    const tag = (e.target && e.target.tagName) ? e.target.tagName.toUpperCase() : '';
+    const isInteractive = tag === 'BUTTON' || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'A';
+    if (isInteractive) return;
     startX = e.clientX;
     startY = e.clientY;
     dragging = true;
