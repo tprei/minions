@@ -2,3 +2,7 @@ node_modules/
 dist/
 coverage/
 .vitest/
+playwright-report/
+test-results/
+.cache/ms-playwright/
+.e2e-db.sqlite*
