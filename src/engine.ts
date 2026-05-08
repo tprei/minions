@@ -7,6 +7,7 @@ import type { PollCadence } from "./application/ci-babysitter-service.js";
 import { applyCommand } from "./application/commands.js";
 import { ContinueTaskService } from "./application/continue-task-service.js";
 import { RetryTaskService } from "./application/retry-task-service.js";
+import { ApprovePermissionService } from "./application/approve-permission-service.js";
 import { createRecoveryService } from "./application/recovery-service.js";
 import { NoopRestackExecutor } from "./application/restack-executor.js";
 import type { RestackExecutor } from "./application/restack-executor.js";
@@ -167,6 +168,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
 
   type ActiveOrchestratorEntry = { controller: AbortController; promise: Promise<void> };
   const activeOrchestrators = new Set<ActiveOrchestratorEntry>();
+  const activeProviders = new Map<string, ProviderPlugin>();
 
   const spawnTracked = (deps: Omit<RunOrchestratorDeps, "signal" | "log">): void => {
     const controller = new AbortController();
@@ -175,11 +177,16 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       promise: undefined as unknown as Promise<void>,
     };
     activeOrchestrators.add(entry);
+    const providerKey = `${deps.workflowId}:${deps.taskId}`;
+    activeProviders.set(providerKey, deps.provider);
     const orch = new RunOrchestrator({ ...deps, signal: controller.signal, log: log.child({ component: "run-orchestrator", workflowId: deps.workflowId, taskId: deps.taskId }) });
     entry.promise = orch
       .run()
       .catch((err) => log.child({ component: "run-orchestrator" }).error("run-orchestrator error", { error: (err as Error).message }))
-      .finally(() => { activeOrchestrators.delete(entry); });
+      .finally(() => {
+        activeOrchestrators.delete(entry);
+        activeProviders.delete(providerKey);
+      });
   };
 
   const bootSpawnOrchestrator = config.providerFactory
@@ -282,6 +289,10 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       workspace,
       now,
       spawnOrchestrator: spawnTracked,
+    });
+    serverDeps.approvePermissionService = new ApprovePermissionService({
+      repo,
+      activeProviders,
     });
   }
 

@@ -46,4 +46,5 @@ export interface ProviderPlugin {
   resume(spec: ProviderResumeSpec): Promise<ProviderInvocation>;
   parseFrame(line: string): ProviderEvent[];
   loginStatus(): Promise<{ loggedIn: boolean; details?: string }>;
+  injectApproval?(requestId: string, decision: "approve" | "deny", reason?: string): Promise<void>;
 }
