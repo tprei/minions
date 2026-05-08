@@ -1,6 +1,6 @@
-const FLUSH_INTERVAL_MS = 33;
+const DEFAULT_INTERVAL_MS = 33;
 
-export function createStreamBuffer(onFlush) {
+export function createStreamBuffer({ intervalMs = DEFAULT_INTERVAL_MS, onFlush } = {}) {
   let buffer = "";
   let accumulated = "";
   let timer = null;
@@ -18,7 +18,7 @@ export function createStreamBuffer(onFlush) {
     if (timer === null) {
       timer = setInterval(() => {
         flush();
-      }, FLUSH_INTERVAL_MS);
+      }, intervalMs);
     }
   }
 

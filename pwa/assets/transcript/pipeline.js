@@ -208,28 +208,28 @@ export function createTranscriptPipeline(scrollerEl) {
         const content = document.createElement("div");
         content.className = "te-content te-markdown te-streaming";
         el.appendChild(content);
-        currentAssistantEl = { el, content, accumulated: "" };
+        currentAssistantEl = { el, content, accumulated: "", coalescedEvent: { kind: "assistant_text", text: "" } };
         scrollerEl.appendChild(el);
 
-        streamBuffer = createStreamBuffer((_chunk, flushedAccumulated) => {
-          currentAssistantEl.content.innerHTML = DOMPurify.sanitize(marked.parse(flushedAccumulated));
-          maybeScroll();
+        streamBuffer = createStreamBuffer({
+          onFlush(_chunk, flushedAccumulated) {
+            currentAssistantEl.content.innerHTML = DOMPurify.sanitize(marked.parse(flushedAccumulated));
+            maybeScroll();
+          },
         });
       }
 
       const text = event.text ?? "";
       currentAssistantEl.accumulated += text;
-      currentAssistantEl.content.innerHTML = DOMPurify.sanitize(
-        marked.parse(currentAssistantEl.accumulated)
-      );
+      currentAssistantEl.coalescedEvent.text += text;
       streamBuffer.appendDelta(text);
-      events.push(event);
       maybeScroll();
       return;
     }
 
     if (streamBuffer) {
       streamBuffer.flush();
+      events.push(currentAssistantEl.coalescedEvent);
       streamBuffer = null;
       currentAssistantEl = null;
     }

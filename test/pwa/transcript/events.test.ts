@@ -7,12 +7,6 @@ vi.mock("/assets/vendor/marked.esm.js", () => ({
   },
 }));
 
-vi.mock("/assets/vendor/dompurify.esm.js", () => ({
-  default: {
-    sanitize: (html: string) => html,
-  },
-}));
-
 vi.mock("/assets/components/status-dot.js", () => ({
   createStatusDot: (status: string, _opts?: unknown) => {
     const span = document.createElement("span");
@@ -43,12 +37,25 @@ describe("assistant_text renderer", () => {
     expect(content!.innerHTML).toBe("<p>hello world</p>");
   });
 
-  it("XSS attempt is sanitized (DOMPurify mock strips nothing but the test verifies the path is taken)", () => {
-    const xss = '<script>alert("xss")</script>';
-    const el = renderAssistantText({ kind: "assistant_text", text: xss });
+  it("script tag is stripped by real DOMPurify", () => {
+    const el = renderAssistantText({ kind: "assistant_text", text: "<script>alert(1)</script>" });
     const content = el.querySelector(".te-content");
     expect(content).not.toBeNull();
-    expect(content!.innerHTML).toBeDefined();
+    expect(content!.innerHTML).not.toContain("<script");
+  });
+
+  it("onerror attribute is stripped by real DOMPurify", () => {
+    const el = renderAssistantText({ kind: "assistant_text", text: '<img src=x onerror="alert(1)">' });
+    const content = el.querySelector(".te-content");
+    expect(content).not.toBeNull();
+    expect(content!.innerHTML).not.toContain("onerror");
+  });
+
+  it("safe HTML like strong is preserved by real DOMPurify", () => {
+    const el = renderAssistantText({ kind: "assistant_text", text: "<strong>bold</strong>" });
+    const content = el.querySelector(".te-content");
+    expect(content).not.toBeNull();
+    expect(content!.querySelector("strong")).not.toBeNull();
   });
 
   it("renders empty text without error", () => {

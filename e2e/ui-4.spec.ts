@@ -170,6 +170,41 @@ test.describe("Streaming throttle (UI-4)", () => {
       expect(textContent).toContain(`word${i}`);
     }
   });
+
+  test("100 rapid assistant_text chunks cause ≤10 DOM mutations on the content element", async ({ page }) => {
+    await gotoTranscript(page);
+
+    const mutationCount = await page.evaluate(async () => {
+      const shell = (window as unknown as { __shell?: { appendTranscriptEvent: (p: unknown) => void } }).__shell;
+      if (!shell) throw new Error("__shell not available");
+
+      const scroller = document.querySelector(".phase-transcript-scroller-wrap") as HTMLElement | null;
+      if (!scroller) throw new Error(".phase-transcript-scroller-wrap not found");
+
+      let count = 0;
+      const observer = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          if (
+            (m.target as HTMLElement).classList?.contains("te-content") ||
+            (m.target as HTMLElement).classList?.contains("te-markdown")
+          ) {
+            count++;
+          }
+        }
+      });
+      observer.observe(scroller, { subtree: true, childList: true, characterData: true });
+
+      for (let i = 0; i < 100; i++) {
+        shell.appendTranscriptEvent({ taskId: "task-ui4-1", runId: "run-1", providerEvent: { kind: "assistant_text", text: `chunk${i} ` } });
+      }
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 400));
+      observer.disconnect();
+      return count;
+    });
+
+    expect(mutationCount).toBeLessThanOrEqual(10);
+  });
 });
 
 test.describe("Cost tier badge (UI-4)", () => {
