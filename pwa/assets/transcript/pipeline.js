@@ -261,12 +261,10 @@ export function createTranscriptPipeline(scrollerEl) {
       const existingEl = scrollerEl.lastElementChild;
       if (existingEl && existingEl._group === lastNew) {
         const body = existingEl._body;
-        if (lastNew.expanded) {
-          body.hidden = false;
-          const newEv = lastNew.events[lastNew.events.length - 1];
-          const fn = DISPATCH[newEv.kind];
-          if (fn) body.appendChild(fn(newEv));
-        }
+        const newEv = lastNew.events[lastNew.events.length - 1];
+        const fn = DISPATCH[newEv.kind];
+        if (fn) body.appendChild(fn(newEv));
+        body.hidden = !lastNew.expanded;
         if (existingEl._updateHeader) existingEl._updateHeader();
         maybeScroll();
         return;

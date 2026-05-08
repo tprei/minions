@@ -13,6 +13,14 @@ vi.mock("/assets/vendor/dompurify.esm.js", () => ({
   },
 }));
 
+class MockIntersectionObserver {
+  observe() {}
+  disconnect() {}
+  unobserve() {}
+}
+
+(globalThis as any).IntersectionObserver = MockIntersectionObserver;
+
 import { createTranscriptPipeline } from "../../../pwa/assets/transcript/pipeline.js";
 
 function makeScroller(): HTMLElement {
@@ -25,6 +33,37 @@ function makeScroller(): HTMLElement {
 
 beforeEach(() => {
   document.body.innerHTML = "";
+});
+
+describe("cluster body always appended, hidden toggled separately", () => {
+  it("collapsed cluster body contains all rows after growing, then expanding shows full count", () => {
+    const scroller = makeScroller();
+    const pipeline = createTranscriptPipeline(scroller);
+
+    pipeline.appendEvent({ kind: "tool_call", id: "tc1", name: "Read", input: { path: "a" } });
+    pipeline.appendEvent({ kind: "tool_call", id: "tc2", name: "Read", input: { path: "b" } });
+    pipeline.appendEvent({ kind: "tool_call", id: "tc3", name: "Read", input: { path: "c" } });
+
+    const clusterEl1 = scroller.querySelector(".te-cluster") as HTMLElement & { _group: any; _body: HTMLElement };
+    expect(clusterEl1).not.toBeNull();
+    const group = clusterEl1._group;
+    expect(group.expanded).toBe(false);
+
+    pipeline.appendEvent({ kind: "tool_call", id: "tc4", name: "Read", input: { path: "d" } });
+    pipeline.appendEvent({ kind: "tool_call", id: "tc5", name: "Read", input: { path: "e" } });
+
+    const clusterEl2 = scroller.querySelector(".te-cluster") as HTMLElement & { _group: any; _body: HTMLElement };
+    expect(clusterEl2).toBe(clusterEl1);
+    const body = clusterEl2._body;
+
+    expect(body.querySelectorAll(".te-tool-call")).toHaveLength(5);
+    expect(body.hidden).toBe(true);
+
+    group.expanded = true;
+    body.hidden = false;
+
+    expect(body.querySelectorAll(".te-tool-call")).toHaveLength(5);
+  });
 });
 
 describe("assistant_text coalescing", () => {
