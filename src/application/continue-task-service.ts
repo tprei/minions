@@ -2,7 +2,7 @@ import { DomainError } from "../domain/errors.js";
 import type { ProviderPlugin } from "../plugins/provider-plugin.js";
 import type { RuntimeBackend } from "../plugins/runtime-backend.js";
 import type { WorkspaceBackend } from "../plugins/workspace-backend.js";
-import { slugify } from "../plugins/workspace-backend.js";
+import { deriveBranch } from "../plugins/workspace-backend.js";
 import type { Command, CommandResult } from "./commands.js";
 import type { WorkflowRepository } from "./repository.js";
 import type { RunOrchestratorDeps } from "./run-orchestrator.js";
@@ -25,9 +25,6 @@ export interface ContinueTaskInput {
   prompt: string;
 }
 
-function deriveBranch(workflowId: string, taskId: string): string {
-  return `minions/${slugify(workflowId)}_${slugify(taskId)}`;
-}
 
 export class ContinueTaskService {
   private readonly deps: ContinueTaskServiceDeps;
