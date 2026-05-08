@@ -26,10 +26,11 @@ describe("createComposer", () => {
     expect(hint.textContent).toBe("Queued for AI");
   });
 
-  it("renders 'Submit retry' in feedback mode", () => {
+  it("renders 'Submit' in feedback mode", () => {
     const { element } = createComposer({ mode: "feedback", taskId: "t1", workflowId: "wf1" });
     const btn = element.querySelector(".composer-btn") as HTMLButtonElement;
-    expect(btn.textContent).toContain("Submit retry");
+    expect(btn.textContent).toContain("Submit");
+    expect(btn.textContent).not.toContain("retry");
   });
 
   it("disables button and textarea in disabled mode", () => {

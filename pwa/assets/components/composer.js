@@ -8,7 +8,7 @@ const CLOCK_SVG = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" x
 const MODE_CONFIG = {
   idle:     { label: "Send",         icon: null,      hint: null },
   running:  { label: "Queue",        icon: CLOCK_SVG, hint: "Queued for AI" },
-  feedback: { label: "Submit retry", icon: null,      hint: null },
+  feedback: { label: "Submit",        icon: null,      hint: null },
   disabled: { label: "Send",         icon: null,      hint: null },
 };
 

@@ -300,3 +300,104 @@ test.describe("Hidden not unmounted", () => {
     }
   });
 });
+
+test.describe("Error phase recovery buttons", () => {
+  test("failed status: Retry and Reset buttons are absent", async ({ page }) => {
+    await gotoDetail(page, "failed");
+    await expect(page.locator(".phase-error")).toBeVisible();
+    await expect(page.locator(".phase-error-retry-btn")).toHaveCount(0);
+    await expect(page.locator(".phase-error-reset-btn")).toHaveCount(0);
+    await expect(page.locator(".phase-error-recovery-caption")).toBeVisible();
+  });
+
+  test("cancelled status: Retry and Reset buttons are absent", async ({ page }) => {
+    await gotoDetail(page, "cancelled");
+    await expect(page.locator(".phase-error")).toBeVisible();
+    await expect(page.locator(".phase-error-retry-btn")).toHaveCount(0);
+    await expect(page.locator(".phase-error-reset-btn")).toHaveCount(0);
+  });
+});
+
+test.describe("Operator phase command wiring", () => {
+  test("Continue posts continue-task with textarea prompt", async ({ page }) => {
+    const postedBodies: unknown[] = [];
+    await setupRoutes(page, "needs-review");
+    await page.route("**/commands", async (route) => {
+      const body = route.request().postDataJSON();
+      postedBodies.push(body);
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+
+    await page.goto(`/?test=1#/workflow/${WF_ID}`);
+    await page.waitForSelector(".workspace-shell", { timeout: 5_000 });
+    await page.evaluate(
+      (s) => {
+        const shell = (window as unknown as { __shell?: { setExecutionStatus: (s: string) => void } }).__shell;
+        if (!shell) throw new Error("__shell not available");
+        shell.setExecutionStatus(s);
+      },
+      "needs-review"
+    );
+
+    await expect(page.locator(".phase-operator")).toBeVisible();
+    await page.locator(".composer-textarea").fill("my feedback prompt");
+    await page.locator(".phase-operator-continue-btn").click();
+
+    const continuePost = postedBodies.find(
+      (b: unknown) => (b as Record<string, unknown>)["kind"] === "continue-task"
+    ) as Record<string, unknown> | undefined;
+    expect(continuePost).toBeTruthy();
+    expect(continuePost!["taskId"]).toBe(TASK_ID);
+    expect(continuePost!["workflowId"]).toBe(WF_ID);
+    expect(continuePost!["prompt"]).toBe("my feedback prompt");
+  });
+
+  test("Retry posts retry-task with textarea prompt", async ({ page }) => {
+    const postedBodies: unknown[] = [];
+    await setupRoutes(page, "needs-review");
+    await page.route("**/commands", async (route) => {
+      const body = route.request().postDataJSON();
+      postedBodies.push(body);
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+
+    await page.goto(`/?test=1#/workflow/${WF_ID}`);
+    await page.waitForSelector(".workspace-shell", { timeout: 5_000 });
+    await page.evaluate(
+      (s) => {
+        const shell = (window as unknown as { __shell?: { setExecutionStatus: (s: string) => void } }).__shell;
+        if (!shell) throw new Error("__shell not available");
+        shell.setExecutionStatus(s);
+      },
+      "needs-review"
+    );
+
+    await expect(page.locator(".phase-operator")).toBeVisible();
+    await page.locator(".composer-textarea").fill("retry this with new prompt");
+    await page.locator(".phase-operator-retry-btn").click();
+
+    const retryPost = postedBodies.find(
+      (b: unknown) => (b as Record<string, unknown>)["kind"] === "retry-task"
+    ) as Record<string, unknown> | undefined;
+    expect(retryPost).toBeTruthy();
+    expect(retryPost!["taskId"]).toBe(TASK_ID);
+    expect(retryPost!["workflowId"]).toBe(WF_ID);
+    expect(retryPost!["prompt"]).toBe("retry this with new prompt");
+  });
+});
+
+test.describe("PR link href", () => {
+  test("setArtifacts with a pr artifact sets the href on the summary PR link", async ({ page }) => {
+    await gotoDetail(page, "merged");
+    await expect(page.locator(".phase-summary")).toBeVisible();
+
+    await page.evaluate(() => {
+      const shell = (window as unknown as { __shell?: { setArtifacts: (a: unknown[]) => void } }).__shell;
+      if (!shell) throw new Error("__shell not available");
+      shell.setArtifacts([{ kind: "pr", url: "https://github.com/org/repo/pull/42" }]);
+    });
+
+    const link = page.locator(".phase-summary-pr-link");
+    await expect(link).toHaveAttribute("href", "https://github.com/org/repo/pull/42");
+  });
+});

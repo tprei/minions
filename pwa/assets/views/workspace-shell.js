@@ -21,14 +21,16 @@ const PROGRESS_CAPTION = {
 };
 
 function derivePhase(status) {
-  return PHASE_MAP[status] ?? "input";
+  if (!(status in PHASE_MAP)) throw new Error(`unknown executionStatus: ${status}`);
+  return PHASE_MAP[status];
 }
 
 function deriveComposerMode(status) {
   if (status === "running") return "running";
   if (status === "needs-review") return "feedback";
   if (status === "quality-pending" || status === "ci-pending" || status === "finalizing" || status === "pr-open") return "disabled";
-  return "idle";
+  if (status === "pending" || status === "ready" || status === "merged" || status === "failed" || status === "cancelled") return "idle";
+  throw new Error(`unknown executionStatus: ${status}`);
 }
 
 function createTranscriptScroller() {
@@ -61,6 +63,7 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
 
   let currentPhase = null;
   let currentStatus = null;
+  let summaryPrLink = null;
 
   const composer = createComposer({
     mode: "idle",
@@ -181,11 +184,11 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
   function buildPhaseSummary() {
     const el = document.createElement("div");
 
-    const prLink = document.createElement("a");
-    prLink.className = "phase-summary-pr-link";
-    prLink.target = "_blank";
-    prLink.rel = "noopener noreferrer";
-    prLink.textContent = "View PR";
+    summaryPrLink = document.createElement("a");
+    summaryPrLink.className = "phase-summary-pr-link";
+    summaryPrLink.target = "_blank";
+    summaryPrLink.rel = "noopener noreferrer";
+    summaryPrLink.textContent = "View PR";
 
     const closeBtn = document.createElement("button");
     closeBtn.className = "phase-summary-close-btn";
@@ -194,55 +197,27 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
       window.location.hash = "";
     });
 
-    el.appendChild(prLink);
+    el.appendChild(summaryPrLink);
     el.appendChild(closeBtn);
     return el;
   }
 
   function buildPhaseError() {
+    // Recovery from failed/cancelled is not supported by the engine today.
+    // "retry-task" requires needs-review; "mark-ready" requires pending.
+    // Retry and Reset buttons are intentionally absent until a dedicated engine
+    // recovery command exists. Do not add fake buttons here.
     const el = document.createElement("div");
 
     const errMsg = document.createElement("div");
     errMsg.className = "phase-error-msg";
 
-    const retryBtn = document.createElement("button");
-    retryBtn.className = "phase-error-retry-btn";
-    retryBtn.textContent = "Retry";
-    retryBtn.addEventListener("click", () => {
-      fetch("/commands", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          kind: "retry-task",
-          workflowId,
-          taskId,
-          prompt: "",
-        }),
-      }).catch(() => {});
-    });
-
-    const resetBtn = document.createElement("button");
-    resetBtn.className = "phase-error-reset-btn";
-    resetBtn.textContent = "Reset";
-    resetBtn.addEventListener("click", () => {
-      fetch("/commands", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          kind: "transition-task",
-          workflowId,
-          transition: {
-            kind: "mark-ready",
-            taskId,
-            now: new Date().toISOString(),
-          },
-        }),
-      }).catch(() => {});
-    });
+    const caption = document.createElement("div");
+    caption.className = "phase-error-recovery-caption";
+    caption.textContent = "Recovery TBD — add engine command";
 
     el.appendChild(errMsg);
-    el.appendChild(retryBtn);
-    el.appendChild(resetBtn);
+    el.appendChild(caption);
     return el;
   }
 
@@ -372,6 +347,14 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
     transcriptScroller.scrollTop = transcriptScroller.scrollHeight;
   }
 
+  function setArtifacts(artifacts) {
+    if (!summaryPrLink) return;
+    const prArtifact = [...artifacts].reverse().find((a) => a.kind === "pr");
+    if (prArtifact?.url) {
+      summaryPrLink.href = prArtifact.url;
+    }
+  }
+
   function destroy() {
     root.remove();
   }
@@ -398,6 +381,7 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
     element: root,
     destroy,
     setExecutionStatus,
+    setArtifacts,
     appendTranscriptEvent,
   };
 }

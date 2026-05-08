@@ -2,6 +2,7 @@ export interface WorkspaceShellInstance {
   element: HTMLElement;
   destroy(): void;
   setExecutionStatus(status: string): void;
+  setArtifacts(artifacts: Array<{ kind: string; url?: string }>): void;
   appendTranscriptEvent(payload: unknown): void;
 }
 

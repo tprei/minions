@@ -124,4 +124,37 @@ describe("createWorkspaceShell", () => {
     destroy();
     expect(document.body.contains(element)).toBe(false);
   });
+
+  it("setExecutionStatus throws on unknown status", () => {
+    const { setExecutionStatus } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
+    expect(() => setExecutionStatus("bogus-status")).toThrow("unknown executionStatus: bogus-status");
+  });
+
+  it("error phase has no retry or reset buttons", () => {
+    const { element, setExecutionStatus } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
+    setExecutionStatus("failed");
+    expect(element.querySelector(".phase-error-retry-btn")).toBeNull();
+    expect(element.querySelector(".phase-error-reset-btn")).toBeNull();
+    expect(element.querySelector(".phase-error-recovery-caption")).not.toBeNull();
+  });
+
+  it("setArtifacts sets href on PR link when merged", () => {
+    const { element, setExecutionStatus, setArtifacts } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
+    setExecutionStatus("merged");
+    setArtifacts([{ kind: "pr", url: "https://github.com/org/repo/pull/1" }]);
+    const link = element.querySelector(".phase-summary-pr-link") as HTMLAnchorElement;
+    expect(link.href).toContain("https://github.com/org/repo/pull/1");
+  });
+
+  it("setArtifacts uses the last pr artifact", () => {
+    const { element, setExecutionStatus, setArtifacts } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
+    setExecutionStatus("merged");
+    setArtifacts([
+      { kind: "pr", url: "https://github.com/org/repo/pull/1" },
+      { kind: "diff", url: "https://example.com/diff" },
+      { kind: "pr", url: "https://github.com/org/repo/pull/2" },
+    ]);
+    const link = element.querySelector(".phase-summary-pr-link") as HTMLAnchorElement;
+    expect(link.href).toContain("https://github.com/org/repo/pull/2");
+  });
 });

@@ -15,6 +15,7 @@ export const state = {
 let sseClient = null;
 let routeGen = 0;
 let currentShell = null;
+let currentShellKey = null;
 
 document.addEventListener("DOMContentLoaded", bootstrap);
 
@@ -57,6 +58,7 @@ function destroyShell() {
   if (currentShell) {
     currentShell.destroy();
     currentShell = null;
+    currentShellKey = null;
   }
 }
 
@@ -130,7 +132,9 @@ function openStream(id) {
         const task = nodes[payload.taskId];
         if (task) nodes[payload.taskId] = { ...task, executionStatus: payload.toExecutionStatus };
         renderKanban();
-        if (currentShell) currentShell.setExecutionStatus(payload.toExecutionStatus);
+        if (currentShell && currentShellKey === `${state.currentWorkflow.id}:${payload.taskId}`) {
+          currentShell.setExecutionStatus(payload.toExecutionStatus);
+        }
         return;
       }
 
@@ -145,9 +149,9 @@ function openStream(id) {
       if (event.kind === "provider-event") {
         const payload = event.payload;
         state.transcript.push(payload);
-        if (currentShell) {
+        if (currentShell && currentShellKey === `${state.currentWorkflow?.id}:${payload.taskId}`) {
           currentShell.appendTranscriptEvent(payload);
-        } else {
+        } else if (!currentShell) {
           const node = transcriptNode(payload);
           const container = document.querySelector(".transcript");
           if (container) {
@@ -388,11 +392,19 @@ function mountWorkspaceShell(container) {
   const taskId = taskIds[0] ?? "default";
   const task = wf.graph[taskId];
   const status = task?.executionStatus ?? "pending";
+  const key = `${wf.id}:${taskId}`;
 
-  destroyShell();
-  currentShell = createWorkspaceShell({ workflowId: wf.id, taskId, eventBus: null });
+  if (currentShell && currentShellKey === key) {
+    container.appendChild(currentShell.element);
+  } else {
+    destroyShell();
+    currentShell = createWorkspaceShell({ workflowId: wf.id, taskId, eventBus: null });
+    currentShellKey = key;
+    container.appendChild(currentShell.element);
+  }
+
   currentShell.setExecutionStatus(status);
-  container.appendChild(currentShell.element);
+  if (task?.artifacts) currentShell.setArtifacts(task.artifacts);
 
   if (new URLSearchParams(location.search).get("test") === "1") {
     window.__shell = currentShell;
