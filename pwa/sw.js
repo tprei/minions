@@ -77,28 +77,38 @@ self.addEventListener("fetch", (evt) => {
   }
 });
 
+function parseAndValidatePushPayload(rawData) {
+  let p;
+  try {
+    p = rawData?.json();
+  } catch (err) {
+    throw new Error(`invalid push payload: JSON parse failed — ${err.message}`);
+  }
+
+  if (!p || typeof p !== "object") {
+    throw new Error("invalid push payload: not an object");
+  }
+
+  const required = { taskId: p.taskId, kind: p.kind, code: p.code, title: p.title, body: p.body, urlPath: p.urlPath, workflowId: p.workflowId };
+  for (const [field, value] of Object.entries(required)) {
+    if (typeof value !== "string" || value === "") {
+      throw new Error(`invalid push payload: missing or empty field "${field}"`);
+    }
+  }
+
+  return p;
+}
+
 self.addEventListener("push", (evt) => {
   let p;
   try {
-    p = evt.data?.json();
-  } catch {
+    p = parseAndValidatePushPayload(evt.data);
+  } catch (err) {
+    console.error(err.message);
     return;
   }
 
-  if (!p || typeof p !== "object") return;
-
-  const { taskId, kind, code, title, body, urlPath, workflowId } = p;
-  if (
-    typeof taskId !== "string" || taskId === "" ||
-    typeof kind !== "string" || kind === "" ||
-    typeof code !== "string" || code === "" ||
-    typeof title !== "string" || title === "" ||
-    typeof body !== "string" || body === "" ||
-    typeof urlPath !== "string" || urlPath === "" ||
-    typeof workflowId !== "string" || workflowId === ""
-  ) {
-    return;
-  }
+  const { taskId, code, title, body, urlPath, workflowId } = p;
 
   evt.waitUntil(
     self.registration.showNotification(title, {

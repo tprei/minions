@@ -116,13 +116,6 @@ export function createSseClient({ url, onEvent, onStatus }) {
   window.addEventListener("online", onOnline);
   window.addEventListener("pageshow", onPageshow);
 
-  navigator.serviceWorker?.addEventListener("message", (evt) => {
-    if (evt.data?.type === "notification:navigate") {
-      const { workflowId, taskId, urlPath } = evt.data;
-      onEvent?.({ kind: "navigate", payload: { workflowId, taskId, urlPath } });
-    }
-  });
-
   connect();
 
   function forceReconnect() {

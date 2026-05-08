@@ -7,8 +7,7 @@ export function setupPush({ onUpdateAvailable, onInstallPromptAvailable }) {
       });
     });
 
-    navigator.serviceWorker.addEventListener("controllerchange", () => {
-    });
+    setupNotificationNavigationBridge();
   }
 
   if (!localStorage.getItem("install-prompt:dismissed")) {
@@ -23,6 +22,16 @@ export function setupPush({ onUpdateAvailable, onInstallPromptAvailable }) {
       }).catch(() => {});
     });
   }
+}
+
+function setupNotificationNavigationBridge() {
+  navigator.serviceWorker.addEventListener("message", (evt) => {
+    if (evt.data?.type === "notification:navigate") {
+      const { workflowId, urlPath } = evt.data;
+      const hash = urlPath?.startsWith("/") ? urlPath.replace(/^[^#]*/, "") : urlPath;
+      window.location.hash = hash ?? `#/workflow/${workflowId}`;
+    }
+  });
 }
 
 function trackRegistration(reg, onUpdateAvailable) {
@@ -42,10 +51,13 @@ function trackRegistration(reg, onUpdateAvailable) {
 
 function buildActivate(swInstance) {
   return function activate() {
-    if (swInstance) {
-      swInstance.postMessage({ type: "sw:skip-waiting" });
-    }
-    window.location.reload();
+    if (!swInstance) return;
+    navigator.serviceWorker.addEventListener(
+      "controllerchange",
+      () => { location.reload(); },
+      { once: true }
+    );
+    swInstance.postMessage({ type: "sw:skip-waiting" });
   };
 }
 

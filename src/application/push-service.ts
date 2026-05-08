@@ -161,7 +161,7 @@ export class PushService {
       kind: event.kind,
       code: decision.code,
       cursor: event.cursor,
-      urlPath: `/workflows/${workflowId}?task=${decision.taskId}`,
+      urlPath: `/#/workflow/${workflowId}`,
     };
   }
 

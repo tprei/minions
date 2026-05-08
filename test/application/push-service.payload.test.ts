@@ -45,7 +45,7 @@ describe("PushService.buildPayload", () => {
     expect(payload.kind).toBe("task-transitioned");
     expect(payload.code).toBe("done");
     expect(payload.cursor).toBe(5);
-    expect(payload.urlPath).toBe("/workflows/wf-abc?task=task-xyz");
+    expect(payload.urlPath).toBe("/#/workflow/wf-abc");
   });
 
   it("builds correct payload for permission_request", () => {
@@ -69,7 +69,7 @@ describe("PushService.buildPayload", () => {
     expect(payload.kind).toBe("provider-event");
     expect(payload.code).toBe("perm");
     expect(payload.cursor).toBe(7);
-    expect(payload.urlPath).toBe("/workflows/wf-1?task=t1");
+    expect(payload.urlPath).toBe("/#/workflow/wf-1");
   });
 
   it("builds correct payload for non-recoverable error", () => {
