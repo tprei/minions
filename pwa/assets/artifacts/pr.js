@@ -112,7 +112,7 @@ export function render(artifact, ctx = {}) {
   };
   window.addEventListener("focus", onFocus);
 
-  wrap.__cleanup = () => window.removeEventListener("focus", onFocus);
+  wrap.__artifactCleanup = () => window.removeEventListener("focus", onFocus);
 
   return wrap;
 }

@@ -61,6 +61,14 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
   const root = document.createElement("div");
   root.className = "workspace-shell";
 
+  const main = document.createElement("div");
+  main.className = "workspace-main";
+  root.appendChild(main);
+
+  const rightRail = document.createElement("div");
+  rightRail.className = "workspace-right-rail";
+  root.appendChild(rightRail);
+
   const transcriptScroller = createTranscriptScroller();
   const transcriptPipeline = createTranscriptPipeline(transcriptScroller);
 
@@ -101,7 +109,7 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
   for (const [id, el] of Object.entries(phases)) {
     el.className = `phase-${id}`;
     el.style.display = "none";
-    root.appendChild(el);
+    main.appendChild(el);
   }
 
   composer.onInput(() => {

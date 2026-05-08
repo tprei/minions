@@ -7,7 +7,7 @@ export declare const state: {
   error: string | null;
   streamStatus: "connecting" | "connected" | "reconnecting" | "closed";
 };
-export declare function parseHash(hash: string): string | null;
+export declare function parseHash(hash: string): { workflowId: string; taskId: string | null } | null;
 export declare function transcriptNode(payload: unknown): HTMLElement;
 export declare function renderReply(container: HTMLElement | null, workflow?: unknown): void;
 export declare function loadWorkflowAndSubscribe(id: string): void;

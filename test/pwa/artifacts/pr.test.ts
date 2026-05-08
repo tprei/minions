@@ -75,4 +75,31 @@ describe("pr renderer", () => {
     render(artifact);
     expect(mockFetch).not.toHaveBeenCalled();
   });
+
+  it("__artifactCleanup removes window focus listener when called", () => {
+    const addSpy = vi.spyOn(window, "addEventListener");
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+
+    const artifact = {
+      kind: "pr" as const,
+      ref: "https://github.com/org/repo/pull/99",
+      producedBy: "t1",
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    const el = render(artifact);
+
+    const addCount = addSpy.mock.calls.filter((c) => c[0] === "focus").length;
+    expect(addCount).toBe(1);
+
+    const removeCountBefore = removeSpy.mock.calls.filter((c) => c[0] === "focus").length;
+
+    expect(typeof (el as unknown as { __artifactCleanup: unknown }).__artifactCleanup).toBe("function");
+    (el as unknown as { __artifactCleanup: () => void }).__artifactCleanup();
+
+    const removeCountAfter = removeSpy.mock.calls.filter((c) => c[0] === "focus").length;
+    expect(removeCountAfter).toBe(removeCountBefore + 1);
+
+    addSpy.mockRestore();
+    removeSpy.mockRestore();
+  });
 });

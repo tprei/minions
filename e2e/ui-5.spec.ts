@@ -176,6 +176,22 @@ test.describe("DAG panel (UI-5)", () => {
     await expect(depChip).toBeVisible();
     await expect(depChip).toContainText(TASK_A);
   });
+
+  test("clicking Tasks pill on desktop mounts inline panel inside .workspace-right-rail", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await gotoWorkflow(page);
+
+    const pill = page.locator(".tasks-pill");
+    await expect(pill).toBeVisible({ timeout: 5_000 });
+    await pill.click();
+
+    const rail = page.locator(".workspace-right-rail");
+    await expect(rail).toBeAttached({ timeout: 3_000 });
+
+    const inlinePanel = rail.locator(".dag-inline-panel");
+    await expect(inlinePanel).toBeVisible({ timeout: 3_000 });
+    await expect(inlinePanel).toContainText("Task A");
+  });
 });
 
 test.describe("Artifact renderers (UI-5)", () => {

@@ -43,13 +43,17 @@ function registerSW() {
   });
 }
 
+let currentRouteTaskId = null;
+
 function onRoute() {
-  const id = parseHash(window.location.hash);
-  if (id) {
-    state.currentId = id;
-    loadWorkflowAndSubscribe(id);
+  const route = parseHash(window.location.hash);
+  if (route) {
+    state.currentId = route.workflowId;
+    currentRouteTaskId = route.taskId;
+    loadWorkflowAndSubscribe(route.workflowId);
   } else {
     state.currentId = null;
+    currentRouteTaskId = null;
     state.currentWorkflow = null;
     state.transcript = [];
     destroyShell();
@@ -75,9 +79,9 @@ function destroyDagPanel() {
 }
 
 export function parseHash(hash) {
-  const m = /^#\/workflow\/([^/]+)$/.exec(hash);
+  const m = /^#\/workflow\/([^/]+)(?:\/task\/([^/]+))?$/.exec(hash);
   if (!m || !m[1]) return null;
-  return m[1];
+  return { workflowId: m[1], taskId: m[2] ?? null };
 }
 
 function loadList() {
@@ -417,7 +421,8 @@ function mountWorkspaceShell(container) {
   if (!wf) return;
 
   const taskIds = Object.keys(wf.graph);
-  const taskId = taskIds[0] ?? "default";
+  const routeTaskId = currentRouteTaskId && wf.graph[currentRouteTaskId] ? currentRouteTaskId : null;
+  const taskId = routeTaskId ?? taskIds[0] ?? "default";
   const task = wf.graph[taskId];
   const status = task?.executionStatus ?? "pending";
   const key = `${wf.id}:${taskId}`;

@@ -28,6 +28,14 @@ const ARTIFACT_RENDERERS = {
   "quality-report": renderQualityReport,
 };
 
+function cleanupArtifacts(root) {
+  root.querySelectorAll("*").forEach((el) => {
+    if (typeof el.__artifactCleanup === "function") {
+      el.__artifactCleanup();
+    }
+  });
+}
+
 function renderArtifact(artifact, ctx) {
   const renderer = ARTIFACT_RENDERERS[artifact.kind];
   if (!renderer) {
@@ -183,6 +191,7 @@ export function createDagPanel({ workflow, onTaskFocus }) {
       const body = buildBody();
       const bodyEl = sheet.panel.querySelector(".sheet-body");
       if (bodyEl) {
+        cleanupArtifacts(bodyEl);
         bodyEl.innerHTML = "";
         bodyEl.appendChild(body);
       }
@@ -192,6 +201,7 @@ export function createDagPanel({ workflow, onTaskFocus }) {
       const existing = inlineEl.querySelector(".dag-panel-body");
       const newBody = buildBody();
       if (existing) {
+        cleanupArtifacts(existing);
         existing.replaceWith(newBody);
       } else {
         inlineEl.appendChild(newBody);
@@ -201,10 +211,13 @@ export function createDagPanel({ workflow, onTaskFocus }) {
 
   function destroy() {
     if (sheet) {
+      const bodyEl = sheet.panel.querySelector(".sheet-body");
+      if (bodyEl) cleanupArtifacts(bodyEl);
       sheet.destroy();
       sheet = null;
     }
     if (inlineEl) {
+      cleanupArtifacts(inlineEl);
       inlineEl.remove();
       inlineEl = null;
     }
