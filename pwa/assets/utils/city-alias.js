@@ -18,9 +18,13 @@ function fnv1a32(str) {
   let hash = 2166136261;
   for (let i = 0; i < str.length; i++) {
     hash ^= str.charCodeAt(i);
-    hash = (hash * 16777619) >>> 0;
+    hash = Math.imul(hash, 16777619) >>> 0;
   }
   return hash;
+}
+
+export function fnv1a32ForTest(str) {
+  return fnv1a32(str);
 }
 
 export function cityAlias(workflowId) {

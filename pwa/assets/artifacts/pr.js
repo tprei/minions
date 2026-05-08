@@ -1,5 +1,13 @@
 const cache = new Map();
 
+function toApiUrl(ref) {
+  const htmlMatch = ref.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+  if (htmlMatch) {
+    return `https://api.github.com/repos/${htmlMatch[1]}/${htmlMatch[2]}/pulls/${htmlMatch[3]}`;
+  }
+  return ref;
+}
+
 function stateClass(state) {
   if (state === "open") return "pr-state-open";
   if (state === "closed") return "pr-state-closed";
@@ -80,23 +88,25 @@ export function render(artifact, ctx = {}) {
     detail.textContent = `Error: ${msg}`;
   }
 
+  const apiUrl = toApiUrl(artifact.ref);
+
   function fetchDetail() {
     if (!githubProxy) return;
 
-    const cacheEntry = cache.get(artifact.ref);
+    const cacheEntry = cache.get(apiUrl);
     if (cacheEntry && Date.now() - cacheEntry.ts < 30000) {
       renderDetail(cacheEntry.data);
       return;
     }
 
-    const proxyUrl = `${githubProxy}?url=${encodeURIComponent(artifact.ref)}`;
+    const proxyUrl = `${githubProxy}?url=${encodeURIComponent(apiUrl)}`;
     fetch(proxyUrl)
       .then((r) => {
         if (!r.ok) throw new Error(`upstream ${r.status}`);
         return r.json();
       })
       .then((data) => {
-        cache.set(artifact.ref, { data, ts: Date.now() });
+        cache.set(apiUrl, { data, ts: Date.now() });
         renderDetail(data);
       })
       .catch((err) => renderError(err.message));
@@ -105,7 +115,7 @@ export function render(artifact, ctx = {}) {
   fetchDetail();
 
   const onFocus = () => {
-    const entry = cache.get(artifact.ref);
+    const entry = cache.get(apiUrl);
     if (!entry || Date.now() - entry.ts >= 30000) {
       fetchDetail();
     }

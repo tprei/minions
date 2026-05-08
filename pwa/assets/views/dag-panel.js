@@ -52,9 +52,13 @@ function buildTaskRow(taskId, task, onTaskFocus, ctx) {
   row.className = "dag-task-row";
   row.dataset.taskId = taskId;
 
+  row.addEventListener("click", (e) => {
+    if (e.target.closest("button, a, .stop-propagate, [data-stop-propagate]")) return;
+    onTaskFocus(taskId);
+  });
+
   const header = document.createElement("div");
   header.className = "dag-task-header";
-  header.addEventListener("click", () => onTaskFocus(taskId));
 
   const busy = BUSY_STATUSES.has(task.executionStatus);
   const dot = createStatusDot(task.executionStatus, { busy });
@@ -149,6 +153,8 @@ export function createDagPanel({ workflow, onTaskFocus }) {
 
   function openMobile() {
     if (sheet) {
+      const bodyEl = sheet.panel.querySelector(".sheet-body");
+      if (bodyEl) cleanupArtifacts(bodyEl);
       sheet.destroy();
       sheet = null;
     }
@@ -158,6 +164,7 @@ export function createDagPanel({ workflow, onTaskFocus }) {
 
   function openDesktop(container) {
     if (inlineEl) {
+      cleanupArtifacts(inlineEl);
       inlineEl.remove();
     }
     inlineEl = document.createElement("div");

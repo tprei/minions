@@ -76,6 +76,48 @@ describe("pr renderer", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it("normalizes an HTML PR url to the API form before fetching", async () => {
+    const prData = { title: "HTML url PR", state: "open", user: { login: "bob", avatar_url: "" }, body: null };
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(prData), { status: 200, headers: { "Content-Type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    const artifact = {
+      kind: "pr" as const,
+      ref: "https://github.com/myorg/myrepo/pull/77",
+      producedBy: "t1",
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    render(artifact, { githubProxy: "/github/pr-detail" });
+
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalled(), { timeout: 1000 });
+
+    const calledUrl = (mockFetch.mock.calls[0] as string[])[0];
+    expect(calledUrl).toContain(encodeURIComponent("https://api.github.com/repos/myorg/myrepo/pulls/77"));
+    expect(calledUrl).not.toContain(encodeURIComponent("github.com/myorg/myrepo/pull/77"));
+  });
+
+  it("passes through an existing API url unchanged", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    const artifact = {
+      kind: "pr" as const,
+      ref: "https://api.github.com/repos/org/repo/pulls/999",
+      producedBy: "t1",
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    render(artifact, { githubProxy: "/github/pr-detail" });
+
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalled(), { timeout: 1000 });
+
+    const calledUrl = (mockFetch.mock.calls[0] as string[])[0];
+    expect(calledUrl).toContain(encodeURIComponent("https://api.github.com/repos/org/repo/pulls/999"));
+  });
+
   it("__artifactCleanup removes window focus listener when called", () => {
     const addSpy = vi.spyOn(window, "addEventListener");
     const removeSpy = vi.spyOn(window, "removeEventListener");

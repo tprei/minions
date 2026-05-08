@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { cityAlias } from "../../../pwa/assets/utils/city-alias.js";
+import { cityAlias, fnv1a32ForTest } from "../../../pwa/assets/utils/city-alias.js";
+
+describe("fnv1a32", () => {
+  it("produces correct known-vector outputs (FNV-1a 32-bit)", () => {
+    // Values independently verified with Math.imul-correct implementation
+    expect(fnv1a32ForTest("")).toBe(2166136261);
+    expect(fnv1a32ForTest("a")).toBe(3826002220);
+    expect(fnv1a32ForTest("foobar")).toBe(3214735720);
+  });
+});
 
 describe("cityAlias", () => {
   it("returns the same alias for the same workflowId", () => {
