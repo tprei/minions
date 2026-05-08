@@ -22,8 +22,11 @@ describe("createComposer", () => {
     expect(btn.textContent).toContain("Queue");
     const icon = btn.querySelector(".composer-btn-icon");
     expect(icon).not.toBeNull();
-    const hint = element.querySelector(".composer-hint") as HTMLElement;
-    expect(hint.textContent).toContain("Queueing follow-ups requires a future engine command");
+    const hintPrimary = element.querySelector(".composer-hint-primary") as HTMLElement;
+    expect(hintPrimary.textContent).toContain("Queued for AI");
+    const hintSecondary = element.querySelector(".composer-hint-secondary") as HTMLElement;
+    expect(hintSecondary.textContent).toContain("Awaiting completion");
+    expect(btn.disabled).toBe(true);
   });
 
   it("running mode button is disabled — no queue command exists in engine", () => {

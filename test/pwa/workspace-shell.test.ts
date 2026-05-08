@@ -249,7 +249,7 @@ describe("createWorkspaceShell", () => {
   it("setArtifacts sets href on PR link when merged", () => {
     const { element, setExecutionStatus, setArtifacts } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
     setExecutionStatus("merged");
-    setArtifacts([{ kind: "pr", url: "https://github.com/org/repo/pull/1" }]);
+    setArtifacts([{ kind: "pr", ref: "https://github.com/org/repo/pull/1" }]);
     const link = element.querySelector(".phase-summary-pr-link") as HTMLAnchorElement;
     expect(link.href).toContain("https://github.com/org/repo/pull/1");
   });
@@ -258,9 +258,9 @@ describe("createWorkspaceShell", () => {
     const { element, setExecutionStatus, setArtifacts } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
     setExecutionStatus("merged");
     setArtifacts([
-      { kind: "pr", url: "https://github.com/org/repo/pull/1" },
-      { kind: "diff", url: "https://example.com/diff" },
-      { kind: "pr", url: "https://github.com/org/repo/pull/2" },
+      { kind: "pr", ref: "https://github.com/org/repo/pull/1" },
+      { kind: "diff", ref: "https://example.com/diff" },
+      { kind: "pr", ref: "https://github.com/org/repo/pull/2" },
     ]);
     const link = element.querySelector(".phase-summary-pr-link") as HTMLAnchorElement;
     expect(link.href).toContain("https://github.com/org/repo/pull/2");

@@ -410,8 +410,8 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
   function setArtifacts(artifacts) {
     if (!summaryPrLink) return;
     const prArtifact = [...artifacts].reverse().find((a) => a.kind === "pr");
-    if (prArtifact?.url) {
-      summaryPrLink.href = prArtifact.url;
+    if (prArtifact?.ref) {
+      summaryPrLink.href = prArtifact.ref;
     }
   }
 

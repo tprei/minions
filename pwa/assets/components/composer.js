@@ -7,7 +7,7 @@ const CLOCK_SVG = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" x
 
 const MODE_CONFIG = {
   idle:     { label: "Send",         icon: null,      hint: null,                                                                                          submitDisabled: false },
-  running:  { label: "Queue",        icon: CLOCK_SVG, hint: "Queueing follow-ups requires a future engine command — composer disabled while task is running", submitDisabled: true  },
+  running:  { label: "Queue",        icon: CLOCK_SVG, hint: "Queued for AI", hintSub: "Awaiting completion before queuing follow-ups.", submitDisabled: true  },
   feedback: { label: "Submit",       icon: null,      hint: null,                                                                                          submitDisabled: false },
   disabled: { label: "Send",         icon: null,      hint: null,                                                                                          submitDisabled: true  },
 };
@@ -33,13 +33,22 @@ export function createComposer({ mode: initialMode, taskId, workflowId, onSubmit
   const footer = document.createElement("div");
   footer.className = "composer-footer";
 
-  const hint = document.createElement("span");
-  hint.className = "composer-hint";
+  const hintWrap = document.createElement("div");
+  hintWrap.className = "composer-hint";
+
+  const hintPrimary = document.createElement("span");
+  hintPrimary.className = "composer-hint-primary";
+
+  const hintSecondary = document.createElement("span");
+  hintSecondary.className = "composer-hint-secondary";
+
+  hintWrap.appendChild(hintPrimary);
+  hintWrap.appendChild(hintSecondary);
 
   const btn = document.createElement("button");
   btn.className = "composer-btn";
 
-  footer.appendChild(hint);
+  footer.appendChild(hintWrap);
   footer.appendChild(btn);
   root.appendChild(textarea);
   root.appendChild(footer);
@@ -61,11 +70,14 @@ export function createComposer({ mode: initialMode, taskId, workflowId, onSubmit
     btn.dataset.mode = m;
 
     if (cfg.hint) {
-      hint.textContent = cfg.hint;
-      hint.style.display = "";
+      hintPrimary.textContent = cfg.hint;
+      hintSecondary.textContent = cfg.hintSub ?? "";
+      hintSecondary.style.display = cfg.hintSub ? "" : "none";
+      hintWrap.style.display = "";
     } else {
-      hint.textContent = "";
-      hint.style.display = "none";
+      hintPrimary.textContent = "";
+      hintSecondary.textContent = "";
+      hintWrap.style.display = "none";
     }
 
     const submitDisabled = cfg.submitDisabled;

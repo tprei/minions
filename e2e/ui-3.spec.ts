@@ -237,10 +237,14 @@ test.describe("Composer mode shape-shifts", () => {
 
     await expect(btn).toBeDisabled();
 
-    const hint = page.locator(".composer-hint");
-    await expect(hint).toBeVisible();
-    const hintText = await hint.textContent();
-    expect(hintText).toContain("Queueing follow-ups requires a future engine command");
+    const hintPrimary = page.locator(".composer-hint-primary");
+    await expect(hintPrimary).toBeVisible();
+    const primaryText = await hintPrimary.textContent();
+    expect(primaryText).toContain("Queued for AI");
+    const hintSecondary = page.locator(".composer-hint-secondary");
+    await expect(hintSecondary).toBeVisible();
+    const secondaryText = await hintSecondary.textContent();
+    expect(secondaryText).toContain("Awaiting completion");
   });
 
   test("running phase textarea remains editable (draft persists) even though submit is blocked", async ({ page }) => {
@@ -448,10 +452,66 @@ test.describe("PR link href", () => {
     await page.evaluate(() => {
       const shell = (window as unknown as { __shell?: { setArtifacts: (a: unknown[]) => void } }).__shell;
       if (!shell) throw new Error("__shell not available");
-      shell.setArtifacts([{ kind: "pr", url: "https://github.com/org/repo/pull/42" }]);
+      shell.setArtifacts([{ kind: "pr", ref: "https://github.com/org/repo/pull/42" }]);
     });
 
     const link = page.locator(".phase-summary-pr-link");
     await expect(link).toHaveAttribute("href", "https://github.com/org/repo/pull/42");
+  });
+
+  test("SSE task-transitioned to merged triggers workflow refetch and populates PR link", async ({ page }) => {
+    const wfRunning = {
+      ...WORKFLOW,
+      graph: {
+        [TASK_ID]: { ...WORKFLOW.graph[TASK_ID], executionStatus: "running", artifacts: [] },
+      },
+    };
+    const wfMerged = {
+      ...WORKFLOW,
+      graph: {
+        [TASK_ID]: {
+          ...WORKFLOW.graph[TASK_ID],
+          executionStatus: "merged",
+          artifacts: [
+            { kind: "pr", ref: "https://github.com/org/repo/pull/99", producedBy: TASK_ID, createdAt: "2026-01-01T00:00:00Z" },
+          ],
+        },
+      },
+    };
+
+    const sseEvent = [
+      `event: task-transitioned`,
+      `data: ${JSON.stringify({ kind: "task-transitioned", payload: { taskId: TASK_ID, fromExecutionStatus: "running", toExecutionStatus: "merged", fromStackStatus: "clean", toStackStatus: "clean", taskVersion: 2 } })}`,
+      ``,
+    ].join("\n");
+
+    let serveUpdated = false;
+
+    await page.route("**/workflows", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([wfRunning]) })
+    );
+    await page.route(`**/workflows/${WF_ID}`, (route) => {
+      const wf = serveUpdated ? wfMerged : wfRunning;
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(wf) });
+    });
+    await page.route(`**/workflows/${WF_ID}/events`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        headers: { "Cache-Control": "no-cache" },
+        body: sseEvent,
+      })
+    );
+    await page.route("**/commands", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: "{}" })
+    );
+
+    serveUpdated = true;
+    await page.goto(`/?test=1#/workflow/${WF_ID}`);
+    await page.waitForSelector(".workspace-shell", { timeout: 5_000 });
+
+    await expect(page.locator(".phase-summary")).toBeVisible({ timeout: 5_000 });
+    const link = page.locator(".phase-summary-pr-link");
+    await expect(link).toHaveAttribute("href", "https://github.com/org/repo/pull/99", { timeout: 5_000 });
   });
 });

@@ -135,6 +135,18 @@ function openStream(id) {
         if (currentShell && currentShellKey === `${state.currentWorkflow.id}:${payload.taskId}`) {
           currentShell.setExecutionStatus(payload.toExecutionStatus);
         }
+        const wfId = state.currentWorkflow.id;
+        fetch(`/workflows/${wfId}`)
+          .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+          .then((wf) => {
+            if (!state.currentWorkflow || state.currentWorkflow.id !== wfId) return;
+            state.currentWorkflow = wf;
+            const updatedTask = wf.graph[payload.taskId];
+            if (currentShell && currentShellKey === `${wfId}:${payload.taskId}` && updatedTask?.artifacts) {
+              currentShell.setArtifacts(updatedTask.artifacts);
+            }
+          })
+          .catch(() => {});
         return;
       }
 
