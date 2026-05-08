@@ -1017,3 +1017,39 @@ main {
   overflow-y: auto;
   min-height: 0;
 }
+
+/* Desktop right-rail layout */
+.workspace-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.workspace-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.workspace-right-rail {
+  flex: 0 0 0;
+  overflow: hidden;
+}
+
+.dag-inline-panel {
+  border-left: 1px solid hsl(var(--border));
+  padding: 16px;
+  overflow-y: auto;
+  height: 100%;
+  background: hsl(var(--bg-surface));
+}
+
+@media (min-width: 768px) {
+  .workspace-shell {
+    flex-direction: row;
+  }
+
+  .workspace-right-rail:has(.dag-inline-panel) {
+    flex: 0 0 320px;
+  }
+}

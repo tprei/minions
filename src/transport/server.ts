@@ -470,7 +470,12 @@ export function createServer(deps: ServerDeps): Hono {
     if (!upstreamRes.ok) {
       return c.json({ code: "upstream_error", message: `upstream responded ${upstreamRes.status}` }, 502);
     }
-    const data: unknown = await upstreamRes.json();
+    let data: unknown;
+    try {
+      data = await upstreamRes.json();
+    } catch {
+      return c.json({ code: "upstream_error", message: "upstream returned invalid JSON" }, 502);
+    }
     return c.json(data);
   });
 

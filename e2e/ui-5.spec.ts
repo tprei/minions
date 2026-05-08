@@ -192,6 +192,25 @@ test.describe("DAG panel (UI-5)", () => {
     await expect(inlinePanel).toBeVisible({ timeout: 3_000 });
     await expect(inlinePanel).toContainText("Task A");
   });
+
+  test("desktop layout: inline panel sits beside workspace-main (not stacked)", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await gotoWorkflow(page);
+
+    const pill = page.locator(".tasks-pill");
+    await expect(pill).toBeVisible({ timeout: 5_000 });
+    await pill.click();
+
+    const inlinePanel = page.locator(".dag-inline-panel");
+    await expect(inlinePanel).toBeVisible({ timeout: 3_000 });
+
+    const panelBox = await inlinePanel.boundingBox();
+    const mainBox = await page.locator(".workspace-main").boundingBox();
+    expect(panelBox).not.toBeNull();
+    expect(mainBox).not.toBeNull();
+    expect(panelBox!.x).toBeGreaterThan(0);
+    expect(panelBox!.x).toBeGreaterThan(mainBox!.x);
+  });
 });
 
 test.describe("Artifact renderers (UI-5)", () => {

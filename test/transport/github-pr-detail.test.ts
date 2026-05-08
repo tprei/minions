@@ -114,4 +114,16 @@ describe("GET /github/pr-detail", () => {
     const res = await app.request(`/github/pr-detail?url=${url}`);
     expect(res.status).toBe(200);
   });
+
+  it("returns 502 with upstream_error code when upstream returns 200 with invalid JSON", async () => {
+    fetchSpy.mockResolvedValue(
+      new Response("not valid json{{", { status: 200, headers: { "Content-Type": "application/json" } })
+    );
+    const app = makeApp();
+    const url = encodeURIComponent("https://api.github.com/repos/org/repo/pulls/1");
+    const res = await app.request(`/github/pr-detail?url=${url}`);
+    expect(res.status).toBe(502);
+    const body = await res.json() as { code: string };
+    expect(body.code).toBe("upstream_error");
+  });
 });
