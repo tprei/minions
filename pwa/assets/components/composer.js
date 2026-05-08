@@ -6,10 +6,10 @@ const CLOCK_SVG = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" x
 </svg>`;
 
 const MODE_CONFIG = {
-  idle:     { label: "Send",         icon: null,      hint: null },
-  running:  { label: "Queue",        icon: CLOCK_SVG, hint: "Queued for AI" },
-  feedback: { label: "Submit",        icon: null,      hint: null },
-  disabled: { label: "Send",         icon: null,      hint: null },
+  idle:     { label: "Send",         icon: null,      hint: null,                                                                                          submitDisabled: false },
+  running:  { label: "Queue",        icon: CLOCK_SVG, hint: "Queueing follow-ups requires a future engine command — composer disabled while task is running", submitDisabled: true  },
+  feedback: { label: "Submit",       icon: null,      hint: null,                                                                                          submitDisabled: false },
+  disabled: { label: "Send",         icon: null,      hint: null,                                                                                          submitDisabled: true  },
 };
 
 export function createComposer({ mode: initialMode, taskId, workflowId, onSubmit }) {
@@ -23,8 +23,11 @@ export function createComposer({ mode: initialMode, taskId, workflowId, onSubmit
   textarea.placeholder = "Message…";
   textarea.value = draft.value;
 
+  const inputHandlers = new Set();
+
   textarea.addEventListener("input", () => {
     draft.setValue(textarea.value);
+    for (const h of inputHandlers) h(textarea.value);
   });
 
   const footer = document.createElement("div");
@@ -65,16 +68,18 @@ export function createComposer({ mode: initialMode, taskId, workflowId, onSubmit
       hint.style.display = "none";
     }
 
-    const disabled = m === "disabled";
-    btn.disabled = disabled;
-    textarea.disabled = disabled;
-    btn.classList.toggle("composer-btn-disabled", disabled);
+    const submitDisabled = cfg.submitDisabled;
+    const textareaDisabled = m === "disabled";
+    btn.disabled = submitDisabled;
+    textarea.disabled = textareaDisabled;
+    btn.classList.toggle("composer-btn-disabled", submitDisabled);
   }
 
   applyMode(currentMode);
 
   btn.addEventListener("click", () => {
-    if (currentMode === "disabled") return;
+    const cfg = MODE_CONFIG[currentMode] ?? MODE_CONFIG.idle;
+    if (cfg.submitDisabled) return;
     const val = textarea.value.trim();
     if (!val) return;
     onSubmit?.(val, currentMode);
@@ -93,6 +98,11 @@ export function createComposer({ mode: initialMode, taskId, workflowId, onSubmit
     setValue(v) {
       textarea.value = v;
       draft.setValue(v);
+      for (const h of inputHandlers) h(v);
+    },
+    onInput(handler) {
+      inputHandlers.add(handler);
+      return () => inputHandlers.delete(handler);
     },
   };
 }

@@ -130,6 +130,114 @@ describe("createWorkspaceShell", () => {
     expect(() => setExecutionStatus("bogus-status")).toThrow("unknown executionStatus: bogus-status");
   });
 
+  it("setExecutionStatus(completed) shows phase-progress with 'Task completed — finalizing' caption", () => {
+    const { element, setExecutionStatus } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
+    setExecutionStatus("completed");
+    const progress = element.querySelector(".phase-progress") as HTMLElement;
+    expect(progress.style.display).not.toBe("none");
+    const caption = element.querySelector(".phase-progress-caption") as HTMLElement;
+    expect(caption.textContent).toBe("Task completed — finalizing");
+  });
+
+  it("setExecutionStatus(ready) shows phase-input with waiting caption, no Start button", () => {
+    const { element, setExecutionStatus } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
+    setExecutionStatus("ready");
+    const input = element.querySelector(".phase-input") as HTMLElement;
+    expect(input.style.display).not.toBe("none");
+    const startBtn = element.querySelector(".phase-input-start-btn") as HTMLElement;
+    expect(startBtn.style.display).toBe("none");
+    const waitingCaption = element.querySelector(".phase-input-waiting-caption") as HTMLElement;
+    expect(waitingCaption.style.display).not.toBe("none");
+    expect(waitingCaption.textContent).toContain("Awaiting worker pickup");
+  });
+
+  it("setExecutionStatus(pending) shows Start button, no waiting caption", () => {
+    const { element, setExecutionStatus } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
+    setExecutionStatus("pending");
+    const startBtn = element.querySelector(".phase-input-start-btn") as HTMLElement;
+    expect(startBtn.style.display).not.toBe("none");
+    const waitingCaption = element.querySelector(".phase-input-waiting-caption") as HTMLElement;
+    expect(waitingCaption.style.display).toBe("none");
+  });
+
+  it("provider-event for a different taskId is dropped", () => {
+    type BusHandler = (ev: { payload: Record<string, unknown> }) => void;
+    const handlers: Record<string, BusHandler[]> = {};
+    const eventBus = {
+      on(event: string, handler: BusHandler) {
+        handlers[event] = handlers[event] ?? [];
+        handlers[event].push(handler);
+        return () => {};
+      },
+    };
+    const { element, setExecutionStatus } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus });
+    setExecutionStatus("running");
+
+    handlers["provider-event"]?.forEach((h) =>
+      h({ payload: { taskId: "other-task", providerEvent: { kind: "assistant_text", text: "should not appear" } } })
+    );
+    const transcript = element.querySelector(".transcript") as HTMLElement;
+    expect(transcript.textContent).not.toContain("should not appear");
+  });
+
+  it("provider-event for the correct taskId is appended", () => {
+    type BusHandler = (ev: { payload: Record<string, unknown> }) => void;
+    const handlers: Record<string, BusHandler[]> = {};
+    const eventBus = {
+      on(event: string, handler: BusHandler) {
+        handlers[event] = handlers[event] ?? [];
+        handlers[event].push(handler);
+        return () => {};
+      },
+    };
+    const { element, setExecutionStatus } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus });
+    setExecutionStatus("running");
+
+    handlers["provider-event"]?.forEach((h) =>
+      h({ payload: { taskId: "t1", providerEvent: { kind: "assistant_text", text: "correct task event" } } })
+    );
+    const transcript = element.querySelector(".transcript") as HTMLElement;
+    expect(transcript.textContent).toContain("correct task event");
+  });
+
+  it("operator Continue and Retry buttons are disabled when textarea is empty", () => {
+    const { element, setExecutionStatus } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
+    setExecutionStatus("needs-review");
+    const continueBtn = element.querySelector(".phase-operator-continue-btn") as HTMLButtonElement;
+    const retryBtn = element.querySelector(".phase-operator-retry-btn") as HTMLButtonElement;
+    expect(continueBtn.disabled).toBe(true);
+    expect(retryBtn.disabled).toBe(true);
+  });
+
+  it("operator Continue and Retry buttons enable when textarea has content", () => {
+    const { element, setExecutionStatus } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
+    setExecutionStatus("needs-review");
+    const ta = element.querySelector(".composer-textarea") as HTMLTextAreaElement;
+    ta.value = "some text";
+    ta.dispatchEvent(new Event("input"));
+    const continueBtn = element.querySelector(".phase-operator-continue-btn") as HTMLButtonElement;
+    const retryBtn = element.querySelector(".phase-operator-retry-btn") as HTMLButtonElement;
+    expect(continueBtn.disabled).toBe(false);
+    expect(retryBtn.disabled).toBe(false);
+  });
+
+  it("operator Continue clears composer and localStorage on 2xx response", async () => {
+    const { element, setExecutionStatus } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
+    setExecutionStatus("needs-review");
+    const ta = element.querySelector(".composer-textarea") as HTMLTextAreaElement;
+    ta.value = "operator feedback";
+    ta.dispatchEvent(new Event("input"));
+    localStorage.setItem("draft:wf1:t1", "operator feedback");
+
+    const continueBtn = element.querySelector(".phase-operator-continue-btn") as HTMLButtonElement;
+    continueBtn.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(ta.value).toBe("");
+    expect(localStorage.getItem("draft:wf1:t1")).toBeNull();
+  });
+
   it("error phase has no retry or reset buttons", () => {
     const { element, setExecutionStatus } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
     setExecutionStatus("failed");

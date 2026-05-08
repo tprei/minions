@@ -82,6 +82,7 @@ const PHASE_FOR_STATUS: Record<string, string> = {
   pending: "input",
   ready: "input",
   running: "transcript",
+  completed: "progress",
   "quality-pending": "progress",
   finalizing: "diff",
   "pr-open": "diff",
@@ -153,7 +154,7 @@ test.describe("Phase transitions follow executionStatus", () => {
   }) => {
     await gotoDetail(page, "pending");
 
-    const sequence = ["pending", "ready", "running", "quality-pending", "finalizing", "merged"] as const;
+    const sequence = ["pending", "ready", "running", "completed", "quality-pending", "finalizing", "merged"] as const;
 
     for (const status of sequence) {
       await setStatus(page, status);
@@ -222,7 +223,7 @@ test.describe("Drafts persist across reload", () => {
 });
 
 test.describe("Composer mode shape-shifts", () => {
-  test("running phase button reads Queue with clock icon", async ({ page }) => {
+  test("running phase button reads Queue with clock icon and is disabled (no engine queue command)", async ({ page }) => {
     await gotoDetail(page, "running");
 
     const btn = page.locator(".composer-btn");
@@ -234,9 +235,27 @@ test.describe("Composer mode shape-shifts", () => {
 
     await expect(btn.locator(".composer-btn-icon")).toBeVisible();
 
+    await expect(btn).toBeDisabled();
+
     const hint = page.locator(".composer-hint");
     await expect(hint).toBeVisible();
-    await expect(hint).toHaveText("Queued for AI");
+    const hintText = await hint.textContent();
+    expect(hintText).toContain("Queueing follow-ups requires a future engine command");
+  });
+
+  test("running phase textarea remains editable (draft persists) even though submit is blocked", async ({ page }) => {
+    await gotoDetail(page, "running");
+    const ta = page.locator(".composer-textarea");
+    await expect(ta).toBeEnabled();
+    await ta.fill("draft content for later");
+    const stored = await page.evaluate(() => {
+      const keys = Object.keys(localStorage);
+      for (const k of keys) {
+        if (k.startsWith("draft:")) return localStorage.getItem(k);
+      }
+      return null;
+    });
+    expect(stored).toBe("draft content for later");
   });
 
   test("pending phase shows Start button in input phase (no composer)", async ({ page }) => {
@@ -246,6 +265,28 @@ test.describe("Composer mode shape-shifts", () => {
     const startBtn = page.locator(".phase-input-start-btn");
     await expect(startBtn).toBeVisible();
     await expect(startBtn).toHaveText("Start");
+  });
+
+  test("ready phase shows waiting caption and no Start button", async ({ page }) => {
+    await gotoDetail(page, "ready");
+
+    await expect(page.locator(".phase-input")).toBeVisible();
+    await expect(page.locator(".phase-input-start-btn")).toBeHidden();
+    const waitingCaption = page.locator(".phase-input-waiting-caption");
+    await expect(waitingCaption).toBeVisible();
+    const text = await waitingCaption.textContent();
+    expect(text).toContain("Awaiting worker pickup");
+  });
+
+  test("completed status shows phase-progress with correct caption", async ({ page }) => {
+    await gotoDetail(page, "pending");
+    await setStatus(page, "completed");
+
+    await expect(page.locator(".phase-progress")).toBeVisible();
+    const caption = page.locator(".phase-progress-caption");
+    await expect(caption).toBeVisible();
+    const text = await caption.textContent();
+    expect(text).toBe("Task completed — finalizing");
   });
 
   test("switching from pending to running changes to Queue mode", async ({ page }) => {
@@ -319,7 +360,14 @@ test.describe("Error phase recovery buttons", () => {
 });
 
 test.describe("Operator phase command wiring", () => {
-  test("Continue posts continue-task with textarea prompt", async ({ page }) => {
+  test("Continue and Retry buttons are disabled when textarea is empty", async ({ page }) => {
+    await gotoDetail(page, "needs-review");
+    await expect(page.locator(".phase-operator")).toBeVisible();
+    await expect(page.locator(".phase-operator-continue-btn")).toBeDisabled();
+    await expect(page.locator(".phase-operator-retry-btn")).toBeDisabled();
+  });
+
+  test("Continue posts continue-task with textarea prompt and clears composer on 2xx", async ({ page }) => {
     const postedBodies: unknown[] = [];
     await setupRoutes(page, "needs-review");
     await page.route("**/commands", async (route) => {
@@ -341,6 +389,7 @@ test.describe("Operator phase command wiring", () => {
 
     await expect(page.locator(".phase-operator")).toBeVisible();
     await page.locator(".composer-textarea").fill("my feedback prompt");
+    await expect(page.locator(".phase-operator-continue-btn")).toBeEnabled();
     await page.locator(".phase-operator-continue-btn").click();
 
     const continuePost = postedBodies.find(
@@ -350,9 +399,11 @@ test.describe("Operator phase command wiring", () => {
     expect(continuePost!["taskId"]).toBe(TASK_ID);
     expect(continuePost!["workflowId"]).toBe(WF_ID);
     expect(continuePost!["prompt"]).toBe("my feedback prompt");
+
+    await expect(page.locator(".composer-textarea")).toHaveValue("");
   });
 
-  test("Retry posts retry-task with textarea prompt", async ({ page }) => {
+  test("Retry posts retry-task with textarea prompt and clears composer on 2xx", async ({ page }) => {
     const postedBodies: unknown[] = [];
     await setupRoutes(page, "needs-review");
     await page.route("**/commands", async (route) => {
@@ -374,6 +425,7 @@ test.describe("Operator phase command wiring", () => {
 
     await expect(page.locator(".phase-operator")).toBeVisible();
     await page.locator(".composer-textarea").fill("retry this with new prompt");
+    await expect(page.locator(".phase-operator-retry-btn")).toBeEnabled();
     await page.locator(".phase-operator-retry-btn").click();
 
     const retryPost = postedBodies.find(
@@ -383,6 +435,8 @@ test.describe("Operator phase command wiring", () => {
     expect(retryPost!["taskId"]).toBe(TASK_ID);
     expect(retryPost!["workflowId"]).toBe(WF_ID);
     expect(retryPost!["prompt"]).toBe("retry this with new prompt");
+
+    await expect(page.locator(".composer-textarea")).toHaveValue("");
   });
 });
 

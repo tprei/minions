@@ -5,6 +5,7 @@ const PHASE_MAP = {
   "pending":         "input",
   "ready":           "input",
   "running":         "transcript",
+  "completed":       "progress",
   "quality-pending": "progress",
   "finalizing":      "diff",
   "pr-open":         "diff",
@@ -16,6 +17,7 @@ const PHASE_MAP = {
 };
 
 const PROGRESS_CAPTION = {
+  "completed":       "Task completed — finalizing",
   "quality-pending": "Running quality gates",
   "ci-pending":      "CI running",
 };
@@ -28,7 +30,7 @@ function derivePhase(status) {
 function deriveComposerMode(status) {
   if (status === "running") return "running";
   if (status === "needs-review") return "feedback";
-  if (status === "quality-pending" || status === "ci-pending" || status === "finalizing" || status === "pr-open") return "disabled";
+  if (status === "completed" || status === "quality-pending" || status === "ci-pending" || status === "finalizing" || status === "pr-open") return "disabled";
   if (status === "pending" || status === "ready" || status === "merged" || status === "failed" || status === "cancelled") return "idle";
   throw new Error(`unknown executionStatus: ${status}`);
 }
@@ -101,6 +103,12 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
     root.appendChild(el);
   }
 
+  composer.onInput(() => {
+    if (typeof phases.operator.__syncOperatorButtons === "function") {
+      phases.operator.__syncOperatorButtons();
+    }
+  });
+
   function buildPhaseInput() {
     const el = document.createElement("div");
 
@@ -130,9 +138,35 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
       }).catch(() => {});
     });
 
+    const waitingCaption = document.createElement("div");
+    waitingCaption.className = "phase-input-waiting-caption";
+
+    const waitingSpinner = document.createElement("div");
+    waitingSpinner.className = "phase-spinner";
+
+    const waitingText = document.createElement("span");
+    waitingText.className = "phase-input-waiting-text";
+    waitingText.textContent = "Awaiting worker pickup";
+
+    waitingCaption.appendChild(waitingSpinner);
+    waitingCaption.appendChild(waitingText);
+    waitingCaption.style.display = "none";
+
     inputArea.appendChild(textarea);
     inputArea.appendChild(startBtn);
+    inputArea.appendChild(waitingCaption);
     el.appendChild(inputArea);
+
+    el.__updateInputPhase = function (status) {
+      if (status === "pending") {
+        startBtn.style.display = "";
+        waitingCaption.style.display = "none";
+      } else {
+        startBtn.style.display = "none";
+        waitingCaption.style.display = "";
+      }
+    };
+
     return el;
   }
 
@@ -230,24 +264,44 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
     const continueBtn = document.createElement("button");
     continueBtn.className = "phase-operator-continue-btn";
     continueBtn.textContent = "Continue";
-    continueBtn.addEventListener("click", () => {
-      const val = composer.getValue().trim();
-      fetch("/commands", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: "continue-task", workflowId, taskId, prompt: val }),
-      }).catch(() => {});
-    });
+    continueBtn.disabled = true;
 
     const retryBtn = document.createElement("button");
     retryBtn.className = "phase-operator-retry-btn";
     retryBtn.textContent = "Retry";
+    retryBtn.disabled = true;
+
+    function syncOperatorButtons() {
+      const empty = composer.getValue().trim() === "";
+      continueBtn.disabled = empty;
+      retryBtn.disabled = empty;
+    }
+
+    continueBtn.addEventListener("click", () => {
+      const val = composer.getValue().trim();
+      if (!val) return;
+      fetch("/commands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "continue-task", workflowId, taskId, prompt: val }),
+      }).then((res) => {
+        if (res.ok) {
+          composer.setValue("");
+        }
+      }).catch(() => {});
+    });
+
     retryBtn.addEventListener("click", () => {
       const val = composer.getValue().trim();
+      if (!val) return;
       fetch("/commands", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind: "retry-task", workflowId, taskId, prompt: val }),
+      }).then((res) => {
+        if (res.ok) {
+          composer.setValue("");
+        }
       }).catch(() => {});
     });
 
@@ -284,6 +338,8 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
     el.appendChild(recoveryFooter);
     el.appendChild(scrollerWrap);
     el.appendChild(composerWrap);
+
+    el.__syncOperatorButtons = syncOperatorButtons;
     return el;
   }
 
@@ -339,6 +395,10 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
       phases.progress.innerHTML = "";
       phases.progress.appendChild(createSpinner(caption));
     }
+
+    if (phase === "input" && typeof phases.input.__updateInputPhase === "function") {
+      phases.input.__updateInputPhase(status);
+    }
   }
 
   function appendTranscriptEvent(payload) {
@@ -366,7 +426,9 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
       }
     });
     const off2 = eventBus.on?.("provider-event", (ev) => {
-      appendTranscriptEvent(ev.payload);
+      if (ev.payload?.taskId === taskId) {
+        appendTranscriptEvent(ev.payload);
+      }
     });
 
     const origDestroy = destroy;

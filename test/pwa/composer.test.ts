@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createComposer } from "../../pwa/assets/components/composer.js";
 
 describe("createComposer", () => {
@@ -23,7 +23,33 @@ describe("createComposer", () => {
     const icon = btn.querySelector(".composer-btn-icon");
     expect(icon).not.toBeNull();
     const hint = element.querySelector(".composer-hint") as HTMLElement;
-    expect(hint.textContent).toBe("Queued for AI");
+    expect(hint.textContent).toContain("Queueing follow-ups requires a future engine command");
+  });
+
+  it("running mode button is disabled — no queue command exists in engine", () => {
+    const { element } = createComposer({ mode: "running", taskId: "t1", workflowId: "wf1" });
+    const btn = element.querySelector(".composer-btn") as HTMLButtonElement;
+    const ta = element.querySelector("textarea") as HTMLTextAreaElement;
+    expect(btn.disabled).toBe(true);
+    expect(ta.disabled).toBe(false);
+  });
+
+  it("running mode submit handler does not call fetch", () => {
+    const fetchCalls: unknown[] = [];
+    vi.stubGlobal("fetch", (...args: unknown[]) => { fetchCalls.push(args); return Promise.resolve(new Response("{}")); });
+    const received: string[] = [];
+    const { element } = createComposer({
+      mode: "running",
+      taskId: "t1",
+      workflowId: "wf1",
+      onSubmit: (val) => received.push(val),
+    });
+    const ta = element.querySelector("textarea") as HTMLTextAreaElement;
+    const btn = element.querySelector(".composer-btn") as HTMLButtonElement;
+    ta.value = "queued message";
+    btn.click();
+    expect(received).toHaveLength(0);
+    expect(fetchCalls).toHaveLength(0);
   });
 
   it("renders 'Submit' in feedback mode", () => {
