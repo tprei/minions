@@ -9,7 +9,7 @@
     "start": "tsx src/main.ts",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:install": "playwright install --with-deps chromium"
+    "test:e2e:install": "playwright install chromium"
   },
   "devDependencies": {
     "@playwright/test": "^1.47.0",
