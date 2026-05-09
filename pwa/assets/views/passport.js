@@ -36,7 +36,7 @@ function formatDate(ts) {
   return d.toISOString().slice(0, 10);
 }
 
-export function createPassport({ workflows: initialWorkflows = [] } = {}) {
+export function createPassport({ workflows: initialWorkflows = [], onRefresh } = {}) {
   let workflows = initialWorkflows;
   let currentSort = 'created';
 
@@ -114,7 +114,13 @@ export function createPassport({ workflows: initialWorkflows = [] } = {}) {
   }
 
   function refresh() {
-    return Promise.resolve();
+    if (typeof onRefresh !== 'function') return Promise.resolve();
+    return Promise.resolve(onRefresh()).then((latest) => {
+      if (Array.isArray(latest)) {
+        workflows = latest;
+        renderList();
+      }
+    });
   }
 
   updateSortButtons();
@@ -122,9 +128,7 @@ export function createPassport({ workflows: initialWorkflows = [] } = {}) {
 
   return {
     element: root,
-    refresh() {
-      renderList();
-    },
+    refresh,
     update(newWorkflows) {
       workflows = newWorkflows;
       renderList();

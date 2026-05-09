@@ -13,6 +13,7 @@ import { attachSwipeUp } from "./gestures/swipe-up.js";
 import { createDefaultActionsDrawer } from "./views/actions-drawer.js";
 import { attachPullToRefresh } from "./hooks/use-pull-to-refresh.js";
 import { createKanbanCardContextMenu } from "./components/context-menu.js";
+import { agentColor } from "./utils/agent-color.js";
 
 export const state = {
   workflows: [],
@@ -179,7 +180,13 @@ function renderActivity() {
   renderHeader(app);
   appendInstallBannerIfActive(app);
   if (!activityTabInstance) {
-    activityTabInstance = createActivityTab({ workflows: state.workflows });
+    activityTabInstance = createActivityTab({
+      workflows: state.workflows,
+      onRefresh: () => fetch("/workflows").then((r) => r.json()).then((data) => {
+        state.workflows = data;
+        return data;
+      }),
+    });
   } else {
     activityTabInstance.updateWorkflows(state.workflows);
   }
@@ -329,6 +336,10 @@ function openStream(id) {
         state.transcript.push(payload);
         if (currentShell && currentShellKey === `${state.currentWorkflow?.id}:${payload.taskId}`) {
           currentShell.appendTranscriptEvent(payload);
+          const innerEvent = payload?.providerEvent ?? payload;
+          if (innerEvent?.kind === "usage" && state.currentWorkflow?.id === state.currentId) {
+            currentShell.recordUsage(innerEvent);
+          }
         } else if (!currentShell) {
           const node = transcriptNode(payload);
           const container = document.querySelector(".transcript");
@@ -887,6 +898,14 @@ function renderKanban(container) {
       const sc = statusClassMap[colName] ?? "status-pending";
       card.className = `task-card ${sc}`;
       card.dataset.taskId = task.id;
+
+      const latestRun = Array.isArray(task.runs) && task.runs.length > 0
+        ? task.runs[task.runs.length - 1]
+        : null;
+      if (latestRun?.providerType) {
+        const { accent } = agentColor(latestRun.providerType);
+        card.style.borderLeft = `4px solid ${accent}`;
+      }
 
       const titleRow = document.createElement("div");
       titleRow.className = "task-card-title";

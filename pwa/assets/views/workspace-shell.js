@@ -5,6 +5,8 @@ import { createChecksPanel } from "./checks-panel.js";
 import { createDiffViewer } from "./diff-viewer.js";
 import { createMergeProgress } from "./merge-progress.js";
 import { createCompletionStepper } from "../components/completion-stepper.js";
+import { createCostBadge } from "../components/cost-badge.js";
+import { agentColor } from "../utils/agent-color.js";
 
 const PHASE_MAP = {
   "pending":         "input",
@@ -85,6 +87,7 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
   let currentTask = initialTask ?? null;
   let currentWorkflow = initialWorkflow ?? null;
   let completionStepper = null;
+  let costBadge = null;
 
   const composer = createComposer({
     mode: "idle",
@@ -112,6 +115,9 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
 
   completionStepper = createCompletionStepper({ task: currentTask });
   taskHeader.appendChild(completionStepper.element);
+
+  costBadge = createCostBadge();
+  taskHeader.appendChild(costBadge.element);
 
   const phases = {
     input:      buildPhaseInput(),
@@ -199,6 +205,13 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
   function buildPhaseTranscript() {
     const el = document.createElement("div");
 
+    const providerLabel = document.createElement("div");
+    providerLabel.className = "transcript-provider-label";
+    providerLabel.hidden = true;
+
+    el.__providerLabel = providerLabel;
+    el.appendChild(providerLabel);
+
     const scrollerWrap = document.createElement("div");
     scrollerWrap.className = "phase-transcript-scroller-wrap";
     scrollerWrap.appendChild(transcriptScroller);
@@ -210,6 +223,22 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
     el.appendChild(scrollerWrap);
     el.appendChild(composerWrap);
     return el;
+  }
+
+  function updateProviderLabel(task) {
+    const labelEl = phases?.transcript?.__providerLabel;
+    if (!labelEl) return;
+    const runs = Array.isArray(task?.runs) ? task.runs : [];
+    const latestRun = runs.length > 0 ? runs[runs.length - 1] : null;
+    const provider = latestRun?.providerType ?? null;
+    if (provider) {
+      const { accent } = agentColor(provider);
+      labelEl.textContent = `Provider: ${provider}`;
+      labelEl.style.color = accent;
+      labelEl.hidden = false;
+    } else {
+      labelEl.hidden = true;
+    }
   }
 
   function buildPhaseProgress() {
@@ -453,6 +482,10 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
     if (phase === "diff" && typeof phases.diff.__mountPrTab === "function") {
       phases.diff.__mountPrTab(task ?? null, workflow ?? null);
     }
+
+    if (phase === "transcript" || phase === "operator") {
+      updateProviderLabel(task);
+    }
   }
 
   function appendTranscriptEvent(payload) {
@@ -460,10 +493,15 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
     transcriptPipeline.appendEvent(providerEvent);
   }
 
+  function recordUsage(event) {
+    if (costBadge) costBadge.handleUsageEvent(event);
+  }
+
   function setArtifacts(artifacts, task, workflow) {
     if (task !== undefined) {
       currentTask = task;
       if (completionStepper) completionStepper.update(task);
+      updateProviderLabel(task);
     }
     if (workflow !== undefined) currentWorkflow = workflow;
 
@@ -483,6 +521,10 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
     if (completionStepper) {
       completionStepper.destroy();
       completionStepper = null;
+    }
+    if (costBadge) {
+      costBadge.destroy();
+      costBadge = null;
     }
     root.remove();
   }
@@ -520,5 +562,6 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
     setExecutionStatus,
     setArtifacts,
     appendTranscriptEvent,
+    recordUsage,
   };
 }

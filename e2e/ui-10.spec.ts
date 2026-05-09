@@ -233,6 +233,148 @@ test.describe("UI-10: gestures, passport, cost badge, agent colors, theme meta, 
     await page.screenshot({ path: "e2e/ui-10.spec.ts-snapshots/cost-badge.png" });
   });
 
+  test("kanban card with claude-code provider has blue border-left stripe", async ({ page }) => {
+    const wf = {
+      id: "wf-color-claude",
+      kind: "manual-dag",
+      status: "active",
+      graph: {
+        "task-cc-1": {
+          id: "task-cc-1",
+          title: "Claude Code Task",
+          executionStatus: "running",
+          stackStatus: "clean",
+          dependsOn: [],
+          artifacts: [],
+          runs: [
+            {
+              id: "run-1",
+              taskId: "task-cc-1",
+              attempt: 1,
+              providerType: "claude-code",
+              runtimeType: "local",
+              runtimeSessionId: "sess-1",
+              startedAt: "2026-01-01T00:00:00Z",
+            },
+          ],
+        },
+      },
+      operations: {},
+      policy: { maxConcurrent: 1, autoLand: false, autoMergeOnGreen: false },
+      version: 1,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+
+    await page.route("**/workflows", (route) => {
+      if (route.request().method() === "GET") {
+        route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([wf]) });
+      } else {
+        route.continue();
+      }
+    });
+    await page.route(`**/workflows/wf-color-claude`, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(wf) })
+    );
+    await page.route(`**/workflows/wf-color-claude/events`, (route) =>
+      route.fulfill({ status: 200, contentType: "text/event-stream", headers: { "Cache-Control": "no-cache" }, body: "" })
+    );
+    await page.route("**/push/vapid-public-key", (route) =>
+      route.fulfill({ status: 404, body: "not found" })
+    );
+    await page.route("**/audit/events**", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ events: [] }) })
+    );
+    await page.route("**/alerts**", (route) => {
+      if (!route.request().url().includes("subscribe")) {
+        route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ alerts: [] }) });
+      } else {
+        route.continue();
+      }
+    });
+
+    await page.goto(`/#/workflow/wf-color-claude`);
+    await page.waitForSelector(".task-card", { timeout: 8_000 });
+
+    const borderLeft = await page.evaluate(() => {
+      const card = document.querySelector('.task-card') as HTMLElement;
+      return card?.style.borderLeft ?? "";
+    });
+
+    expect(borderLeft.toLowerCase()).toMatch(/4px solid (rgb\(59,\s*130,\s*246\)|#3b82f6)/);
+  });
+
+  test("kanban card with codex provider has purple border-left stripe", async ({ page }) => {
+    const wf = {
+      id: "wf-color-codex",
+      kind: "manual-dag",
+      status: "active",
+      graph: {
+        "task-cx-1": {
+          id: "task-cx-1",
+          title: "Codex Task",
+          executionStatus: "running",
+          stackStatus: "clean",
+          dependsOn: [],
+          artifacts: [],
+          runs: [
+            {
+              id: "run-2",
+              taskId: "task-cx-1",
+              attempt: 1,
+              providerType: "codex",
+              runtimeType: "local",
+              runtimeSessionId: "sess-2",
+              startedAt: "2026-01-01T00:00:00Z",
+            },
+          ],
+        },
+      },
+      operations: {},
+      policy: { maxConcurrent: 1, autoLand: false, autoMergeOnGreen: false },
+      version: 1,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+
+    await page.route("**/workflows", (route) => {
+      if (route.request().method() === "GET") {
+        route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([wf]) });
+      } else {
+        route.continue();
+      }
+    });
+    await page.route(`**/workflows/wf-color-codex`, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(wf) })
+    );
+    await page.route(`**/workflows/wf-color-codex/events`, (route) =>
+      route.fulfill({ status: 200, contentType: "text/event-stream", headers: { "Cache-Control": "no-cache" }, body: "" })
+    );
+    await page.route("**/push/vapid-public-key", (route) =>
+      route.fulfill({ status: 404, body: "not found" })
+    );
+    await page.route("**/audit/events**", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ events: [] }) })
+    );
+    await page.route("**/alerts**", (route) => {
+      if (!route.request().url().includes("subscribe")) {
+        route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ alerts: [] }) });
+      } else {
+        route.continue();
+      }
+    });
+
+    await page.goto(`/#/workflow/wf-color-codex`);
+    await page.waitForSelector(".task-card", { timeout: 8_000 });
+
+    const borderLeft = await page.evaluate(() => {
+      const card = document.querySelector('.task-card') as HTMLElement;
+      return card?.style.borderLeft ?? "";
+    });
+
+    expect(borderLeft.toLowerCase()).toMatch(/4px solid (rgb\(168,\s*85,\s*247\)|#a855f7)/);
+  });
+
   test("Passport sub-tab in Activity shows workflow city aliases", async ({ page }) => {
     await setupBaseRoutes(page, TEST_WORKFLOWS);
     await page.goto("/#/activity");

@@ -2,7 +2,7 @@ import { createAuditFeed } from './audit-feed.js';
 import { createAlertCenter } from './alert-center.js';
 import { createPassport } from './passport.js';
 
-export function createActivityTab({ apiBase = '', workflows: initialWorkflows = [] } = {}) {
+export function createActivityTab({ apiBase = '', workflows: initialWorkflows = [], onRefresh } = {}) {
   let workflows = initialWorkflows;
   const root = document.createElement('div');
   root.className = 'activity-tab';
@@ -73,7 +73,7 @@ export function createActivityTab({ apiBase = '', workflows: initialWorkflows = 
     body.innerHTML = '';
 
     if (!passportView) {
-      passportView = createPassport({ workflows });
+      passportView = createPassport({ workflows, onRefresh });
     }
     body.appendChild(passportView.element);
   }

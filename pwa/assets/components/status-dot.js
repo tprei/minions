@@ -1,10 +1,12 @@
+import { agentColor } from '../utils/agent-color.js';
+
 const VALID_STATUSES = [
   'pending', 'ready', 'running', 'completed', 'quality-pending',
   'finalizing', 'pr-open', 'ci-pending', 'needs-review', 'merged',
   'failed', 'cancelled',
 ];
 
-export function createStatusDot(executionStatus, { busy = false, size = 'md' } = {}) {
+export function createStatusDot(executionStatus, { busy = false, size = 'md', providerName } = {}) {
   const span = document.createElement('span');
   span.setAttribute('role', 'img');
   span.setAttribute('aria-label', executionStatus);
@@ -22,5 +24,11 @@ export function createStatusDot(executionStatus, { busy = false, size = 'md' } =
   }
 
   span.className = classes.join(' ');
+
+  if (providerName) {
+    const { accent } = agentColor(providerName);
+    span.style.outline = `1px solid ${accent}`;
+  }
+
   return span;
 }

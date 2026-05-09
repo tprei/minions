@@ -10,4 +10,7 @@ export interface PassportInstance {
   update(workflows: PassportWorkflow[]): void;
 }
 
-export declare function createPassport(options?: { workflows?: PassportWorkflow[] }): PassportInstance;
+export declare function createPassport(options?: {
+  workflows?: PassportWorkflow[];
+  onRefresh?: () => PassportWorkflow[] | Promise<PassportWorkflow[]>;
+}): PassportInstance;

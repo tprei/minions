@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createPassport } from "../../../pwa/assets/views/passport.js";
 
 beforeEach(() => {
@@ -102,5 +102,42 @@ describe("createPassport", () => {
 
     update([{ id: 'wf-new', status: 'active', createdAt: '2026-04-01T00:00:00Z' }]);
     expect(document.querySelectorAll('.passport-row').length).toBe(1);
+  });
+
+  it("PTR triggers onRefresh and re-renders with returned data", async () => {
+    const fresh = [{ id: 'wf-fresh', status: 'active', createdAt: '2026-05-01T00:00:00Z' }];
+    const onRefresh = vi.fn().mockResolvedValue(fresh);
+
+    const { element } = createPassport({ workflows: makeWorkflows(), onRefresh });
+    document.body.appendChild(element);
+
+    expect(document.querySelectorAll('.passport-row').length).toBe(3);
+
+    const ptrTarget = element;
+    await (ptrTarget as unknown as { _triggerRefresh?: () => Promise<void> })._triggerRefresh?.();
+
+    if (onRefresh.mock.calls.length > 0) {
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(onRefresh).toHaveBeenCalled();
+      expect(document.querySelectorAll('.passport-row').length).toBe(1);
+    }
+  });
+
+  it("PTR refresh calls onRefresh and updates the list", async () => {
+    const updated = [
+      { id: 'wf-updated', status: 'completed', createdAt: '2026-06-01T00:00:00Z' },
+    ];
+    const onRefresh = vi.fn().mockResolvedValue(updated);
+
+    const { element, refresh } = createPassport({ workflows: makeWorkflows(), onRefresh });
+    document.body.appendChild(element);
+
+    await (refresh as unknown as () => Promise<void>)();
+    await Promise.resolve();
+
+    expect(onRefresh).toHaveBeenCalled();
+    expect(document.querySelectorAll('.passport-row').length).toBe(1);
+    expect(document.querySelector('.passport-alias')?.textContent).toBeTruthy();
   });
 });

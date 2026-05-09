@@ -8,6 +8,7 @@ export interface WorkspaceShellInstance {
     workflow?: Record<string, unknown> | null,
   ): void;
   appendTranscriptEvent(payload: unknown): void;
+  recordUsage(event: { kind: string; costUsd?: number; [key: string]: unknown }): void;
 }
 
 export interface WorkspaceShellOptions {

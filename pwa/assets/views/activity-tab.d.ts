@@ -1,6 +1,7 @@
 export interface ActivityTabDeps {
   apiBase?: string;
   workflows?: unknown[];
+  onRefresh?: () => unknown[] | Promise<unknown[]>;
 }
 
 export interface ActivityTab {

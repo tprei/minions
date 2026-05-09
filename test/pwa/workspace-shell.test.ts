@@ -267,4 +267,32 @@ describe("createWorkspaceShell", () => {
     const link = element.querySelector(".phase-summary-pr-link") as HTMLAnchorElement;
     expect(link.href).toContain("https://github.com/org/repo/pull/2");
   });
+
+  it("cost badge mounts in task header", () => {
+    const { element } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
+    document.body.appendChild(element);
+    const badge = element.querySelector(".cost-badge");
+    expect(badge).not.toBeNull();
+  });
+
+  it("cost badge accumulates usage events via recordUsage", () => {
+    const { element, recordUsage } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
+    document.body.appendChild(element);
+    const badge = element.querySelector(".cost-badge") as HTMLElement;
+    expect(badge.classList.contains("cost-badge-green")).toBe(true);
+
+    recordUsage({ kind: "usage", inputTokens: 100, outputTokens: 50, costUsd: 0.05 });
+    expect(badge.classList.contains("cost-badge-yellow")).toBe(true);
+
+    recordUsage({ kind: "usage", inputTokens: 100, outputTokens: 50, costUsd: 0.06 });
+    expect(badge.classList.contains("cost-badge-orange")).toBe(true);
+  });
+
+  it("cost badge is destroyed on unmount", () => {
+    const { element, destroy } = createWorkspaceShell({ workflowId: "wf1", taskId: "t1", eventBus: null });
+    document.body.appendChild(element);
+    expect(element.querySelector(".cost-badge")).not.toBeNull();
+    destroy();
+    expect(document.body.querySelector(".cost-badge")).toBeNull();
+  });
 });
