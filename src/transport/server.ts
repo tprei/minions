@@ -539,7 +539,7 @@ export function createServer(deps: ServerDeps): Hono {
     app.get("/sw.js", serveStatic({ root: deps.pwaRoot, path: "sw.js" }));
     app.get("/icons/*", serveStatic({ root: deps.pwaRoot }));
     app.get("/assets/*", serveStatic({ root: deps.pwaRoot }));
-    app.get("/*.js", serveStatic({ root: deps.pwaRoot }));
+    app.get("/workbox-*.js", serveStatic({ root: deps.pwaRoot }));
   }
 
   return app;
