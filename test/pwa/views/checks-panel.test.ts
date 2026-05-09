@@ -119,16 +119,41 @@ describe("createChecksPanel", () => {
     destroy();
   });
 
-  it("adaptive polling: fast interval when checks change between polls", async () => {
+  it("stable checks slow polling from 30s to 120s", async () => {
     vi.useFakeTimers();
+    const setIntervalSpy = vi.spyOn(global, "setInterval");
+
+    const stableChecks = [{ id: "c1", name: "tests", conclusion: "success", html_url: null }];
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ check_runs: stableChecks }),
+    } as unknown as Response);
+
+    const prDetail = { ...makePrDetail(), check_runs: stableChecks };
+    const { destroy } = createChecksPanel({ prDetail, githubProxy: "/github/pr-detail" });
+
+    const initialCall = setIntervalSpy.mock.calls.find((c) => c[1] === 30000);
+    expect(initialCall, "initial setInterval should use 30000ms").toBeDefined();
+
+    await vi.advanceTimersByTimeAsync(30000);
+
+    const slowCall = setIntervalSpy.mock.calls.find((c) => c[1] === 120000);
+    expect(slowCall, "after stable response setInterval should use 120000ms").toBeDefined();
+
+    destroy();
+    vi.useRealTimers();
+  });
+
+  it("changed checks reset polling from 120s to 30s", async () => {
+    vi.useFakeTimers();
+    const setIntervalSpy = vi.spyOn(global, "setInterval");
 
     const stableChecks = [{ id: "c1", name: "tests", conclusion: "success", html_url: null }];
     const changedChecks = [{ id: "c1", name: "tests", conclusion: "failure", html_url: null }];
-
-    let callCount = 0;
+    let fetchCount = 0;
     vi.mocked(fetch).mockImplementation(() => {
-      callCount++;
-      const checks = callCount === 1 ? stableChecks : changedChecks;
+      fetchCount++;
+      const checks = fetchCount === 1 ? stableChecks : changedChecks;
       return Promise.resolve({
         ok: true,
         json: async () => ({ check_runs: checks }),
@@ -138,44 +163,18 @@ describe("createChecksPanel", () => {
     const prDetail = { ...makePrDetail(), check_runs: stableChecks };
     const { destroy } = createChecksPanel({ prDetail, githubProxy: "/github/pr-detail" });
 
-    vi.advanceTimersByTime(30000);
-    vi.useRealTimers();
-    await flushPromises();
+    await vi.advanceTimersByTimeAsync(30000);
 
-    expect(callCount).toBeGreaterThanOrEqual(1);
-    destroy();
-  });
+    const slowCall = setIntervalSpy.mock.calls.find((c) => c[1] === 120000);
+    expect(slowCall, "after stable response setInterval should use 120000ms").toBeDefined();
 
-  it("adaptive polling: interval slows to 120s when checks do not change", async () => {
-    vi.useFakeTimers();
+    await vi.advanceTimersByTimeAsync(120000);
 
-    const stableChecks = [{ id: "c1", name: "tests", conclusion: "success", html_url: null }];
-
-    let callCount = 0;
-    vi.mocked(fetch).mockImplementation(() => {
-      callCount++;
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({ check_runs: stableChecks }),
-      } as unknown as Response);
-    });
-
-    const prDetail = { ...makePrDetail(), check_runs: stableChecks };
-    const { destroy } = createChecksPanel({ prDetail, githubProxy: "/github/pr-detail" });
-
-    vi.advanceTimersByTime(30000);
-    vi.useRealTimers();
-    await flushPromises();
-    const afterFastPoll = callCount;
-
-    vi.useFakeTimers();
-    vi.advanceTimersByTime(60000);
-    vi.useRealTimers();
-    await flushPromises();
-
-    expect(afterFastPoll).toBeGreaterThanOrEqual(1);
+    const fastResetCall = setIntervalSpy.mock.calls.slice(setIntervalSpy.mock.calls.indexOf(slowCall!) + 1).find((c) => c[1] === 30000);
+    expect(fastResetCall, "after changed response setInterval should reset to 30000ms").toBeDefined();
 
     destroy();
+    vi.useRealTimers();
   });
 
   it("pauses polling when document.hidden is true", async () => {

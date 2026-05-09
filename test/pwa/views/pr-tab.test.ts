@@ -192,6 +192,47 @@ describe("createPrTab", () => {
     destroy();
   });
 
+  it("shows Land button enabled when mergeable_state is unstable", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ ...MOCK_PR_DETAIL, mergeable: "unstable", mergeable_state: "unstable" }),
+    } as unknown as Response);
+
+    const { element, destroy } = createPrTab({
+      task: makePrTask(prCounter++),
+      workflow: { id: "wf-1" },
+      deps: { githubProxy: "/github/pr-detail" },
+    });
+    document.body.appendChild(element);
+
+    await vi.waitFor(() => {
+      const btn = element.querySelector(".pr-tab-land-btn") as HTMLButtonElement | null;
+      expect(btn?.disabled).toBe(false);
+    });
+    destroy();
+  });
+
+  it("shows caveat text when mergeable_state is unstable", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ ...MOCK_PR_DETAIL, mergeable: "unstable", mergeable_state: "unstable" }),
+    } as unknown as Response);
+
+    const { element, destroy } = createPrTab({
+      task: makePrTask(prCounter++),
+      workflow: { id: "wf-1" },
+      deps: { githubProxy: "/github/pr-detail" },
+    });
+    document.body.appendChild(element);
+
+    await vi.waitFor(() => {
+      const caveat = element.querySelector(".pr-tab-land-caveat");
+      expect(caveat).not.toBeNull();
+      expect(caveat?.textContent).toContain("optional checks are failing");
+    });
+    destroy();
+  });
+
   it("shows Land button disabled when mergeable is undefined", async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,

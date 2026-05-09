@@ -82,6 +82,7 @@ export function createMergeProgress(taskId, eventBus) {
       updateStep(phase, "running");
     } else if (status === "completed") {
       phaseState[phase] = "completed";
+      // TODO: handle MERGE_INCONSISTENT case where engine emits completed with error — engine fix needed
       updateStep(phase, "completed");
     } else if (status === "failed") {
       phaseState[phase] = "failed";

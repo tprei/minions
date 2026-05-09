@@ -178,7 +178,7 @@ export function createPrTab({ task, workflow, deps = {} }) {
     footer.innerHTML = "";
 
     const mergeableValue = prDetail.mergeable_state ?? prDetail.mergeable ?? undefined;
-    const isClean = mergeableValue === "clean";
+    const isClean = mergeableValue === "clean" || mergeableValue === "unstable";
 
     const landBtn = document.createElement("button");
     landBtn.className = "pr-tab-land-btn";
@@ -190,6 +190,11 @@ export function createPrTab({ task, workflow, deps = {} }) {
       helper.className = "pr-tab-land-helper";
       helper.textContent = `Not mergeable: ${mergeableValue ?? "unknown"}`;
       footer.appendChild(helper);
+    } else if (mergeableValue === "unstable") {
+      const caveat = document.createElement("span");
+      caveat.className = "pr-tab-land-caveat";
+      caveat.textContent = "Some optional checks are failing — engine will still merge.";
+      footer.appendChild(caveat);
     }
 
     landBtn.addEventListener("click", () => {
