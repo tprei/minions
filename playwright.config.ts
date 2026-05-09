@@ -13,7 +13,7 @@ export default defineConfig({
     toHaveScreenshot: { maxDiffPixelRatio: 0.02 },
   },
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: process.env.PW_BASE_URL ?? "http://localhost:3000",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
@@ -22,7 +22,7 @@ export default defineConfig({
   webServer: {
     command:
       "MWF_DB_PATH=./.e2e-db.sqlite MWF_PWA_DIR=pwa MWF_AUTOMATION_SCAN_MS=0 npm start",
-    url: "http://localhost:3000",
+    url: process.env.PW_BASE_URL ?? "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

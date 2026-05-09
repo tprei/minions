@@ -98,7 +98,7 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
     mode: "idle",
     taskId,
     workflowId,
-    onSubmit(val, mode) {
+    onSubmit(val, mode, attachments) {
       if (!currentStatus) return;
       let kind;
       if (mode === "feedback") {
@@ -106,10 +106,12 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
       } else {
         kind = "continue-task";
       }
+      const body = { kind, workflowId, taskId, prompt: val };
+      if (attachments && attachments.length > 0) body.attachments = attachments;
       fetch("/commands", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, workflowId, taskId, prompt: val }),
+        body: JSON.stringify(body),
       }).catch(() => {});
     },
   });
@@ -300,7 +302,13 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
           workflow,
           deps: {
             createChecksPanel,
-            createDiffViewer,
+            createDiffViewer: (opts) => {
+              const viewer = createDiffViewer(opts);
+              viewer.onSend((comments) => {
+                composer.setAttachments(comments);
+              });
+              return viewer;
+            },
             createMergeProgress: (tId) => {
               if (currentMergeProgress) currentMergeProgress.destroy();
               currentMergeProgress = createMergeProgress(tId, eventBus);
@@ -381,13 +389,17 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
     continueBtn.addEventListener("click", () => {
       const val = composer.getValue().trim();
       if (!val) return;
+      const attachments = composer.getAttachments?.();
+      const body = { kind: "continue-task", workflowId, taskId, prompt: val };
+      if (attachments && attachments.length > 0) body.attachments = attachments;
       fetch("/commands", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: "continue-task", workflowId, taskId, prompt: val }),
+        body: JSON.stringify(body),
       }).then((res) => {
         if (res.ok) {
           composer.setValue("");
+          composer.setAttachments([]);
         }
       }).catch(() => {});
     });
