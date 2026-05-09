@@ -1,5 +1,6 @@
 import { createComposer } from "../components/composer.js";
 import { createTranscriptPipeline } from "../transcript/pipeline.js";
+import { createDraftPrPanel } from "./draft-pr-panel.js";
 
 const PHASE_MAP = {
   "pending":         "input",
@@ -75,6 +76,8 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
   let currentPhase = null;
   let currentStatus = null;
   let summaryPrLink = null;
+  let draftPrPanel = null;
+  let currentArtifacts = [];
 
   const composer = createComposer({
     mode: "idle",
@@ -219,8 +222,13 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
       }).catch(() => {});
     });
 
+    const draftPrSlot = document.createElement("div");
+    draftPrSlot.className = "phase-diff-draft-pr-slot";
+
     el.appendChild(placeholder);
     el.appendChild(landBtn);
+    el.appendChild(draftPrSlot);
+    el.__draftPrSlot = draftPrSlot;
     return el;
   }
 
@@ -378,6 +386,7 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
 
     if (phase === currentPhase) {
       updatePhaseInternals(phase, status);
+      syncDraftPrPanel();
       return;
     }
 
@@ -394,6 +403,8 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
     if (phases[phase]) {
       phases[phase].style.display = "";
     }
+
+    syncDraftPrPanel();
   }
 
   function updatePhaseInternals(phase, status) {
@@ -416,10 +427,29 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
   }
 
   function setArtifacts(artifacts) {
-    if (!summaryPrLink) return;
-    const prArtifact = [...artifacts].reverse().find((a) => a.kind === "pr");
-    if (prArtifact?.ref) {
-      summaryPrLink.href = prArtifact.ref;
+    currentArtifacts = artifacts;
+    if (summaryPrLink) {
+      const prArtifact = [...artifacts].reverse().find((a) => a.kind === "pr");
+      if (prArtifact?.ref) {
+        summaryPrLink.href = prArtifact.ref;
+      }
+    }
+    syncDraftPrPanel();
+  }
+
+  function syncDraftPrPanel() {
+    const slot = phases.diff?.__draftPrSlot;
+    if (!slot) return;
+
+    const hasPr = currentArtifacts.some((a) => a.kind === "pr");
+    const showPanel = currentStatus === "finalizing" && !hasPr;
+
+    if (showPanel && !draftPrPanel) {
+      draftPrPanel = createDraftPrPanel({ workflowId, taskId, onDraft: null });
+      slot.appendChild(draftPrPanel.element);
+    } else if (!showPanel && draftPrPanel) {
+      draftPrPanel.destroy();
+      draftPrPanel = null;
     }
   }
 
