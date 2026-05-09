@@ -30,6 +30,21 @@ export function createComposer({ mode: initialMode, taskId, workflowId, onSubmit
     for (const h of inputHandlers) h(textarea.value);
   });
 
+  const attachmentPill = document.createElement("div");
+  attachmentPill.className = "composer-attachment-pill";
+  attachmentPill.dataset.testid = "composer-attachment-pill";
+  attachmentPill.style.display = "none";
+
+  const pillLabel = document.createElement("span");
+  pillLabel.className = "composer-attachment-pill-label";
+  attachmentPill.appendChild(pillLabel);
+
+  const pillList = document.createElement("ul");
+  pillList.className = "composer-attachment-list";
+  pillList.style.display = "none";
+  pillList.dataset.testid = "composer-attachment-list";
+  attachmentPill.appendChild(pillList);
+
   const footer = document.createElement("div");
   footer.className = "composer-footer";
 
@@ -50,10 +65,45 @@ export function createComposer({ mode: initialMode, taskId, workflowId, onSubmit
 
   footer.appendChild(hintWrap);
   footer.appendChild(btn);
+  root.appendChild(attachmentPill);
   root.appendChild(textarea);
   root.appendChild(footer);
 
   let currentMode = initialMode ?? "idle";
+  let queuedAttachments = [];
+  const commentJumpListeners = new Set();
+
+  let pillExpanded = false;
+
+  pillLabel.addEventListener("click", () => {
+    pillExpanded = !pillExpanded;
+    pillList.style.display = pillExpanded ? "" : "none";
+  });
+
+  function renderAttachmentPill() {
+    if (queuedAttachments.length === 0) {
+      attachmentPill.style.display = "none";
+      pillList.innerHTML = "";
+      pillList.style.display = "none";
+      pillExpanded = false;
+      return;
+    }
+
+    pillLabel.textContent = `Queued for AI · ${queuedAttachments.length} comment${queuedAttachments.length === 1 ? "" : "s"}`;
+    attachmentPill.style.display = "";
+
+    pillList.innerHTML = "";
+    for (const att of queuedAttachments) {
+      const li = document.createElement("li");
+      li.className = "composer-attachment-item";
+      li.dataset.testid = "composer-attachment-item";
+      li.textContent = `${att.path}:${att.line} — ${att.body}`;
+      li.addEventListener("click", () => {
+        for (const cb of commentJumpListeners) cb(att);
+      });
+      pillList.appendChild(li);
+    }
+  }
 
   function applyMode(m) {
     currentMode = m;
@@ -94,9 +144,12 @@ export function createComposer({ mode: initialMode, taskId, workflowId, onSubmit
     if (cfg.submitDisabled) return;
     const val = textarea.value.trim();
     if (!val) return;
-    onSubmit?.(val, currentMode);
+    const attachments = queuedAttachments.length > 0 ? [...queuedAttachments] : undefined;
+    onSubmit?.(val, currentMode, attachments);
     draft.clear();
     textarea.value = "";
+    queuedAttachments = [];
+    renderAttachmentPill();
   });
 
   draft.subscribe((v) => {
@@ -115,6 +168,17 @@ export function createComposer({ mode: initialMode, taskId, workflowId, onSubmit
     onInput(handler) {
       inputHandlers.add(handler);
       return () => inputHandlers.delete(handler);
+    },
+    setAttachments(attachments) {
+      queuedAttachments = attachments ? [...attachments] : [];
+      renderAttachmentPill();
+    },
+    getAttachments() {
+      return [...queuedAttachments];
+    },
+    onCommentJump(cb) {
+      commentJumpListeners.add(cb);
+      return () => commentJumpListeners.delete(cb);
     },
   };
 }

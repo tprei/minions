@@ -421,6 +421,45 @@ Phase events arrive as `merge-phase` SSE events with payload `{ taskId, phase, s
 
 `WorkspaceShell` wires `merge-phase` events from `eventBus` into `currentMergeProgress.onMergePhase(ev)`.
 
-### Comments-as-attachments
+### Comments-as-attachments (UI-8.5)
 
-The comment composer is intentionally absent from UI-8. It is gated on **UI-8.5**, which runs after UI-8 is clean. Do not add the composer or attachment bundling in this slice.
+Gates on **E1** (`continue-task` attachments, merged before UI-8.5). Do not implement in UI-8.
+
+#### Diff viewer: comment composer
+
+`createDiffViewer` now exposes two additional methods: `getComments()` and `onSend(cb)`.
+
+After a multi-line drag selection, a floating "Add comment" button appears at the anchor line (end of the selection). Clicking it shows an inline form with a textarea, **Save**, and **Cancel**. On save:
+
+- For single-line selections: `body` is the raw comment text.
+- For multi-line selections: `body` is prefixed with `"Lines ${start}-${end}: "`.
+- The comment is stored internally with `{ kind: "comment", path, line: start, body }` matching E1's schema exactly. No extra fields.
+
+Each saved comment renders a `💬` chip (`.diff-comment-chip`) on its anchor line. Clicking the chip opens an edit form with **Save**, **Delete**, and **Cancel**.
+
+When at least one comment exists, a footer button `"Send to agent (N)"` (`.diff-send-btn`) appears. Clicking it fires all `onSend` listeners with `DiffComment[]`.
+
+The mousedown handler guards against re-triggering the drag selection logic when the click target is a `diff-add-comment-btn`, `diff-comment-chip`, or `diff-comment-form` element — this prevents the "Add comment" button click from interfering with range state.
+
+#### Composer: attachment pill
+
+`createComposer` gains three new methods:
+
+- `setAttachments(attachments)` — queues `CommentAttachment[]`; shows a `.composer-attachment-pill` above the textarea with label `"Queued for AI · N comment(s)"`.
+- `getAttachments()` — returns current queued attachments (used by workspace-shell's operator phase buttons).
+- `onCommentJump(cb)` — registers a callback fired when a user taps an attachment item in the expanded list, to navigate the diff viewer to that range.
+
+The pill label is clickable — it toggles a `.composer-attachment-list` showing one item per attachment (`path:line — body`). Tapping an item triggers `onCommentJump` listeners.
+
+On submit, `onSubmit(value, mode, attachments)` receives the queued attachments as the third argument. The composer clears both `textarea` and `queuedAttachments` on submit.
+
+#### Workspace shell wiring
+
+In `buildPhaseDiff`, `createDiffViewer` is wrapped to hook `viewer.onSend → composer.setAttachments`. The `continueBtn` in the operator phase reads `composer.getAttachments()` before sending and appends `attachments` to the `continue-task` POST body only when non-empty:
+
+```js
+const body = { kind: "continue-task", workflowId, taskId, prompt: val };
+if (attachments && attachments.length > 0) body.attachments = attachments;
+```
+
+E1's validator rejects any attachment field not in `{kind, path, line, body}` and enforces `kind === "comment"`, `path: string`, `line: number`, `body: string`.
