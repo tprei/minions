@@ -1,4 +1,4 @@
-const CACHE_VERSION = "v2-2026-05-08";
+const CACHE_VERSION = "v2-2026-05-09";
 const MANIFEST_CACHE = `manifest-${CACHE_VERSION}`;
 
 const MANIFEST_PRECACHE = ["/manifest.json", "/icons/icon-192.png", "/icons/icon-512.png"];

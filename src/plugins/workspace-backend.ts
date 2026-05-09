@@ -41,3 +41,7 @@ export function slugify(s: string): string {
   const hash = createHash("sha256").update(s).digest("hex").slice(0, 6);
   return sanitized.length > 0 ? `${sanitized}-${hash}` : hash;
 }
+
+export function deriveBranch(workflowId: string, taskId: string): string {
+  return `minions/${slugify(workflowId)}_${slugify(taskId)}`;
+}

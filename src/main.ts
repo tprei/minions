@@ -47,11 +47,15 @@ async function main(): Promise<void> {
   const vapidPrivate = optional("MWF_VAPID_PRIVATE_KEY");
   const vapidSubject = optional("MWF_VAPID_SUBJECT");
 
+  const automationScanMsRaw = optional("MWF_AUTOMATION_SCAN_MS");
+  const automationScanIntervalMs = automationScanMsRaw !== undefined ? Number(automationScanMsRaw) : undefined;
+
   const config: EngineConfig = {
     dbPath,
     providerFactory,
     qualityPlugin: new ExecQualityPlugin(runner),
     logLevel: parseLevel(process.env["MWF_LOG_LEVEL"]),
+    ...(automationScanIntervalMs !== undefined ? { automationScanIntervalMs } : {}),
   };
 
   if (repoPath !== undefined) config.repoPath = repoPath;

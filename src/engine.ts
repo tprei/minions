@@ -5,6 +5,7 @@ import type { BootRecoveryReport, BootRespawnContext } from "./application/boot.
 import type { SCMPlugin } from "./plugins/scm-plugin.js";
 import type { PollCadence } from "./application/ci-babysitter-service.js";
 import { applyCommand } from "./application/commands.js";
+import { AutomationRunner } from "./application/automation-runner.js";
 import { ContinueTaskService } from "./application/continue-task-service.js";
 import { RetryTaskService } from "./application/retry-task-service.js";
 import { ApprovePermissionService } from "./application/approve-permission-service.js";
@@ -82,6 +83,8 @@ export interface EngineConfig {
   ciBabysitterCadence?: PollCadence;
   supervisor?: SupervisorWithRepos;
   scanIntervalMs?: number;
+  automationScanIntervalMs?: number;
+  automationDisabled?: boolean;
 }
 
 function resolveVapid(config: EngineConfig): VapidConfig | undefined {
@@ -165,6 +168,9 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   const vapid = vapidEarly;
   const repo = repoEarly;
   const recoveryService = createRecoveryService(repo, executor, runtime, now, log.child({ component: "recovery" }));
+
+  let automationRunner: AutomationRunner | undefined;
+  let automationRunnerAbort: AbortController | undefined;
 
   type ActiveOrchestratorEntry = { controller: AbortController; promise: Promise<void> };
   const activeOrchestrators = new Set<ActiveOrchestratorEntry>();
@@ -308,6 +314,37 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       repo,
       activeProviders,
     });
+
+    if (config.automationDisabled !== true) {
+      automationRunnerAbort = new AbortController();
+      automationRunner = new AutomationRunner({
+        repo,
+        applyCommand: (cmd) => applyCommand(repo, cmd),
+        providerFactory: config.providerFactory,
+        runtime,
+        workspace,
+        spawnOrchestrator: spawnTracked,
+        publish: (workflowId, taskId, runId, providerEvent) => {
+          const envelope: WorkflowEvent = {
+            cursor: 0,
+            workflowId,
+            occurredAt: now(),
+            kind: "provider-event",
+            payload: { taskId, runId, providerEvent },
+          };
+          repo.publishTransient(workflowId, envelope);
+        },
+        now,
+        signal: automationRunnerAbort.signal,
+        log: log.child({ component: "automation-runner" }),
+        recoveryService,
+        staleReadyMs,
+        staleGateMs,
+        ...(config.automationScanIntervalMs !== undefined ? { scanIntervalMs: config.automationScanIntervalMs } : {}),
+      });
+      serverDeps.automationRunner = automationRunner;
+      automationRunner.start();
+    }
   }
 
   let ciBabysitterAbort: AbortController | undefined;
@@ -439,6 +476,8 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     repo,
     async close() {
       log.info("engine shutdown", { kind: "engine-lifecycle", phase: "shutdown" });
+      automationRunnerAbort?.abort();
+      if (automationRunner) await automationRunner.stop();
       pushAbort?.abort();
       ciBabysitterAbort?.abort();
       qualityAbort?.abort();

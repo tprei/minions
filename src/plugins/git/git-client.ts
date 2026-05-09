@@ -40,19 +40,24 @@ export class GitClient {
     opts?: { env?: Record<string, string> },
   ): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
-      const [spawnBin, spawnArgs] =
-        this.commandPrefix.length > 0
-          ? [
-              this.commandPrefix[0]!,
-              [...this.commandPrefix.slice(1), this.bin, ...args],
-            ]
-          : [this.bin, [...args]];
+      const useDocker = this.commandPrefix.length > 0;
+      const gitArgs = useDocker ? ["-C", cwd, ...args] : [...args];
+      const [spawnBin, spawnArgs] = useDocker
+        ? [
+            this.commandPrefix[0]!,
+            [...this.commandPrefix.slice(1), this.bin, ...gitArgs],
+          ]
+        : [this.bin, gitArgs];
 
       const spawnEnv = opts?.env !== undefined
         ? { ...process.env, ...opts.env }
         : undefined;
 
-      const proc = spawn(spawnBin, spawnArgs, { cwd, ...(spawnEnv !== undefined ? { env: spawnEnv } : {}) });
+      const spawnOptions: { cwd?: string; env?: NodeJS.ProcessEnv } = {};
+      if (!useDocker) spawnOptions.cwd = cwd;
+      if (spawnEnv !== undefined) spawnOptions.env = spawnEnv;
+
+      const proc = spawn(spawnBin, spawnArgs, spawnOptions);
       const stdoutChunks: Buffer[] = [];
       const stderrChunks: Buffer[] = [];
 

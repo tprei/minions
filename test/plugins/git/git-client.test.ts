@@ -128,8 +128,8 @@ describe("GitClient", () => {
 
       expect(spawnMock).toHaveBeenCalledWith(
         "docker",
-        ["exec", "worker", "git", "worktree", "prune"],
-        { cwd: "/repo" },
+        ["exec", "worker", "git", "-C", "/repo", "worktree", "prune"],
+        {},
       );
     });
   });
@@ -164,8 +164,9 @@ describe("GitClient", () => {
 
       const call = spawnMock.mock.calls[0] as [string, string[], { cwd: string; env: Record<string, string> }];
       expect(call[0]).toBe("docker");
-      expect(call[1]).toEqual(["exec", "worker", "git", "push", "origin", "main"]);
+      expect(call[1]).toEqual(["exec", "worker", "git", "-C", "/repo", "push", "origin", "main"]);
       expect(call[2].env["GIT_ASKPASS"]).toBe("/scripts/askpass.sh");
+      expect(call[2].cwd).toBeUndefined();
     });
   });
 
