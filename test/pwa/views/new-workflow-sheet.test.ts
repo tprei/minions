@@ -97,7 +97,7 @@ describe("buildPostBody", () => {
       tasks,
     });
 
-    expect(body.kind).toBe("multi-task");
+    expect(body.kind).toBe("manual-dag");
     expect(body.tasks).toHaveLength(2);
     const mt0 = body.tasks[0];
     const mt1 = body.tasks[1];
@@ -297,7 +297,7 @@ describe("createNewWorkflowSheet", () => {
     await new Promise((r) => setTimeout(r, 0));
 
     const body = capturedBody as Record<string, unknown>;
-    expect(body.kind).toBe("multi-task");
+    expect(body.kind).toBe("manual-dag");
     const tasks = body.tasks as Array<{ id: string; prompt: string; dependsOn?: string[] }>;
     expect(tasks).toHaveLength(2);
     const t0 = tasks[0];

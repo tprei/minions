@@ -203,7 +203,7 @@ test.describe("UI-6: FAB + new-workflow sheet", () => {
     await page.waitForFunction(() => window.location.hash === "#/workflow/wf-multi", { timeout: 5_000 });
 
     expect(capturedBody).not.toBeNull();
-    expect(capturedBody!.kind).toBe("multi-task");
+    expect(capturedBody!.kind).toBe("manual-dag");
     const tasks = capturedBody!.tasks as Array<{ id: string; prompt: string; dependsOn?: string[] }>;
     expect(tasks).toHaveLength(2);
     const mt0 = tasks[0];

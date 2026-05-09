@@ -9,7 +9,7 @@ function buildPostBody({ title, prompt, kind, policy, tasks }) {
 
   const body = {
     id: workflowId,
-    kind,
+    kind: kind === 'multi-task' ? 'manual-dag' : kind,
     tasks: [],
   };
 
