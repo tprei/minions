@@ -369,3 +369,58 @@ Per finding 18, the live indicator is now silent when healthy:
 - `streamStatus === "reconnecting"` or `"closed"` → indicator is shown with the appropriate label.
 
 The `data-stream-status` attribute is still set on every transition for test selectors.
+
+## PR tab + merge phase stepper (UI-8)
+
+### When the PR tab renders
+
+`WorkspaceShell` mounts the PR tab inside the `diff` phase container when the active task has a `pr` artifact. Without a `pr` artifact, the original placeholder is shown. The PR tab is created by `createPrTab({ task, workflow, deps })` in `pwa/assets/views/pr-tab.js`.
+
+### PR detail fetch
+
+`createPrTab` lazy-fetches PR metadata via the engine CORS proxy at `GET /github/pr-detail?url=<encoded-api-url>`. It reuses the same `toApiUrl` helper from `pr.js` to normalize GitHub HTML URLs (`https://github.com/…/pull/N`) to API form (`https://api.github.com/repos/…/pulls/N`). Results are cached for 30 seconds by API URL. Call `refresh()` to bust the cache and re-fetch.
+
+### Checks panel
+
+`createChecksPanel({ prDetail, githubProxy })` in `pwa/assets/views/checks-panel.js` renders per-check rows with status dots (success / failure / pending / skipped), check name, duration, and "View logs" link.
+
+Adaptive polling rules:
+- Start: 30-second poll interval.
+- If a poll finds no change in check fingerprints: slow to 120 seconds.
+- If any check changes: reset to 30 seconds.
+- When `document.hidden` is `true`, the interval callback skips the fetch (no extra logic needed — the guard is inside the callback).
+- On `visibilitychange` to visible: calls `fetchAndUpdate()` immediately then reschedules.
+- `destroy()` calls `clearInterval` and removes the `visibilitychange` listener.
+
+### Diff viewer
+
+`createDiffViewer({ prDetail, files })` in `pwa/assets/views/diff-viewer.js` renders a lazy file tree (left) and diff pane (right).
+
+Layout: uses `matchMedia('(min-width: 768px)')`. At ≥768 px the root element gets `diff-viewer-side-by-side`; below it gets `diff-viewer-unified`. The listener is cleaned up in `destroy()`.
+
+Line-range selection: per-line `mousedown` / `mouseover` handlers update `selectedRange: { start, end }`. Expose it via `getSelectedRange()`. The comment composer is **not** wired in this slice — that is gated on UI-8.5.
+
+Rendering uses a plain `<pre>` with `<span class="diff-line">` elements. Lines starting with `+` (not `+++`) get `diff-add`; lines starting with `-` (not `---`) get `diff-del`. No syntax highlighter.
+
+### Land CTA
+
+The `pr-tab-footer` renders a `<button class="pr-tab-land-btn">`. Gating rule:
+
+- `mergeable_state === "clean"` → enabled.
+- Any other value or `undefined` → disabled. A `<span class="pr-tab-land-helper">` shows the actual value so users understand why.
+
+On click: `POST /workflows/:id/tasks/:taskId/merge` with an empty JSON body. On success: `createMergeProgress(taskId)` mounts a phase stepper above the diff body.
+
+### Merge phase stepper
+
+`createMergeProgress(taskId, eventBus)` in `pwa/assets/views/merge-progress.js` renders a `.merge-progress` container with 6 `.merge-step` elements, one per phase in order: `prepareMerge → commit → squash → rebase → applyMerge → finalize`.
+
+Each step has a `data-phase` attribute and class `merge-step-<state>` where state is `idle | running | completed | failed`.
+
+Phase events arrive as `merge-phase` SSE events with payload `{ taskId, phase, status: "started" | "completed", error? }`. The engine emits `"started"` and `"completed"` (not `"running"` or `"failed"`) — the UI maps `started → running` and `completed → completed`. If an `error` field is present on a `completed` event, it treats the step as `failed`.
+
+`WorkspaceShell` wires `merge-phase` events from `eventBus` into `currentMergeProgress.onMergePhase(ev)`.
+
+### Comments-as-attachments
+
+The comment composer is intentionally absent from UI-8. It is gated on **UI-8.5**, which runs after UI-8 is clean. Do not add the composer or attachment bundling in this slice.

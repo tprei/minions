@@ -253,7 +253,7 @@ function openStream(id) {
             state.currentWorkflow = wf;
             const updatedTask = wf.graph[payload.taskId];
             if (currentShell && currentShellKey === `${wfId}:${payload.taskId}` && updatedTask?.artifacts) {
-              currentShell.setArtifacts(updatedTask.artifacts);
+              currentShell.setArtifacts(updatedTask.artifacts, updatedTask, wf);
             }
             if (currentDagPanel) {
               currentDagPanel.update(wf);
@@ -543,13 +543,13 @@ function mountWorkspaceShell(container) {
     container.appendChild(currentShell.element);
   } else {
     destroyShell();
-    currentShell = createWorkspaceShell({ workflowId: wf.id, taskId, eventBus: null });
+    currentShell = createWorkspaceShell({ workflowId: wf.id, taskId, eventBus: null, task, workflow: wf });
     currentShellKey = key;
     container.appendChild(currentShell.element);
   }
 
   currentShell.setExecutionStatus(status);
-  if (task?.artifacts) currentShell.setArtifacts(task.artifacts);
+  if (task?.artifacts) currentShell.setArtifacts(task.artifacts, task, wf);
 
   if (new URLSearchParams(location.search).get("test") === "1") {
     window.__shell = currentShell;

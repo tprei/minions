@@ -1,5 +1,9 @@
 import { createComposer } from "../components/composer.js";
 import { createTranscriptPipeline } from "../transcript/pipeline.js";
+import { createPrTab } from "./pr-tab.js";
+import { createChecksPanel } from "./checks-panel.js";
+import { createDiffViewer } from "./diff-viewer.js";
+import { createMergeProgress } from "./merge-progress.js";
 
 const PHASE_MAP = {
   "pending":         "input",
@@ -57,7 +61,7 @@ function createSpinner(caption) {
   return wrap;
 }
 
-export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
+export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initialTask, workflow: initialWorkflow }) {
   const root = document.createElement("div");
   root.className = "workspace-shell";
 
@@ -75,6 +79,10 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
   let currentPhase = null;
   let currentStatus = null;
   let summaryPrLink = null;
+  let currentPrTab = null;
+  let currentMergeProgress = null;
+  let currentTask = initialTask ?? null;
+  let currentWorkflow = initialWorkflow ?? null;
 
   const composer = createComposer({
     mode: "idle",
@@ -207,20 +215,41 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
     placeholder.className = "phase-diff-placeholder";
     placeholder.textContent = "Diff";
 
-    const landBtn = document.createElement("button");
-    landBtn.className = "phase-diff-land-btn";
-    landBtn.textContent = "Land";
-    landBtn.addEventListener("click", () => {
-      if (!currentStatus) return;
-      fetch(`/workflows/${workflowId}/tasks/${taskId}/merge`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      }).catch(() => {});
-    });
-
     el.appendChild(placeholder);
-    el.appendChild(landBtn);
+
+    el.__mountPrTab = function(task, workflow) {
+      if (currentPrTab) {
+        currentPrTab.destroy();
+        currentPrTab = null;
+      }
+      if (currentMergeProgress) {
+        currentMergeProgress.destroy();
+        currentMergeProgress = null;
+      }
+
+      const hasPr = task?.artifacts && [...task.artifacts].some((a) => a.kind === "pr");
+
+      if (hasPr) {
+        placeholder.style.display = "none";
+        currentPrTab = createPrTab({
+          task,
+          workflow,
+          deps: {
+            createChecksPanel,
+            createDiffViewer,
+            createMergeProgress: (tId) => {
+              if (currentMergeProgress) currentMergeProgress.destroy();
+              currentMergeProgress = createMergeProgress(tId, eventBus);
+              return currentMergeProgress;
+            },
+          },
+        });
+        el.appendChild(currentPrTab.element);
+      } else {
+        placeholder.style.display = "";
+      }
+    };
+
     return el;
   }
 
@@ -377,7 +406,7 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
     const phase = derivePhase(status);
 
     if (phase === currentPhase) {
-      updatePhaseInternals(phase, status);
+      updatePhaseInternals(phase, status, currentTask, currentWorkflow);
       return;
     }
 
@@ -387,7 +416,7 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
 
     currentPhase = phase;
 
-    updatePhaseInternals(phase, status);
+    updatePhaseInternals(phase, status, currentTask, currentWorkflow);
     placeTranscriptScroller(phase);
     placeComposer(phase);
 
@@ -396,7 +425,7 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
     }
   }
 
-  function updatePhaseInternals(phase, status) {
+  function updatePhaseInternals(phase, status, task, workflow) {
     composer.setMode(deriveComposerMode(status));
 
     if (phase === "progress") {
@@ -408,6 +437,10 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
     if (phase === "input" && typeof phases.input.__updateInputPhase === "function") {
       phases.input.__updateInputPhase(status);
     }
+
+    if (phase === "diff" && typeof phases.diff.__mountPrTab === "function") {
+      phases.diff.__mountPrTab(task ?? null, workflow ?? null);
+    }
   }
 
   function appendTranscriptEvent(payload) {
@@ -415,11 +448,19 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
     transcriptPipeline.appendEvent(providerEvent);
   }
 
-  function setArtifacts(artifacts) {
-    if (!summaryPrLink) return;
-    const prArtifact = [...artifacts].reverse().find((a) => a.kind === "pr");
-    if (prArtifact?.ref) {
-      summaryPrLink.href = prArtifact.ref;
+  function setArtifacts(artifacts, task, workflow) {
+    if (task !== undefined) currentTask = task;
+    if (workflow !== undefined) currentWorkflow = workflow;
+
+    if (summaryPrLink) {
+      const prArtifact = [...artifacts].reverse().find((a) => a.kind === "pr");
+      if (prArtifact?.ref) {
+        summaryPrLink.href = prArtifact.ref;
+      }
+    }
+
+    if (currentPhase === "diff" && typeof phases.diff.__mountPrTab === "function") {
+      phases.diff.__mountPrTab(currentTask, currentWorkflow);
     }
   }
 
@@ -438,11 +479,17 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
         appendTranscriptEvent(ev.payload);
       }
     });
+    const off3 = eventBus.on?.("merge-phase", (ev) => {
+      if (ev.payload?.taskId === taskId && currentMergeProgress) {
+        currentMergeProgress.onMergePhase(ev);
+      }
+    });
 
     const origDestroy = destroy;
     destroy = function () {
       off1?.();
       off2?.();
+      off3?.();
       origDestroy();
     };
   }
