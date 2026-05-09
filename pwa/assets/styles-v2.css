@@ -1914,3 +1914,154 @@ main {
   font-style: italic;
   padding: 0 2px;
 }
+/* ── Draft-PR panel ── */
+
+@keyframes draft-pr-shimmer {
+  0%   { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.draft-pr-panel {
+  background: hsl(var(--bg-elevated));
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.draft-pr-idle,
+.draft-pr-loading,
+.draft-pr-loaded,
+.draft-pr-error {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.draft-pr-loading-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.draft-pr-spinner {
+  width: 1em;
+  height: 1em;
+  border: 2px solid hsl(var(--border));
+  border-top-color: hsl(var(--accent));
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.draft-pr-skeleton-title,
+.draft-pr-skeleton-body {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--bg-elevated)) 0%,
+    hsl(var(--border)) 50%,
+    hsl(var(--bg-elevated)) 100%
+  );
+  background-size: 200px 100%;
+  animation: draft-pr-shimmer 1.4s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+.draft-pr-skeleton-title { min-height: 1.5em; }
+.draft-pr-skeleton-body  { min-height: 6em; }
+
+.draft-pr-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: hsl(var(--fg-muted));
+}
+
+.draft-pr-title-input,
+.draft-pr-body-textarea {
+  width: 100%;
+  background: hsl(var(--bg));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  color: hsl(var(--fg));
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 8px 10px;
+  resize: vertical;
+  transition: border-color 120ms;
+}
+
+.draft-pr-title-input:focus,
+.draft-pr-body-textarea:focus {
+  outline: none;
+  border-color: hsl(var(--accent));
+}
+
+.draft-pr-loaded-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.draft-pr-error {
+  border: 1px solid hsl(var(--tone-err));
+  background: hsl(var(--tone-err-bg) / 0.1);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.draft-pr-error-msg {
+  font-size: 12px;
+  color: hsl(var(--tone-err));
+}
+
+/* Buttons — primary (auto-draft) */
+.draft-pr-auto-btn {
+  padding: 8px 14px;
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-fg));
+  border: none;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 120ms;
+}
+
+.draft-pr-auto-btn:hover { filter: brightness(1.1); }
+
+/* Buttons — ghost (cancel, copy-title, copy-body, re-draft, retry) */
+.draft-pr-cancel-btn,
+.draft-pr-copy-title-btn,
+.draft-pr-copy-body-btn,
+.draft-pr-redraft-btn,
+.draft-pr-retry-btn {
+  padding: 6px 12px;
+  background: transparent;
+  color: hsl(var(--fg-muted));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 120ms, color 120ms;
+}
+
+.draft-pr-cancel-btn:hover,
+.draft-pr-copy-title-btn:hover,
+.draft-pr-copy-body-btn:hover,
+.draft-pr-redraft-btn:hover {
+  border-color: hsl(var(--accent));
+  color: hsl(var(--accent));
+}
+
+.draft-pr-retry-btn:hover {
+  border-color: hsl(var(--tone-err));
+  color: hsl(var(--tone-err));
+}

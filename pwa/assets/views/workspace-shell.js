@@ -4,6 +4,7 @@ import { createPrTab } from "./pr-tab.js";
 import { createChecksPanel } from "./checks-panel.js";
 import { createDiffViewer } from "./diff-viewer.js";
 import { createMergeProgress } from "./merge-progress.js";
+import { createDraftPrPanel } from "./draft-pr-panel.js";
 import { createCompletionStepper } from "../components/completion-stepper.js";
 import { createCostBadge } from "../components/cost-badge.js";
 import { agentColor } from "../utils/agent-color.js";
@@ -90,6 +91,8 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
   let completionStepper = null;
   let costBadge = null;
   let hasPendingApproval = false;
+  let draftPrPanel = null;
+  let currentArtifacts = [];
 
   const composer = createComposer({
     mode: "idle",
@@ -273,6 +276,11 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
 
     el.appendChild(placeholder);
 
+    const draftPrSlot = document.createElement("div");
+    draftPrSlot.className = "phase-diff-draft-pr-slot";
+    el.appendChild(draftPrSlot);
+    el.__draftPrSlot = draftPrSlot;
+
     el.__mountPrTab = function(task, workflow) {
       if (currentPrTab) {
         currentPrTab.destroy();
@@ -305,7 +313,6 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
         placeholder.style.display = "";
       }
     };
-
     return el;
   }
 
@@ -466,6 +473,7 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
 
     if (phase === currentPhase) {
       updatePhaseInternals(phase, status, currentTask, currentWorkflow);
+      syncDraftPrPanel();
       return;
     }
 
@@ -482,6 +490,8 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
     if (phases[phase]) {
       phases[phase].style.display = "";
     }
+
+    syncDraftPrPanel();
   }
 
   function updatePhaseInternals(phase, status, task, workflow) {
@@ -523,6 +533,8 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
     }
     if (workflow !== undefined) currentWorkflow = workflow;
 
+    currentArtifacts = artifacts;
+
     if (summaryPrLink) {
       const prArtifact = [...artifacts].reverse().find((a) => a.kind === "pr");
       if (prArtifact?.ref) {
@@ -532,6 +544,24 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
 
     if (currentPhase === "diff" && typeof phases.diff.__mountPrTab === "function") {
       phases.diff.__mountPrTab(currentTask, currentWorkflow);
+    }
+
+    syncDraftPrPanel();
+  }
+
+  function syncDraftPrPanel() {
+    const slot = phases.diff?.__draftPrSlot;
+    if (!slot) return;
+
+    const hasPr = currentArtifacts.some((a) => a.kind === "pr");
+    const showPanel = currentStatus === "finalizing" && !hasPr;
+
+    if (showPanel && !draftPrPanel) {
+      draftPrPanel = createDraftPrPanel({ workflowId, taskId });
+      slot.appendChild(draftPrPanel.element);
+    } else if (!showPanel && draftPrPanel) {
+      draftPrPanel.destroy();
+      draftPrPanel = null;
     }
   }
 

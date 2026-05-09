@@ -558,3 +558,42 @@ createTranscriptPipeline(scrollerEl, { workflowId, taskId })
 The context is passed to each renderer call so approval cards can POST to the correct IDs without a separate mechanism.
 
 `setOnApprovalChange(fn)` registers a callback that fires whenever the pending approval state changes (new pending event or resolution). `getPendingApproval()` returns the live `HTMLElement` for the pending card (used by the shell to delegate hotkey actions directly to `el.__approve()` / `el.__openDeny()`).
+
+## Auto-draft PR (UI-6.5)
+
+**Prerequisite:** Engine slice E2 — `POST /workflows/:id/tasks/:taskId/draft-pr` must be configured (`draftPrDeps` wired in `ServerDeps`).
+
+### Surface
+
+The draft panel appears inside the diff phase (`workspace-shell.js`) when:
+- `task.executionStatus === "finalizing"`, AND
+- No `pr` artifact exists on the task yet.
+
+When the engine creates the PR and the task leaves `finalizing`, the panel unmounts automatically.
+
+### Panel factory
+
+`pwa/assets/views/draft-pr-panel.js` exports `createDraftPrPanel({ workflowId, taskId, onDraft }) → { element, fetch(), cancel(), destroy() }`.
+
+States: **Idle** → **Loading** (skeleton + Cancel) → **Loaded** (editable title + body + Copy/Re-draft buttons) or **Error** (message + Retry).
+
+### Error messages by response code
+
+| HTTP status | `code` in body | User-facing message |
+|-------------|---------------|---------------------|
+| 504 | `draft_pr_timeout` | "Request timed out — the provider took more than 30s. Try again." |
+| 503 | `internal_error` | "Auto-draft is not configured on this engine." |
+| 422 | `invalid_transition` | "This task has no branch yet — draft unavailable." |
+| 500 | `draft_pr_parse_error` | "The provider returned an unparseable response. Try again." |
+
+The error UI matches on **both** HTTP status and `body.code` — whichever is present — so the distinction survives proxies that remap status codes.
+
+### Cancellation
+
+The panel uses `AbortController`. Clicking **Cancel** mid-flight aborts the network request; the panel returns to Idle immediately without an error flash.
+
+### Tests
+
+Unit tests: `test/pwa/views/draft-pr-panel.test.ts` — covers Idle → Loading → Loaded, Cancel abort, all 4 error states, Re-draft re-fetch, and `onDraft` callback.
+
+E2E tests: `e2e/ui-6.5.spec.ts` — panel visibility, skeleton/loaded transition, 504 and 422 error display.
