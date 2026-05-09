@@ -538,6 +538,10 @@ function renderHeader(container) {
     hdr.appendChild(right);
   }
 
+  if (!state.currentWorkflow && fab) {
+    hdr.appendChild(fab.element);
+  }
+
   container.appendChild(hdr);
 }
 
@@ -640,10 +644,6 @@ function renderWorkflowList(container) {
     }
 
     container.appendChild(list);
-  }
-
-  if (fab) {
-    container.appendChild(fab.element);
   }
 }
 

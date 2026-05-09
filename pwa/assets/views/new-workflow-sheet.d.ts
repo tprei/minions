@@ -12,9 +12,8 @@ export interface PolicyInput {
 
 export interface PostBody {
   id: string;
-  kind: string;
+  kind: 'single-task' | 'manual-dag';
   tasks: Array<{ id: string; title: string; prompt: string; dependsOn?: string[] }>;
-  title?: string;
   policy?: Partial<PolicyInput>;
 }
 

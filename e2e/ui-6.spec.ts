@@ -35,6 +35,28 @@ test.describe("UI-6: FAB + new-workflow sheet", () => {
     await expect(fab).toBeVisible();
   });
 
+  test("FAB is inside header on desktop", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await setupBaseRoutes(page);
+    await page.goto("/");
+    await page.waitForSelector(".fab", { timeout: 5_000 });
+    const fabBox = await page.locator(".fab").boundingBox();
+    const headerBox = await page.locator("header").boundingBox();
+    expect(fabBox).not.toBeNull();
+    expect(headerBox).not.toBeNull();
+    expect(fabBox!.y).toBeGreaterThanOrEqual(headerBox!.y);
+    expect(fabBox!.y + fabBox!.height).toBeLessThanOrEqual(headerBox!.y + headerBox!.height + 1);
+  });
+
+  test("FAB is position:fixed on mobile", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await setupBaseRoutes(page);
+    await page.goto("/");
+    await page.waitForSelector(".fab", { timeout: 5_000 });
+    const position = await page.locator(".fab").evaluate((el) => getComputedStyle(el).position);
+    expect(position).toBe("fixed");
+  });
+
   test("clicking FAB opens the new-workflow sheet", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await setupBaseRoutes(page);
