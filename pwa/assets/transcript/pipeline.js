@@ -5,6 +5,7 @@ import { render as renderToolResult } from "./events/tool-result.js";
 import { render as renderUsage } from "./events/usage.js";
 import { render as renderError } from "./events/error.js";
 import { render as renderFinal } from "./events/final.js";
+import { render as renderApproval } from "./events/approval.js";
 import { marked } from "/assets/vendor/marked.esm.js";
 import DOMPurify from "/assets/vendor/dompurify.esm.js";
 import { aggregateConsecutive, ClusterGroup } from "./aggregate.js";
@@ -23,6 +24,7 @@ const DISPATCH = {
   usage: renderUsage,
   error: renderError,
   final: renderFinal,
+  permission_request: renderApproval,
 };
 
 function shouldCluster(event) {
@@ -38,9 +40,9 @@ function clusterableSet(events) {
   return kinds;
 }
 
-function renderEvent(event) {
+function renderEvent(event, ctx) {
   const fn = DISPATCH[event.kind];
-  if (fn) return fn(event);
+  if (fn) return fn(event, ctx);
   const el = document.createElement("div");
   el.className = "te te-unknown";
   el.textContent = JSON.stringify(event);
@@ -119,13 +121,15 @@ function renderClusterGroup(group, onToggle) {
 
 const AUTO_SCROLL_THRESHOLD = 64;
 
-export function createTranscriptPipeline(scrollerEl) {
+export function createTranscriptPipeline(scrollerEl, pipelineCtx = {}) {
   const events = [];
   let renderedItems = [];
   let currentAssistantEl = null;
   let streamBuffer = null;
   let autoScrollEnabled = true;
   let jumpBtn = null;
+  let pendingApprovalEl = null;
+  let onApprovalChange = null;
 
   function isNearBottom() {
     const { scrollTop, scrollHeight, clientHeight } = scrollerEl;
@@ -183,9 +187,26 @@ export function createTranscriptPipeline(scrollerEl) {
     return aggregateConsecutive(events, CLUSTER_KINDS, prevGroups);
   }
 
+  function makeEventCtx(event) {
+    const ctx = {
+      workflowId: pipelineCtx.workflowId ?? "",
+      taskId: pipelineCtx.taskId ?? "",
+    };
+    if (event.kind === "permission_request") {
+      ctx.onResolved = (requestId) => {
+        if (pendingApprovalEl && pendingApprovalEl.dataset.requestId === requestId) {
+          pendingApprovalEl = null;
+          if (onApprovalChange) onApprovalChange(null);
+        }
+      };
+    }
+    return ctx;
+  }
+
   function fullRerender() {
     scrollerEl.innerHTML = "";
     currentAssistantEl = null;
+    pendingApprovalEl = null;
     const items = recluster();
     renderedItems = items;
 
@@ -193,10 +214,16 @@ export function createTranscriptPipeline(scrollerEl) {
       if (item instanceof ClusterGroup) {
         scrollerEl.appendChild(renderClusterGroup(item));
       } else {
-        scrollerEl.appendChild(renderEvent(item));
+        const ctx = makeEventCtx(item);
+        const el = renderEvent(item, ctx);
+        scrollerEl.appendChild(el);
+        if (item.kind === "permission_request" && !el.dataset.resolved) {
+          pendingApprovalEl = el;
+        }
       }
     }
 
+    if (onApprovalChange) onApprovalChange(pendingApprovalEl ? events.find((e) => e.kind === "permission_request" && e.id === pendingApprovalEl.dataset.requestId) ?? null : null);
     maybeScroll();
   }
 
@@ -244,8 +271,13 @@ export function createTranscriptPipeline(scrollerEl) {
       items.length === prevCount + 1 &&
       !(items[items.length - 1] instanceof ClusterGroup)
     ) {
-      const newEl = renderEvent(event);
+      const ctx = makeEventCtx(event);
+      const newEl = renderEvent(event, ctx);
       scrollerEl.appendChild(newEl);
+      if (event.kind === "permission_request" && !newEl.dataset.resolved) {
+        pendingApprovalEl = newEl;
+        if (onApprovalChange) onApprovalChange(event);
+      }
       maybeScroll();
       return;
     }
@@ -263,7 +295,7 @@ export function createTranscriptPipeline(scrollerEl) {
         const body = existingEl._body;
         const newEv = lastNew.events[lastNew.events.length - 1];
         const fn = DISPATCH[newEv.kind];
-        if (fn) body.appendChild(fn(newEv));
+        if (fn) body.appendChild(fn(newEv, makeEventCtx(newEv)));
         body.hidden = !lastNew.expanded;
         if (existingEl._updateHeader) existingEl._updateHeader();
         maybeScroll();
@@ -280,11 +312,22 @@ export function createTranscriptPipeline(scrollerEl) {
       streamBuffer = null;
     }
     currentAssistantEl = null;
+    pendingApprovalEl = null;
     events.length = 0;
     renderedItems = [];
     scrollerEl.innerHTML = "";
     if (jumpBtn) jumpBtn.hidden = true;
+    if (onApprovalChange) onApprovalChange(null);
   }
 
-  return { appendEvent, reset };
+  function setOnApprovalChange(fn) {
+    onApprovalChange = fn;
+  }
+
+  function getPendingApproval() {
+    if (!pendingApprovalEl) return null;
+    return pendingApprovalEl;
+  }
+
+  return { appendEvent, reset, setOnApprovalChange, getPendingApproval };
 }

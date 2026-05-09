@@ -27,7 +27,8 @@ function derivePhase(status) {
   return PHASE_MAP[status];
 }
 
-function deriveComposerMode(status) {
+function deriveComposerMode(status, hasPendingApproval) {
+  if (status === "running" && hasPendingApproval) return "approval";
   if (status === "running") return "running";
   if (status === "needs-review") return "feedback";
   if (status === "completed" || status === "quality-pending" || status === "ci-pending" || status === "finalizing" || status === "pr-open") return "disabled";
@@ -62,11 +63,12 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
   root.className = "workspace-shell";
 
   const transcriptScroller = createTranscriptScroller();
-  const transcriptPipeline = createTranscriptPipeline(transcriptScroller);
+  const transcriptPipeline = createTranscriptPipeline(transcriptScroller, { workflowId, taskId });
 
   let currentPhase = null;
   let currentStatus = null;
   let summaryPrLink = null;
+  let hasPendingApproval = false;
 
   const composer = createComposer({
     mode: "idle",
@@ -107,6 +109,22 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
   composer.onInput(() => {
     if (typeof phases.operator.__syncOperatorButtons === "function") {
       phases.operator.__syncOperatorButtons();
+    }
+  });
+
+  transcriptPipeline.setOnApprovalChange((pendingEvent) => {
+    hasPendingApproval = pendingEvent !== null;
+    if (currentStatus) {
+      composer.setMode(deriveComposerMode(currentStatus, hasPendingApproval));
+    }
+    if (hasPendingApproval) {
+      const pendingEl = transcriptPipeline.getPendingApproval();
+      composer.setApprovalHandlers({
+        onApprove() { if (pendingEl && pendingEl.__approve) pendingEl.__approve(); },
+        onDeny() { if (pendingEl && pendingEl.__openDeny) pendingEl.__openDeny(); },
+      });
+    } else {
+      composer.setApprovalHandlers(null);
     }
   });
 
@@ -389,7 +407,7 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
   }
 
   function updatePhaseInternals(phase, status) {
-    composer.setMode(deriveComposerMode(status));
+    composer.setMode(deriveComposerMode(status, hasPendingApproval));
 
     if (phase === "progress") {
       const caption = PROGRESS_CAPTION[status] ?? "Running…";

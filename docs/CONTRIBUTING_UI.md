@@ -226,3 +226,44 @@ The jump button is appended as a sibling of the scroller (inside the scroller-wr
 3. Add the kind to the `DISPATCH` table in `pwa/assets/transcript/pipeline.js`.
 4. Add render tests in `test/pwa/transcript/events.test.ts` (mock the vendor deps with `vi.mock`).
 5. If the new kind should cluster, add it to `CLUSTER_KINDS` and `CLUSTER_TOOL_NAMES` in `pipeline.js`.
+
+## Approval flow (UI-4.5)
+
+Gates on engine prerequisite **E3** (`approve-permission` command).
+
+### How it works
+
+When a `permission_request` provider event arrives in the transcript, the pipeline renders an `ApprovalCard` inline via `pwa/assets/transcript/events/approval.js`. Simultaneously, the pipeline calls its `onApprovalChange` callback, which the `WorkspaceShell` uses to switch the composer into `approval` mode and wire up hotkeys.
+
+### ApprovalCard state machine
+
+Two stages, rendered inline in the transcript:
+
+1. **Default** — shows tool name, input preview, [Approve] and [Deny] buttons.
+2. **Deny-with-reason** — clicking Deny hides the default actions and reveals a `<textarea>` + [Submit Deny] [Back] buttons. Submit is blocked until the textarea is non-empty (mirrors the engine validator: `reason` is required when `decision === "deny"`).
+
+On Approve: POST `/commands` with `{kind: "approve-permission", workflowId, taskId, requestId, decision: "approve"}`.
+
+On Submit Deny: POST with `decision: "deny", reason`. Both paths show server errors inline (no toast). On success, the card displays a success label and becomes inert.
+
+### Composer approval-mode
+
+While the most recent transcript event is a pending `permission_request`, the shell sets composer mode to `approval`. This:
+
+- Shows the hint "Approval mode — A to approve, D to deny".
+- Disables the primary submit button (the inline card is the action surface).
+- Listens for `keydown` on the textarea: when the textarea is empty, pressing **A** calls `onApprove()` (triggers card's Approve flow); pressing **D** calls `onDeny()` (triggers card's deny-form reveal).
+
+When the approval is resolved (approved or denied), `onApprovalChange` fires with `null` and the composer reverts to `running` mode.
+
+### Pipeline context
+
+`createTranscriptPipeline` now accepts a second argument:
+
+```js
+createTranscriptPipeline(scrollerEl, { workflowId, taskId })
+```
+
+The context is passed to each renderer call so approval cards can POST to the correct IDs without a separate mechanism.
+
+`setOnApprovalChange(fn)` registers a callback that fires whenever the pending approval state changes (new pending event or resolution). `getPendingApproval()` returns the live `HTMLElement` for the pending card (used by the shell to delegate hotkey actions directly to `el.__approve()` / `el.__openDeny()`).
