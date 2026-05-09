@@ -129,3 +129,109 @@ describe("createComposer", () => {
     expect(received).toHaveLength(0);
   });
 });
+
+describe("createComposer — approval mode", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    localStorage.clear();
+  });
+
+  it("approval mode shows hint text", () => {
+    const { element } = createComposer({ mode: "approval", taskId: "t1", workflowId: "wf1" });
+    document.body.appendChild(element);
+    const hintPrimary = element.querySelector(".composer-hint-primary") as HTMLElement;
+    expect(hintPrimary.textContent).toContain("Approval mode");
+    expect(hintPrimary.textContent).toContain("A to approve");
+    expect(hintPrimary.textContent).toContain("D to deny");
+  });
+
+  it("approval mode disables submit button", () => {
+    const { element } = createComposer({ mode: "approval", taskId: "t1", workflowId: "wf1" });
+    const btn = element.querySelector(".composer-btn") as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+  });
+
+  it("A key in empty textarea calls onApprove handler", () => {
+    const { element, setMode, setApprovalHandlers } = createComposer({ mode: "idle", taskId: "t1", workflowId: "wf1" });
+    document.body.appendChild(element);
+    setMode("approval");
+
+    const approved: boolean[] = [];
+    setApprovalHandlers({ onApprove: () => approved.push(true), onDeny: () => {} });
+
+    const ta = element.querySelector("textarea") as HTMLTextAreaElement;
+    ta.value = "";
+    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    expect(approved).toHaveLength(1);
+  });
+
+  it("D key in empty textarea calls onDeny handler", () => {
+    const { element, setMode, setApprovalHandlers } = createComposer({ mode: "idle", taskId: "t1", workflowId: "wf1" });
+    document.body.appendChild(element);
+    setMode("approval");
+
+    const denied: boolean[] = [];
+    setApprovalHandlers({ onApprove: () => {}, onDeny: () => denied.push(true) });
+
+    const ta = element.querySelector("textarea") as HTMLTextAreaElement;
+    ta.value = "";
+    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "d", bubbles: true }));
+    expect(denied).toHaveLength(1);
+  });
+
+  it("A key does not fire when textarea has content", () => {
+    const { element, setMode, setApprovalHandlers } = createComposer({ mode: "idle", taskId: "t1", workflowId: "wf1" });
+    document.body.appendChild(element);
+    setMode("approval");
+
+    const approved: boolean[] = [];
+    setApprovalHandlers({ onApprove: () => approved.push(true), onDeny: () => {} });
+
+    const ta = element.querySelector("textarea") as HTMLTextAreaElement;
+    ta.value = "some text";
+    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    expect(approved).toHaveLength(0);
+  });
+
+  it("A key does not fire when mode is not approval", () => {
+    const { element, setApprovalHandlers } = createComposer({ mode: "idle", taskId: "t1", workflowId: "wf1" });
+    document.body.appendChild(element);
+
+    const approved: boolean[] = [];
+    setApprovalHandlers({ onApprove: () => approved.push(true), onDeny: () => {} });
+
+    const ta = element.querySelector("textarea") as HTMLTextAreaElement;
+    ta.value = "";
+    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    expect(approved).toHaveLength(0);
+  });
+
+  it("uppercase A key in empty textarea calls onApprove handler", () => {
+    const { element, setMode, setApprovalHandlers } = createComposer({ mode: "idle", taskId: "t1", workflowId: "wf1" });
+    document.body.appendChild(element);
+    setMode("approval");
+
+    const approved: boolean[] = [];
+    setApprovalHandlers({ onApprove: () => approved.push(true), onDeny: () => {} });
+
+    const ta = element.querySelector("textarea") as HTMLTextAreaElement;
+    ta.value = "";
+    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "A", bubbles: true }));
+    expect(approved).toHaveLength(1);
+  });
+
+  it("setApprovalHandlers(null) clears handlers so A key does nothing", () => {
+    const { element, setMode, setApprovalHandlers } = createComposer({ mode: "idle", taskId: "t1", workflowId: "wf1" });
+    document.body.appendChild(element);
+    setMode("approval");
+
+    const approved: boolean[] = [];
+    setApprovalHandlers({ onApprove: () => approved.push(true), onDeny: () => {} });
+    setApprovalHandlers(null);
+
+    const ta = element.querySelector("textarea") as HTMLTextAreaElement;
+    ta.value = "";
+    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    expect(approved).toHaveLength(0);
+  });
+});

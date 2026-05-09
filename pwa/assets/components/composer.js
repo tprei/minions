@@ -6,10 +6,11 @@ const CLOCK_SVG = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" x
 </svg>`;
 
 const MODE_CONFIG = {
-  idle:     { label: "Send",         icon: null,      hint: null,                                                                                          submitDisabled: false },
-  running:  { label: "Queue",        icon: CLOCK_SVG, hint: "Queued for AI", hintSub: "Awaiting completion before queuing follow-ups.", submitDisabled: true  },
-  feedback: { label: "Submit",       icon: null,      hint: null,                                                                                          submitDisabled: false },
-  disabled: { label: "Send",         icon: null,      hint: null,                                                                                          submitDisabled: true  },
+  idle:     { label: "Send",         icon: null,      hint: null,                                                                                               submitDisabled: false },
+  running:  { label: "Queue",        icon: CLOCK_SVG, hint: "Queued for AI", hintSub: "Awaiting completion before queuing follow-ups.", submitDisabled: true   },
+  feedback: { label: "Submit",       icon: null,      hint: null,                                                                                               submitDisabled: false },
+  disabled: { label: "Send",         icon: null,      hint: null,                                                                                               submitDisabled: true  },
+  approval: { label: "Send",         icon: null,      hint: "Approval mode — A to approve, D to deny",                                                         submitDisabled: true  },
 };
 
 export function createComposer({ mode: initialMode, taskId, workflowId, onSubmit }) {
@@ -24,10 +25,23 @@ export function createComposer({ mode: initialMode, taskId, workflowId, onSubmit
   textarea.value = draft.value;
 
   const inputHandlers = new Set();
+  let approvalHandlers = null;
 
   textarea.addEventListener("input", () => {
     draft.setValue(textarea.value);
     for (const h of inputHandlers) h(textarea.value);
+  });
+
+  textarea.addEventListener("keydown", (e) => {
+    if (currentMode !== "approval") return;
+    if (textarea.value.trim() !== "") return;
+    if (e.key === "a" || e.key === "A") {
+      e.preventDefault();
+      if (approvalHandlers) approvalHandlers.onApprove();
+    } else if (e.key === "d" || e.key === "D") {
+      e.preventDefault();
+      if (approvalHandlers) approvalHandlers.onDeny();
+    }
   });
 
   const footer = document.createElement("div");
@@ -115,6 +129,9 @@ export function createComposer({ mode: initialMode, taskId, workflowId, onSubmit
     onInput(handler) {
       inputHandlers.add(handler);
       return () => inputHandlers.delete(handler);
+    },
+    setApprovalHandlers(handlers) {
+      approvalHandlers = handlers;
     },
   };
 }
