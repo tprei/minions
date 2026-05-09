@@ -323,3 +323,46 @@ The following fields are intentionally absent from this sheet and will be added 
 - Image attachments
 
 Total combinations: 35 × 35 × 1000 = 1,225,000 — well above the 10k floor. The alias is stable for the same id and statistically unique across the typical workflow population (tens to hundreds per operator).
+
+## Activity tab (UI-7)
+
+### Route and layout
+
+The Activity tab mounts at `#/activity`. `app-v1.js` detects the hash prefix in `onRoute()` and calls `renderActivity()`. The rendered view is cached in `activityTabInstance` — it is not re-created on each render cycle. To force a re-initialize, clear that variable.
+
+The activity tab element is a `div.activity-tab` that contains:
+
+1. A segmented control (`div.activity-segmented`) with two buttons: `Audit` and `Alerts`.
+2. A body container (`div.activity-body`) that holds the currently active sub-view.
+
+### Adding a new sub-view
+
+1. Create `pwa/assets/views/my-sub-view.js` exporting `createMySubView(deps) → { element, refresh() }`.
+2. Create a matching `.d.ts` file.
+3. Import it in `activity-tab.js` and add a button to `.activity-segmented`.
+4. In the click handler, call `createMySubView()`, lazily cache the instance, and swap it into `.activity-body`.
+
+### Filter convention
+
+Audit and alert feeds use cursor-based pagination via `beforeTs` query params. Filter state (action, workflowId, time range) is local to the component. Changing a filter calls `reset()` which clears `events`, resets `beforeTs` to `null`, and fires `fetchPage(true)` (full page refresh from cursor start).
+
+Filter chips use class `active` for selected state. The workflow free-text filter uses `input.audit-workflow-filter` and debounces via the `input` event.
+
+### Install-banner lifecycle
+
+`pwa/assets/views/install-banner.js` exports `createInstallBanner({ apiBase? }) → { element }`.
+
+- Returns `{ element: null }` immediately if `localStorage.getItem('install-banner:dismissed')` is set.
+- Returns a live `div.install-banner` element that starts empty.
+- On creation, fetches `GET /push/vapid-public-key`. If the endpoint returns a `publicKey`, populates the banner with a subscribe button and dismiss button. If the endpoint returns an error or `publicKey` is absent/null, removes the element from the DOM.
+- The `app-v1.js` bootstrap holds a reference to the element in `installBannerEl` and re-appends it via `appendInstallBannerIfActive(container)` on every render cycle, guarding against re-injection by checking `localStorage` first.
+- **Dismiss:** sets `install-banner:dismissed` in `localStorage` and calls `banner.remove()`. Any subsequent re-render of `app` will see the localStorage key and skip re-injection.
+
+### Healthy-silent SSE indicator
+
+Per finding 18, the live indicator is now silent when healthy:
+
+- `streamStatus === "connected"` → indicator has `style.display = "none"`.
+- `streamStatus === "reconnecting"` or `"closed"` → indicator is shown with the appropriate label.
+
+The `data-stream-status` attribute is still set on every transition for test selectors.

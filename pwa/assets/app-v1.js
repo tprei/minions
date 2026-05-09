@@ -6,6 +6,9 @@ import { createTasksPill } from "./components/header.js";
 import { cityAlias } from "./utils/city-alias.js";
 import { createFab } from "./components/fab.js";
 import { createNewWorkflowSheet } from "./views/new-workflow-sheet.js";
+import { createBottomTabs } from "./components/bottom-tabs.js";
+import { createActivityTab } from "./views/activity-tab.js";
+import { createInstallBanner } from "./views/install-banner.js";
 
 export const state = {
   workflows: [],
@@ -24,6 +27,9 @@ let currentShellKey = null;
 let currentDagPanel = null;
 let newWorkflowSheet = null;
 let fab = null;
+let bottomTabsNav = null;
+let installBannerEl = null;
+let activityTabInstance = null;
 
 document.addEventListener("DOMContentLoaded", bootstrap);
 
@@ -51,9 +57,44 @@ function bootstrap() {
     },
   });
 
+  mountBottomTabs();
+  mountInstallBanner();
+
   loadList();
   window.addEventListener("hashchange", onRoute);
   onRoute();
+}
+
+function mountBottomTabs() {
+  const app = document.getElementById("app");
+  if (!app) return;
+
+  bottomTabsNav = createBottomTabs(
+    [
+      { id: 'workflows', label: 'Workflows', icon: '⊞', onSelect: () => { window.location.hash = '#/'; } },
+      { id: 'activity', label: 'Activity', icon: '◈', onSelect: () => { window.location.hash = '#/activity'; } },
+    ],
+    'workflows',
+  );
+  app.appendChild(bottomTabsNav);
+}
+
+function updateBottomTabsActive() {
+  if (!bottomTabsNav) return;
+  const hash = window.location.hash;
+  const isActivity = hash.startsWith('#/activity');
+  bottomTabsNav.querySelectorAll('.bottom-tab').forEach((btn) => {
+    const isActive = btn.dataset.id === (isActivity ? 'activity' : 'workflows');
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+}
+
+function mountInstallBanner() {
+  const { element } = createInstallBanner();
+  if (element) {
+    installBannerEl = element;
+  }
 }
 
 function registerSW() {
@@ -68,7 +109,22 @@ function registerSW() {
 let currentRouteTaskId = null;
 
 function onRoute() {
-  const route = parseHash(window.location.hash);
+  updateBottomTabsActive();
+  const hash = window.location.hash;
+
+  if (hash.startsWith('#/activity')) {
+    state.currentId = null;
+    currentRouteTaskId = null;
+    state.currentWorkflow = null;
+    state.transcript = [];
+    destroyShell();
+    destroyDagPanel();
+    closeStream();
+    renderActivity();
+    return;
+  }
+
+  const route = parseHash(hash);
   if (route) {
     state.currentId = route.workflowId;
     currentRouteTaskId = route.taskId;
@@ -83,6 +139,19 @@ function onRoute() {
     closeStream();
     render();
   }
+}
+
+function renderActivity() {
+  const app = document.getElementById("app");
+  if (!app) return;
+  app.innerHTML = "";
+  renderHeader(app);
+  appendInstallBannerIfActive(app);
+  if (!activityTabInstance) {
+    activityTabInstance = createActivityTab();
+  }
+  app.appendChild(activityTabInstance.element);
+  if (bottomTabsNav) app.appendChild(bottomTabsNav);
 }
 
 function destroyShell() {
@@ -233,13 +302,14 @@ function updateLiveIndicator() {
   if (!indicator) return;
   indicator.className = `live-indicator ${state.streamStatus}`;
   indicator.setAttribute("data-stream-status", state.streamStatus);
-  const dot = indicator.querySelector(".live-dot");
   const label = indicator.querySelector(".live-label");
   if (state.streamStatus === "connected") {
-    if (label) label.textContent = "LIVE";
+    indicator.style.display = "none";
   } else if (state.streamStatus === "reconnecting") {
+    indicator.style.display = "";
     if (label) label.textContent = "RECONNECTING";
   } else {
+    indicator.style.display = "";
     if (label) label.textContent = "OFFLINE";
   }
 }
@@ -412,19 +482,34 @@ function enablePushForWorkflow(workflowId) {
     });
 }
 
+function appendInstallBannerIfActive(container) {
+  if (!installBannerEl) return;
+  if (localStorage.getItem('install-banner:dismissed')) return;
+  if (!container.contains(installBannerEl)) {
+    container.appendChild(installBannerEl);
+  }
+}
+
 function render() {
   const app = document.getElementById("app");
   if (!app) return;
 
+  if (window.location.hash.startsWith('#/activity')) {
+    renderActivity();
+    return;
+  }
+
   app.innerHTML = "";
 
   renderHeader(app);
+  appendInstallBannerIfActive(app);
 
   if (state.error) {
     const err = document.createElement("div");
     err.className = "err-msg";
     err.textContent = state.error;
     app.appendChild(err);
+    if (bottomTabsNav) app.appendChild(bottomTabsNav);
     return;
   }
 
@@ -437,6 +522,8 @@ function render() {
   } else {
     renderWorkflowList(app);
   }
+
+  if (bottomTabsNav) app.appendChild(bottomTabsNav);
 }
 
 function mountWorkspaceShell(container) {
@@ -522,17 +609,20 @@ function renderHeader(container) {
 
     const label = document.createElement("span");
     label.className = "live-label";
-    label.textContent = state.streamStatus === "connected"
-      ? "LIVE"
-      : state.streamStatus === "reconnecting"
-        ? "RECONNECTING"
-        : "OFFLINE";
+    label.textContent = state.streamStatus === "reconnecting"
+      ? "RECONNECTING"
+      : "OFFLINE";
 
     const dot = document.createElement("span");
     dot.className = "live-dot";
 
     indicator.appendChild(label);
     indicator.appendChild(dot);
+
+    if (state.streamStatus === "connected") {
+      indicator.style.display = "none";
+    }
+
     right.appendChild(indicator);
 
     hdr.appendChild(right);
