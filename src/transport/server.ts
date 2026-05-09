@@ -175,11 +175,16 @@ export function createServer(deps: ServerDeps): Hono {
       if (!deps.continueTaskService) {
         return c.json({ code: "internal_error", message: "continue-task service not available", details: {} }, 500);
       }
-      const result = await deps.continueTaskService.run({
+      const input: import("../application/continue-task-service.js").ContinueTaskInput = {
         workflowId: body["workflowId"] as string,
         taskId: body["taskId"] as string,
         prompt: body["prompt"] as string,
-      });
+      };
+      const rawAttachments = body["attachments"];
+      if (Array.isArray(rawAttachments)) {
+        input.attachments = rawAttachments as import("../application/continue-task-service.js").ReviewComment[];
+      }
+      const result = await deps.continueTaskService.run(input);
       return c.json(result);
     }
 

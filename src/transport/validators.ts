@@ -103,6 +103,7 @@ const COMMAND_CHECKS: { [K in AllCommandKind]: FieldCheck[] } = {
     BASE_WORKFLOW_ID,
     { path: "taskId", check: isString, expected: "string" },
     { path: "prompt", check: isNonEmptyString, expected: "non-empty string" },
+    { path: "attachments", check: (v) => v === undefined || Array.isArray(v), expected: "array or undefined" },
   ],
   "retry-task": [
     BASE_WORKFLOW_ID,
@@ -123,13 +124,50 @@ const WORKFLOW_SPEC_CHECKS: FieldCheck[] = [
   { path: "tasks", check: isArray, expected: "array" },
 ];
 
+const ATTACHMENT_ALLOWED_KEYS = new Set(["kind", "path", "line", "body"]);
+
+function validateAttachments(body: unknown): ValidationResult {
+  const raw = (body as Record<string, unknown>)["attachments"];
+  if (raw === undefined) return { ok: true };
+  const items = raw as unknown[];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const prefix = `attachments[${i}]`;
+    if (!isObject(item)) {
+      return { ok: false, failure: { field: prefix, expected: "object", message: `field "${prefix}" must be object` } };
+    }
+    const obj = item as Record<string, unknown>;
+    for (const key of Object.keys(obj)) {
+      if (!ATTACHMENT_ALLOWED_KEYS.has(key)) {
+        return { ok: false, failure: { field: `${prefix}.${key}`, expected: "not allowed", message: `field "${prefix}.${key}" is not allowed` } };
+      }
+    }
+    if (obj["kind"] !== "comment") {
+      return { ok: false, failure: { field: `${prefix}.kind`, expected: '"comment"', message: `field "${prefix}.kind" must be "comment"` } };
+    }
+    if (typeof obj["path"] !== "string") {
+      return { ok: false, failure: { field: `${prefix}.path`, expected: "string", message: `field "${prefix}.path" must be string` } };
+    }
+    if (typeof obj["line"] !== "number") {
+      return { ok: false, failure: { field: `${prefix}.line`, expected: "number", message: `field "${prefix}.line" must be number` } };
+    }
+    if (typeof obj["body"] !== "string") {
+      return { ok: false, failure: { field: `${prefix}.body`, expected: "string", message: `field "${prefix}.body" must be string` } };
+    }
+  }
+  return { ok: true };
+}
+
 export function validateCommand(body: unknown): ValidationResult {
   if (!isObject(body)) {
     return { ok: false, failure: { field: "kind", expected: "string", message: 'field "kind" is required and must be string' } };
   }
   const kind = (body as Record<string, unknown>)["kind"];
   if (typeof kind !== "string" || !(kind in COMMAND_CHECKS)) return { ok: true };
-  return runChecks(body, COMMAND_CHECKS[kind as AllCommandKind]);
+  const base = runChecks(body, COMMAND_CHECKS[kind as AllCommandKind]);
+  if (!base.ok) return base;
+  if (kind === "continue-task") return validateAttachments(body);
+  return { ok: true };
 }
 
 function isPushEndpoint(v: unknown): boolean {

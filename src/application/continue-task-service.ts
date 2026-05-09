@@ -19,10 +19,18 @@ export interface ContinueTaskServiceDeps {
   spawnOrchestrator: (deps: Omit<RunOrchestratorDeps, "signal" | "log">) => void;
 }
 
+export interface ReviewComment {
+  kind: "comment";
+  path: string;
+  line: number;
+  body: string;
+}
+
 export interface ContinueTaskInput {
   workflowId: string;
   taskId: string;
   prompt: string;
+  attachments?: ReviewComment[];
 }
 
 function deriveBranch(workflowId: string, taskId: string): string {
@@ -37,8 +45,13 @@ export class ContinueTaskService {
   }
 
   async run(input: ContinueTaskInput): Promise<CommandResult> {
-    const { workflowId, taskId, prompt } = input;
+    const { workflowId, taskId, prompt, attachments } = input;
     const { repo, applyCommand, providerFactory, runtime, workspace, now, spawnOrchestrator } = this.deps;
+
+    const effectivePrompt =
+      attachments && attachments.length > 0
+        ? `Review comments:\n${attachments.map((a) => `- ${a.path}:${a.line} — ${a.body}`).join("\n")}\n\n${prompt}`
+        : prompt;
 
     const workflow = await repo.get(workflowId);
     if (!workflow) {
@@ -86,7 +99,7 @@ export class ContinueTaskService {
     let runtimeSessionId: string | undefined;
     try {
       const provider = providerFactory();
-      const invocation = await provider.resume({ sessionRef: priorSessionRef, prompt, taskId, workflowId });
+      const invocation = await provider.resume({ sessionRef: priorSessionRef, prompt: effectivePrompt, taskId, workflowId });
       const startSpec: { taskId: string; workflowId: string; command: string[]; env?: Record<string, string>; workspacePath?: string } = {
         taskId,
         workflowId,
