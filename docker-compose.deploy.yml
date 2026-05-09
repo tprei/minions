@@ -1,0 +1,56 @@
+services:
+  engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.engine
+    image: minions/engine:deploy
+    container_name: minions-engine
+    restart: unless-stopped
+    env_file:
+      - .env.deploy
+    ports:
+      - "8787:8787"
+    volumes:
+      - ./data/engine:/data
+      - ./data/sessions:/data/sessions
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      default:
+        aliases: [engine]
+    depends_on:
+      - minions-worker
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/workflows"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  minions-worker:
+    image: minions-worker:dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: minions-worker
+    restart: unless-stopped
+    user: "1001:1001"
+    volumes:
+      - minions-worker-home:/home/minions
+      - ./data/workspaces:/workspace
+      - ./data/repo.git:/repo.git
+      - ./data/sessions:/sessions
+      - minions-worker-cache:/cache
+    command: ["sh", "-c", "tail -f /dev/null"]
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - engine
+
+volumes:
+  minions-worker-home:
+  minions-worker-cache:
