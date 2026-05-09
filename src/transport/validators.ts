@@ -1,6 +1,6 @@
 import type { CommandKind } from "../application/commands.js";
 
-type AllCommandKind = CommandKind | "continue-task" | "retry-task";
+type AllCommandKind = CommandKind | "continue-task" | "retry-task" | "approve-permission";
 
 export interface ValidationFailure {
   field: string;
@@ -110,6 +110,12 @@ const COMMAND_CHECKS: { [K in AllCommandKind]: FieldCheck[] } = {
     { path: "taskId", check: isString, expected: "string" },
     { path: "prompt", check: isNonEmptyString, expected: "non-empty string" },
   ],
+  "approve-permission": [
+    BASE_WORKFLOW_ID,
+    { path: "taskId", check: isString, expected: "string" },
+    { path: "requestId", check: isNonEmptyString, expected: "non-empty string" },
+    { path: "decision", check: (v) => v === "approve" || v === "deny", expected: '"approve" or "deny"' },
+  ],
 };
 
 const TASK_SPEC_CHECKS: FieldCheck[] = [
@@ -167,6 +173,29 @@ export function validateCommand(body: unknown): ValidationResult {
   const base = runChecks(body, COMMAND_CHECKS[kind as AllCommandKind]);
   if (!base.ok) return base;
   if (kind === "continue-task") return validateAttachments(body);
+  if (kind === "approve-permission") {
+    const b = body as Record<string, unknown>;
+    if (b["reason"] !== undefined && typeof b["reason"] !== "string") {
+      return {
+        ok: false,
+        failure: {
+          field: "reason",
+          expected: "string",
+          message: 'field "reason" must be a string',
+        },
+      };
+    }
+    if (b["decision"] === "deny" && !isNonEmptyString(b["reason"])) {
+      return {
+        ok: false,
+        failure: {
+          field: "reason",
+          expected: "non-empty string",
+          message: 'field "reason" is required and must be non-empty string when decision is "deny"',
+        },
+      };
+    }
+  }
   return { ok: true };
 }
 

@@ -7,12 +7,13 @@ import { StubRuntimeBackend } from "../../src/plugins/stub-runtime.js";
 import { createServer } from "../../src/transport/server.js";
 import type { ContinueTaskService } from "../../src/application/continue-task-service.js";
 import type { RetryTaskService } from "../../src/application/retry-task-service.js";
+import type { ApprovePermissionService } from "../../src/application/approve-permission-service.js";
 import { createSingleTaskWorkflow } from "../../src/domain/workflow.js";
 import type { WorkflowEvent } from "../../src/domain/events.js";
 
 const now = "2026-05-04T11:19:00.000Z";
 
-function makeApp(opts: { continueTaskService?: ContinueTaskService; retryTaskService?: RetryTaskService } = {}) {
+function makeApp(opts: { continueTaskService?: ContinueTaskService; retryTaskService?: RetryTaskService; approvePermissionService?: ApprovePermissionService } = {}) {
   const repo = new InMemoryWorkflowRepository();
   const executor = new NoopRestackExecutor();
   const runtime = new StubRuntimeBackend();
@@ -330,5 +331,86 @@ describe("POST /commands", () => {
     expect(res2.status).toBe(200);
     const body2 = await res2.json() as { events: unknown[] };
     expect(body2.events).toHaveLength(0);
+  });
+
+  it("approve-permission routes to approvePermissionService stub with all args", async () => {
+    const serviceStub = {
+      run: vi.fn().mockResolvedValue({ ok: true }),
+    } as unknown as ApprovePermissionService;
+
+    const { app } = makeApp({ approvePermissionService: serviceStub });
+
+    const res = await app.request("/commands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "approve-permission",
+        workflowId: "wf-1",
+        taskId: "task-1",
+        requestId: "req-abc",
+        decision: "approve",
+        reason: "looks good",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(serviceStub.run).toHaveBeenCalledOnce();
+    expect(serviceStub.run).toHaveBeenCalledWith({
+      workflowId: "wf-1",
+      taskId: "task-1",
+      requestId: "req-abc",
+      decision: "approve",
+      reason: "looks good",
+    });
+  });
+
+  it("approve-permission without service returns 500", async () => {
+    const { app } = makeApp();
+
+    const res = await app.request("/commands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "approve-permission",
+        workflowId: "wf-1",
+        taskId: "task-1",
+        requestId: "req-abc",
+        decision: "approve",
+      }),
+    });
+
+    expect(res.status).toBe(500);
+    const body = await res.json() as { code: string };
+    expect(body.code).toBe("internal_error");
+  });
+
+  it("approve-permission deny routes service with reason arg", async () => {
+    const serviceStub = {
+      run: vi.fn().mockResolvedValue({ ok: true }),
+    } as unknown as ApprovePermissionService;
+
+    const { app } = makeApp({ approvePermissionService: serviceStub });
+
+    const res = await app.request("/commands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "approve-permission",
+        workflowId: "wf-1",
+        taskId: "task-1",
+        requestId: "req-abc",
+        decision: "deny",
+        reason: "not allowed",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(serviceStub.run).toHaveBeenCalledWith({
+      workflowId: "wf-1",
+      taskId: "task-1",
+      requestId: "req-abc",
+      decision: "deny",
+      reason: "not allowed",
+    });
   });
 });

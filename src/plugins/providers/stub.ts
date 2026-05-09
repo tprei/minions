@@ -7,6 +7,12 @@ import type {
   ProviderResumeSpec,
 } from "../provider-plugin.js";
 
+export interface ApprovalCall {
+  requestId: string;
+  decision: "approve" | "deny";
+  reason?: string;
+}
+
 export class StubProviderPlugin implements ProviderPlugin {
   readonly name = "stub";
 
@@ -21,6 +27,7 @@ export class StubProviderPlugin implements ProviderPlugin {
 
   private counter = 0;
   private readonly frames: ProviderEvent[][];
+  readonly approvalCalls: ApprovalCall[] = [];
 
   constructor({ frames }: { frames: ProviderEvent[][] }) {
     this.frames = frames;
@@ -42,5 +49,11 @@ export class StubProviderPlugin implements ProviderPlugin {
 
   async loginStatus(): Promise<{ loggedIn: boolean }> {
     return { loggedIn: true };
+  }
+
+  async injectApproval(requestId: string, decision: "approve" | "deny", reason?: string): Promise<void> {
+    const call: ApprovalCall = { requestId, decision };
+    if (reason !== undefined) call.reason = reason;
+    this.approvalCalls.push(call);
   }
 }
