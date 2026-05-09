@@ -7,6 +7,7 @@ import type { CIBabysitterService } from "../application/ci-babysitter-service.j
 import type { QualityGateService } from "../application/quality-gate-service.js";
 import type { CompletionDispatcher } from "../application/completion-dispatcher.js";
 import type { ContinueTaskService } from "../application/continue-task-service.js";
+import type { ApprovePermissionService } from "../application/approve-permission-service.js";
 import type { MergeService } from "../application/merge-service.js";
 import { MergeServiceError } from "../application/merge-service.js";
 import type { RetryTaskService } from "../application/retry-task-service.js";
@@ -29,6 +30,7 @@ export interface ServerDeps {
   recoveryService: RecoveryService;
   executor: RestackExecutor;
   continueTaskService?: ContinueTaskService;
+  approvePermissionService?: ApprovePermissionService;
   retryTaskService?: RetryTaskService;
   mergeService?: MergeService;
   ciBabysitter?: CIBabysitterService;
@@ -43,7 +45,7 @@ export interface ServerDeps {
   supervisor?: SupervisorWithRepos;
 }
 
-type AcceptedCommandKind = CommandKind | "continue-task" | "retry-task";
+type AcceptedCommandKind = CommandKind | "continue-task" | "retry-task" | "approve-permission";
 
 const VALID_COMMAND_KINDS = new Set<AcceptedCommandKind>([
   "transition-task",
@@ -53,6 +55,7 @@ const VALID_COMMAND_KINDS = new Set<AcceptedCommandKind>([
   "mark-restack-conflict",
   "continue-task",
   "retry-task",
+  "approve-permission",
 ]);
 
 export function createServer(deps: ServerDeps): Hono {
@@ -191,6 +194,21 @@ export function createServer(deps: ServerDeps): Hono {
         taskId: body["taskId"] as string,
         prompt: body["prompt"] as string,
       });
+      return c.json(result);
+    }
+
+    if (kind === "approve-permission") {
+      if (!deps.approvePermissionService) {
+        return c.json({ code: "internal_error", message: "approve-permission service not available", details: {} }, 500);
+      }
+      const approvalInput: Parameters<typeof deps.approvePermissionService.run>[0] = {
+        workflowId: body["workflowId"] as string,
+        taskId: body["taskId"] as string,
+        requestId: body["requestId"] as string,
+        decision: body["decision"] as "approve" | "deny",
+      };
+      if (typeof body["reason"] === "string") approvalInput.reason = body["reason"];
+      const result = await deps.approvePermissionService.run(approvalInput);
       return c.json(result);
     }
 
