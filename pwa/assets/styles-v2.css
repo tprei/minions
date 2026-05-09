@@ -1697,3 +1697,220 @@ main {
 }
 
 .install-banner-dismiss:hover { color: hsl(var(--fg)); }
+
+/* ── UI-9: Operations strip ── */
+
+.operations-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--bg-elevated));
+}
+
+.op-card {
+  border: 1px solid hsl(var(--tone-warn) / 0.4);
+  border-radius: 6px;
+  background: hsl(var(--tone-warn) / 0.06);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: entry-in 200ms ease-out both;
+}
+
+.op-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.op-kind-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: hsl(var(--tone-warn) / 0.15);
+  color: hsl(var(--tone-warn));
+  border: 1px solid hsl(var(--tone-warn) / 0.4);
+}
+
+.op-status-pill {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: hsl(var(--fg-muted));
+  background: hsl(var(--bg));
+  border: 1px solid hsl(var(--border));
+}
+
+.op-status-conflict { color: hsl(var(--tone-err)); border-color: hsl(var(--tone-err) / 0.4); background: hsl(var(--tone-err) / 0.07); }
+.op-status-failed   { color: hsl(var(--tone-err)); border-color: hsl(var(--tone-err) / 0.4); background: hsl(var(--tone-err) / 0.07); }
+.op-status-running  { color: hsl(var(--tone-info)); border-color: hsl(var(--tone-info) / 0.4); background: hsl(var(--tone-info) / 0.07); }
+
+.op-card-close-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: hsl(var(--fg-muted));
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.op-card-close-btn:hover { color: hsl(var(--fg)); background: hsl(var(--border) / 0.5); }
+
+.op-affected-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.op-task-chip {
+  background: none;
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  cursor: pointer;
+  color: hsl(var(--fg-muted));
+  transition: border-color 120ms, color 120ms;
+}
+.op-task-chip:hover { border-color: hsl(var(--accent)); color: hsl(var(--fg)); }
+
+.op-explainer {
+  font-size: 12px;
+  color: hsl(var(--fg-muted));
+  line-height: 1.6;
+}
+.op-explainer p { margin: 0 0 4px; }
+.op-explainer p:last-child { margin-bottom: 0; }
+.op-explainer code { font-size: 11px; background: hsl(var(--bg)); padding: 1px 4px; border-radius: 3px; }
+
+.op-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.op-resolve-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-fg));
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: filter 120ms;
+}
+.op-resolve-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.op-resolve-btn:disabled { opacity: 0.5; cursor: not-allowed; filter: none; }
+
+.op-resolve-helper {
+  font-size: 11px;
+  color: hsl(var(--fg-muted));
+  font-style: italic;
+}
+
+/* ── UI-9: Workflow policy badges ── */
+
+.wf-policy-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.wf-policy-auto-land {
+  background: hsl(var(--tone-info) / 0.12);
+  color: hsl(var(--tone-info));
+  border: 1px solid hsl(var(--tone-info) / 0.35);
+}
+
+.wf-policy-auto-merge {
+  background: hsl(var(--tone-ok) / 0.12);
+  color: hsl(var(--tone-ok));
+  border: 1px solid hsl(var(--tone-ok) / 0.35);
+}
+
+/* ── UI-9: Completion stepper ── */
+
+.workspace-task-header {
+  padding: 4px 0;
+}
+
+.completion-stepper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.cs-steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.cs-step {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: hsl(var(--fg-muted));
+  flex: 1;
+  position: relative;
+}
+
+.cs-step + .cs-step::before {
+  content: "—";
+  color: hsl(var(--border));
+  margin-right: 4px;
+  font-size: 10px;
+}
+
+.cs-step-indicator {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.cs-step-label {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.cs-step-idle .cs-step-indicator { color: hsl(var(--fg-muted) / 0.5); }
+.cs-step-idle .cs-step-label { color: hsl(var(--fg-muted) / 0.5); }
+
+.cs-step-active .cs-step-indicator {
+  color: hsl(var(--accent));
+  animation: pulse-ring 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+.cs-step-active .cs-step-label { color: hsl(var(--fg)); font-weight: 600; }
+
+.cs-step-completed .cs-step-indicator { color: hsl(var(--tone-ok)); }
+.cs-step-completed .cs-step-label { color: hsl(var(--fg-muted)); }
+
+.cs-step-stopped .cs-step-indicator { color: hsl(var(--tone-err)); }
+.cs-step-stopped .cs-step-label { color: hsl(var(--tone-err)); }
+
+.cs-error-label {
+  font-size: 11px;
+  color: hsl(var(--tone-err));
+  font-style: italic;
+  padding: 0 2px;
+}

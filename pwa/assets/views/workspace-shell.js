@@ -4,6 +4,7 @@ import { createPrTab } from "./pr-tab.js";
 import { createChecksPanel } from "./checks-panel.js";
 import { createDiffViewer } from "./diff-viewer.js";
 import { createMergeProgress } from "./merge-progress.js";
+import { createCompletionStepper } from "../components/completion-stepper.js";
 
 const PHASE_MAP = {
   "pending":         "input",
@@ -83,6 +84,7 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
   let currentMergeProgress = null;
   let currentTask = initialTask ?? null;
   let currentWorkflow = initialWorkflow ?? null;
+  let completionStepper = null;
 
   const composer = createComposer({
     mode: "idle",
@@ -103,6 +105,13 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
       }).catch(() => {});
     },
   });
+
+  const taskHeader = document.createElement("div");
+  taskHeader.className = "workspace-task-header";
+  main.appendChild(taskHeader);
+
+  completionStepper = createCompletionStepper({ task: currentTask });
+  taskHeader.appendChild(completionStepper.element);
 
   const phases = {
     input:      buildPhaseInput(),
@@ -403,6 +412,9 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
 
   function setExecutionStatus(status) {
     currentStatus = status;
+    if (completionStepper && currentTask) {
+      completionStepper.update({ ...currentTask, executionStatus: status });
+    }
     const phase = derivePhase(status);
 
     if (phase === currentPhase) {
@@ -449,7 +461,10 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
   }
 
   function setArtifacts(artifacts, task, workflow) {
-    if (task !== undefined) currentTask = task;
+    if (task !== undefined) {
+      currentTask = task;
+      if (completionStepper) completionStepper.update(task);
+    }
     if (workflow !== undefined) currentWorkflow = workflow;
 
     if (summaryPrLink) {
@@ -465,6 +480,10 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
   }
 
   function destroy() {
+    if (completionStepper) {
+      completionStepper.destroy();
+      completionStepper = null;
+    }
     root.remove();
   }
 
@@ -472,6 +491,7 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus, task: initi
     const off1 = eventBus.on?.("task-transitioned", (ev) => {
       if (ev.payload?.taskId === taskId) {
         setExecutionStatus(ev.payload.toExecutionStatus);
+        if (completionStepper) completionStepper.onTaskTransitioned(ev);
       }
     });
     const off2 = eventBus.on?.("provider-event", (ev) => {

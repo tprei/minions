@@ -263,6 +263,25 @@ function openStream(id) {
         return;
       }
 
+      if (event.kind === "graph-operation-changed") {
+        if (!state.currentWorkflow) return;
+        if (currentDagPanel) {
+          currentDagPanel.onGraphOperationChanged(event);
+        }
+        const wfId = state.currentWorkflow.id;
+        fetch(`/workflows/${wfId}`)
+          .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+          .then((wf) => {
+            if (!state.currentWorkflow || state.currentWorkflow.id !== wfId) return;
+            state.currentWorkflow = wf;
+            if (currentDagPanel) {
+              currentDagPanel.update(wf);
+            }
+          })
+          .catch(() => {});
+        return;
+      }
+
       if (event.kind === "workflow-status-changed") {
         const payload = event.payload;
         if (!state.currentWorkflow) return;
@@ -728,6 +747,22 @@ function renderWorkflowList(container) {
 
       meta.appendChild(statusEl);
       meta.appendChild(timeEl);
+
+      const policy = wf.policy ?? {};
+      if (policy.autoLand) {
+        const badge = document.createElement("span");
+        badge.className = "wf-policy-badge wf-policy-auto-land";
+        badge.title = "Auto-land enabled";
+        badge.textContent = "auto-land";
+        meta.appendChild(badge);
+      }
+      if (policy.autoMergeOnGreen) {
+        const badge = document.createElement("span");
+        badge.className = "wf-policy-badge wf-policy-auto-merge";
+        badge.title = "Auto-merge on green enabled";
+        badge.textContent = "auto-merge";
+        meta.appendChild(badge);
+      }
 
       item.appendChild(titleEl);
       item.appendChild(idEl);

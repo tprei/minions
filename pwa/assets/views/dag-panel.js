@@ -7,6 +7,7 @@ import { render as renderPr } from "../artifacts/pr.js";
 import { render as renderPatch } from "../artifacts/patch.js";
 import { render as renderCiReport } from "../artifacts/ci-report.js";
 import { render as renderQualityReport } from "../artifacts/quality-report.js";
+import { createOperationsStrip } from "./operations-strip.js";
 
 const BUSY_STATUSES = new Set([
   "running", "quality-pending", "finalizing", "pr-open", "ci-pending",
@@ -146,9 +147,22 @@ export function createDagPanel({ workflow, onTaskFocus }) {
   let sheet = null;
   let inlineEl = null;
   let currentWorkflow = workflow;
+  let opsStrip = null;
 
   function buildBody() {
-    return buildPanelBody(currentWorkflow, onTaskFocus, ctx);
+    const wrap = document.createElement("div");
+    wrap.className = "dag-panel-content";
+
+    opsStrip = createOperationsStrip({
+      workflow: currentWorkflow,
+      deps: { onTaskFocus },
+    });
+    wrap.appendChild(opsStrip.element);
+
+    const taskList = buildPanelBody(currentWorkflow, onTaskFocus, ctx);
+    wrap.appendChild(taskList);
+
+    return wrap;
   }
 
   function openMobile() {
@@ -194,6 +208,10 @@ export function createDagPanel({ workflow, onTaskFocus }) {
   function update(newWorkflow) {
     currentWorkflow = newWorkflow;
 
+    if (opsStrip) {
+      opsStrip.update(newWorkflow);
+    }
+
     if (sheet && sheet.panel.classList.contains("open")) {
       const body = buildBody();
       const bodyEl = sheet.panel.querySelector(".sheet-body");
@@ -205,7 +223,7 @@ export function createDagPanel({ workflow, onTaskFocus }) {
     }
 
     if (inlineEl) {
-      const existing = inlineEl.querySelector(".dag-panel-body");
+      const existing = inlineEl.querySelector(".dag-panel-content");
       const newBody = buildBody();
       if (existing) {
         cleanupArtifacts(existing);
@@ -213,6 +231,12 @@ export function createDagPanel({ workflow, onTaskFocus }) {
       } else {
         inlineEl.appendChild(newBody);
       }
+    }
+  }
+
+  function onGraphOperationChanged(event) {
+    if (opsStrip) {
+      opsStrip.onGraphOperationChanged(event);
     }
   }
 
@@ -228,7 +252,11 @@ export function createDagPanel({ workflow, onTaskFocus }) {
       inlineEl.remove();
       inlineEl = null;
     }
+    if (opsStrip) {
+      opsStrip.destroy();
+      opsStrip = null;
+    }
   }
 
-  return { open, update, destroy };
+  return { open, update, onGraphOperationChanged, destroy };
 }

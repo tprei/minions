@@ -424,3 +424,45 @@ Phase events arrive as `merge-phase` SSE events with payload `{ taskId, phase, s
 ### Comments-as-attachments
 
 The comment composer is intentionally absent from UI-8. It is gated on **UI-8.5**, which runs after UI-8 is clean. Do not add the composer or attachment bundling in this slice.
+
+## UI-9: Operations strip + completion stepper
+
+### Operations strip
+
+`createOperationsStrip({ workflow, deps })` in `pwa/assets/views/operations-strip.js` renders a `.operations-strip` container that shows one card per active (non-completed) `GraphOperation` in `workflow.operations`.
+
+Each card shows:
+- A kind badge (`"Restack"` for `kind: "restack"`).
+- A status pill (e.g. `conflict`, `running`, `pending`).
+- Affected task chips (buttons); clicking a chip calls `deps.onTaskFocus(taskId)`.
+- A conflict explainer div (`.op-explainer`) when `op.error` is set, rendered as markdown via `marked` + sanitized via `DOMPurify`.
+- A Resolve button and a Dismiss (×) button.
+
+**Resolve button gating:** The button is enabled only when `op.kind === "restack"`, `op.status === "conflict"`, and `op.fromBase` is set. When enabled, clicking it POSTs `{ kind: "request-restack", workflowId, input: { operationId: op.id, ancestorId: op.fromBase, idempotencyKey: op.idempotencyKey, now } }` to `/commands`. The server validates this command shape via the `request-restack` entry in `COMMAND_CHECKS`. If the conditions are not met, the button is disabled and a helper span (`.op-resolve-helper`) explains why.
+
+**Dismiss button:** Hides the card locally (sets `display: none`) without touching the engine. The operation persists in the engine until resolved.
+
+`DagPanel` mounts the strip above the task list by wrapping both in a `.dag-panel-content` div. `app-v1.js` forwards `graph-operation-changed` SSE events to `currentDagPanel.onGraphOperationChanged(event)`, which triggers a workflow refetch and re-renders the strip.
+
+### Workflow policy badges
+
+`renderWorkflowList` in `app-v1.js` adds `.wf-policy-badge` spans to each workflow list item:
+- `.wf-policy-auto-land` (tone-info) when `policy.autoLand === true`.
+- `.wf-policy-auto-merge` (tone-ok) when `policy.autoMergeOnGreen === true`.
+
+These use subtle accent colors from the design token ramps and do not affect the kanban task cards.
+
+### Completion stepper
+
+`createCompletionStepper({ task })` in `pwa/assets/components/completion-stepper.js` renders a `.completion-stepper` with 4 `.cs-step` elements for the `finalizing → pr-open → ci-pending → merged` lifecycle.
+
+State classes per step: `cs-step-idle | cs-step-active | cs-step-completed | cs-step-stopped`.
+
+- The active step indicator shows `◌` (pulse-ring animation via CSS).
+- Completed steps show `✓`.
+- When `executionStatus` is `failed` or `cancelled`, all steps up to the last known lifecycle step show `✕` (class `cs-step-stopped`) and a `.cs-error-label` appears ("Stopped at \<step\>").
+- The component is hidden (`display: none`) when the task is not in the lifecycle range.
+
+The stepper tracks `lastLifecycleStatus` internally so that when a terminal failure arrives, it can show the correct stopped-at position without needing the previous task state externally.
+
+`WorkspaceShell` mounts the stepper in a `.workspace-task-header` div above the phase panels. It calls `completionStepper.update(task)` on `setArtifacts` and `completionStepper.onTaskTransitioned(ev)` on task-transitioned events from `eventBus`. Events are scoped to the mounted `taskId` (UI-3 invariant).
