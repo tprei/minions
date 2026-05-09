@@ -232,6 +232,7 @@ function updateLiveIndicator() {
   const indicator = document.querySelector(".live-indicator");
   if (!indicator) return;
   indicator.className = `live-indicator ${state.streamStatus}`;
+  indicator.setAttribute("data-stream-status", state.streamStatus);
   const dot = indicator.querySelector(".live-dot");
   const label = indicator.querySelector(".live-label");
   if (state.streamStatus === "connected") {
@@ -517,6 +518,7 @@ function renderHeader(container) {
 
     const indicator = document.createElement("div");
     indicator.className = `live-indicator ${state.streamStatus}`;
+    indicator.setAttribute("data-stream-status", state.streamStatus);
 
     const label = document.createElement("span");
     label.className = "live-label";

@@ -101,6 +101,7 @@ test.describe("Phase transitions follow executionStatus", () => {
     for (const p of ALL_PHASES.filter((x) => x !== "input")) {
       await expect(page.locator(`.phase-${p}`)).toBeHidden();
     }
+    await expect.poll(() => page.locator(".live-indicator").getAttribute("data-stream-status")).toBe("connected");
     await expect(page).toHaveScreenshot("phase-pending.png");
   });
 
@@ -111,6 +112,7 @@ test.describe("Phase transitions follow executionStatus", () => {
     for (const p of ALL_PHASES.filter((x) => x !== "transcript")) {
       await expect(page.locator(`.phase-${p}`)).toBeHidden();
     }
+    await expect.poll(() => page.locator(".live-indicator").getAttribute("data-stream-status")).toBe("connected");
     await expect(page).toHaveScreenshot("phase-running.png");
   });
 
@@ -118,6 +120,7 @@ test.describe("Phase transitions follow executionStatus", () => {
     await gotoDetail(page, "quality-pending");
 
     await expect(page.locator(".phase-progress")).toBeVisible();
+    await expect.poll(() => page.locator(".live-indicator").getAttribute("data-stream-status")).toBe("connected");
     await expect(page).toHaveScreenshot("phase-quality-pending.png");
   });
 
@@ -125,6 +128,7 @@ test.describe("Phase transitions follow executionStatus", () => {
     await gotoDetail(page, "finalizing");
 
     await expect(page.locator(".phase-diff")).toBeVisible();
+    await expect.poll(() => page.locator(".live-indicator").getAttribute("data-stream-status")).toBe("connected");
     await expect(page).toHaveScreenshot("phase-finalizing.png");
   });
 
@@ -132,6 +136,7 @@ test.describe("Phase transitions follow executionStatus", () => {
     await gotoDetail(page, "merged");
 
     await expect(page.locator(".phase-summary")).toBeVisible();
+    await expect.poll(() => page.locator(".live-indicator").getAttribute("data-stream-status")).toBe("connected");
     await expect(page).toHaveScreenshot("phase-merged.png");
   });
 
@@ -139,6 +144,7 @@ test.describe("Phase transitions follow executionStatus", () => {
     await gotoDetail(page, "failed");
 
     await expect(page.locator(".phase-error")).toBeVisible();
+    await expect.poll(() => page.locator(".live-indicator").getAttribute("data-stream-status")).toBe("connected");
     await expect(page).toHaveScreenshot("phase-failed.png");
   });
 
@@ -146,6 +152,7 @@ test.describe("Phase transitions follow executionStatus", () => {
     await gotoDetail(page, "needs-review");
 
     await expect(page.locator(".phase-operator")).toBeVisible();
+    await expect.poll(() => page.locator(".live-indicator").getAttribute("data-stream-status")).toBe("connected");
     await expect(page).toHaveScreenshot("phase-needs-review.png");
   });
 
@@ -172,6 +179,7 @@ test.describe("Phase transitions follow executionStatus", () => {
         expect(count, `phase-${p} should still be in DOM for status ${status}`).toBe(1);
       }
 
+      await expect.poll(() => page.locator(".live-indicator").getAttribute("data-stream-status")).toBe("connected");
       await expect(page).toHaveScreenshot(`phase-seq-${status}.png`);
     }
   });

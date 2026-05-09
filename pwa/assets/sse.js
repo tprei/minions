@@ -9,6 +9,7 @@ export function createSseClient({ url, onEvent, onStatus }) {
   let watchdogTimer = null;
   let reconnectTimer = null;
   let state = "connecting";
+  let suppressNextConnecting = false;
 
   function setState(s) {
     if (state === s) return;
@@ -47,6 +48,7 @@ export function createSseClient({ url, onEvent, onStatus }) {
     if (!quiet) {
       setState("reconnecting");
     }
+    suppressNextConnecting = quiet;
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       connect();
@@ -55,7 +57,10 @@ export function createSseClient({ url, onEvent, onStatus }) {
 
   function connect() {
     if (closed) return;
-    setState("connecting");
+    if (!suppressNextConnecting) {
+      setState("connecting");
+    }
+    suppressNextConnecting = false;
 
     es = new EventSource(buildUrl());
 
@@ -127,6 +132,7 @@ export function createSseClient({ url, onEvent, onStatus }) {
     es?.close();
     es = null;
     lastActivityAt = 0;
+    suppressNextConnecting = false;
     connect();
   }
 
