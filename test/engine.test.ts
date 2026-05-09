@@ -12,6 +12,7 @@ import { applyCommand } from "../src/application/commands.js";
 import { createSingleTaskWorkflow } from "../src/domain/workflow.js";
 import { StubProviderPlugin } from "../src/plugins/providers/stub.js";
 import { StubRuntimeBackend } from "../src/plugins/stub-runtime.js";
+import type { Artifact } from "../src/domain/types.js";
 
 function makeTempPath(): string {
   const dir = mkdtempSync(join(tmpdir(), "engine-test-"));
@@ -223,5 +224,99 @@ describe("createEngine — close() aborts service-spawned orchestrators", () => 
     await eng.close();
 
     expect(capturedSignal?.aborted).toBe(true);
+  });
+});
+
+describe("createEngine — draft-pr route wired via providerFactory", () => {
+  it("POST /workflows/:id/tasks/:taskId/draft-pr returns 200 with title and body when providerFactory is set", async () => {
+    const dbPath = makeTempPath();
+    const now = "2026-05-08T10:00:00.000Z";
+
+    const seedRepo = new SQLiteWorkflowRepository(dbPath);
+    const wf = createSingleTaskWorkflow("wf-dpr-1", { title: "T", prompt: "P" }, () => now);
+    await seedRepo.save(wf, []);
+    await applyCommand(seedRepo, {
+      kind: "transition-task",
+      workflowId: "wf-dpr-1",
+      transition: { kind: "mark-ready", taskId: "wf-dpr-1:task", now },
+    });
+    const seeded = await seedRepo.get("wf-dpr-1");
+    const seededTask = seeded!.graph["wf-dpr-1:task"]!;
+    const branchArtifact: Artifact = {
+      kind: "branch",
+      ref: "minions/wf-dpr-1_task",
+      producedBy: "wf-dpr-1:task",
+      createdAt: now,
+    };
+    await seedRepo.save({
+      ...seeded!,
+      version: seeded!.version + 1,
+      graph: { "wf-dpr-1:task": { ...seededTask, artifacts: [...seededTask.artifacts, branchArtifact] } },
+    }, []);
+    seedRepo.close();
+
+    const enc = new TextEncoder();
+    const line1 = enc.encode("frame-text\n");
+    const line2 = enc.encode("frame-final\n");
+
+    const stubRuntime: RuntimeBackend = {
+      async start(_spec: RuntimeStartSpec): Promise<RuntimeStartResult> {
+        return { sessionId: "dpr-sess", runtimeType: "stub" };
+      },
+      async stop(): Promise<void> {},
+      async probe(): Promise<RuntimeProbeState> { return "live"; },
+      attach(_sessionId: string, _opts?: RuntimeAttachOptions): AsyncIterable<RuntimeOutputChunk> {
+        return {
+          [Symbol.asyncIterator]: async function* () {
+            yield { sessionId: "dpr-sess", offset: 0, bytes: line1 };
+            yield { sessionId: "dpr-sess", offset: line1.byteLength, bytes: line2 };
+          },
+        };
+      },
+    };
+
+    const provider = new StubProviderPlugin({
+      frames: [
+        [{ kind: "assistant_text", text: '{"title":"Draft PR","body":"Generated body"}' }],
+        [{ kind: "final", sessionRef: "dpr-ref" }],
+      ],
+    });
+
+    const eng = await createEngine({
+      dbPath,
+      runtime: stubRuntime,
+      now: () => now,
+      providerFactory: () => provider,
+      log: silentLogger(),
+    });
+
+    const res = await eng.server.fetch(
+      new Request("http://localhost/workflows/wf-dpr-1/tasks/wf-dpr-1:task/draft-pr", { method: "POST" }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json() as { title: string; body: string };
+    expect(body.title).toBe("Draft PR");
+    expect(body.body).toBe("Generated body");
+
+    await eng.close();
+  });
+
+  it("POST /workflows/:id/tasks/:taskId/draft-pr returns 503 when providerFactory is not set", async () => {
+    const dbPath = makeTempPath();
+    const eng = await createEngine({ dbPath, log: silentLogger() });
+
+    const seedRepo = new SQLiteWorkflowRepository(dbPath);
+    const wf = createSingleTaskWorkflow("wf-dpr-2", { title: "T", prompt: "P" }, () => "2026-05-08T10:00:00.000Z");
+    await seedRepo.save(wf, []);
+    seedRepo.close();
+
+    const res = await eng.server.fetch(
+      new Request("http://localhost/workflows/wf-dpr-2/tasks/wf-dpr-2:task/draft-pr", { method: "POST" }),
+    );
+    expect(res.status).toBe(503);
+    const body = await res.json() as { code: string };
+    expect(body.code).toBe("internal_error");
+
+    await eng.close();
   });
 });
