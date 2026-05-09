@@ -91,10 +91,12 @@ function updateBottomTabsActive() {
 }
 
 function mountInstallBanner() {
-  const { element } = createInstallBanner();
-  if (element) {
-    installBannerEl = element;
-  }
+  createInstallBanner().then((result) => {
+    if (result) {
+      installBannerEl = result.element;
+      render();
+    }
+  });
 }
 
 function registerSW() {

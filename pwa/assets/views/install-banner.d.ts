@@ -3,7 +3,7 @@ export interface InstallBannerDeps {
 }
 
 export interface InstallBanner {
-  element: HTMLElement | null;
+  element: HTMLElement;
 }
 
-export declare function createInstallBanner(deps?: InstallBannerDeps): InstallBanner;
+export declare function createInstallBanner(deps?: InstallBannerDeps): Promise<InstallBanner | null>;

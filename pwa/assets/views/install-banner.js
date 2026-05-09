@@ -34,67 +34,55 @@ async function subscribePushForAlerts(vapidPublicKey) {
   return subscription;
 }
 
-export function createInstallBanner({ apiBase = '' } = {}) {
+export async function createInstallBanner({ apiBase = '' } = {}) {
   if (localStorage.getItem(DISMISSED_KEY)) {
-    return { element: null };
+    return null;
+  }
+
+  let vapidKey = null;
+
+  try {
+    const r = await fetch(`${apiBase}/push/vapid-public-key`);
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (!data.publicKey) return null;
+    vapidKey = data.publicKey;
+  } catch {
+    return null;
   }
 
   const banner = document.createElement('div');
   banner.className = 'install-banner';
 
-  let vapidKey = null;
+  const text = document.createElement('span');
+  text.className = 'install-banner-text';
+  text.textContent = 'Subscribe to engine alerts for real-time notifications';
 
-  fetch(`${apiBase}/push/vapid-public-key`)
-    .then((r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
-    })
-    .then((data) => {
-      if (!data.publicKey) {
-        banner.remove();
-        return;
-      }
-      vapidKey = data.publicKey;
-      showBanner();
-    })
-    .catch(() => {
-      banner.remove();
-    });
+  const subscribeBtn = document.createElement('button');
+  subscribeBtn.className = 'install-banner-subscribe';
+  subscribeBtn.textContent = 'Subscribe';
+  subscribeBtn.addEventListener('click', () => {
+    subscribeBtn.disabled = true;
+    subscribePushForAlerts(vapidKey)
+      .then(() => {
+        dismiss();
+      })
+      .catch(() => {
+        subscribeBtn.disabled = false;
+      });
+  });
 
-  function showBanner() {
-    banner.innerHTML = '';
+  const dismissBtn = document.createElement('button');
+  dismissBtn.className = 'install-banner-dismiss';
+  dismissBtn.textContent = '✕';
+  dismissBtn.setAttribute('aria-label', 'Dismiss');
+  dismissBtn.addEventListener('click', () => {
+    dismiss();
+  });
 
-    const text = document.createElement('span');
-    text.className = 'install-banner-text';
-    text.textContent = 'Subscribe to engine alerts for real-time notifications';
-
-    const subscribeBtn = document.createElement('button');
-    subscribeBtn.className = 'install-banner-subscribe';
-    subscribeBtn.textContent = 'Subscribe';
-    subscribeBtn.addEventListener('click', () => {
-      if (!vapidKey) return;
-      subscribeBtn.disabled = true;
-      subscribePushForAlerts(vapidKey)
-        .then(() => {
-          dismiss();
-        })
-        .catch(() => {
-          subscribeBtn.disabled = false;
-        });
-    });
-
-    const dismissBtn = document.createElement('button');
-    dismissBtn.className = 'install-banner-dismiss';
-    dismissBtn.textContent = '✕';
-    dismissBtn.setAttribute('aria-label', 'Dismiss');
-    dismissBtn.addEventListener('click', () => {
-      dismiss();
-    });
-
-    banner.appendChild(text);
-    banner.appendChild(subscribeBtn);
-    banner.appendChild(dismissBtn);
-  }
+  banner.appendChild(text);
+  banner.appendChild(subscribeBtn);
+  banner.appendChild(dismissBtn);
 
   function dismiss() {
     localStorage.setItem(DISMISSED_KEY, '1');

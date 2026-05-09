@@ -344,18 +344,21 @@ The activity tab element is a `div.activity-tab` that contains:
 
 ### Filter convention
 
-Audit and alert feeds use cursor-based pagination via `beforeTs` query params. Filter state (action, workflowId, time range) is local to the component. Changing a filter calls `reset()` which clears `events`, resets `beforeTs` to `null`, and fires `fetchPage(true)` (full page refresh from cursor start).
+Audit and alert feeds use cursor-based pagination via `beforeTs` query params. Filter state (workflowId) is local to the component. Changing a filter calls `reset()` which clears `events`, resets `beforeTs` to `null`, and fires `fetchPage(true)` (full page refresh from cursor start).
+
+The audit feed exposes a single "All" chip — the engine API (`src/supervisor/audit-repo.ts`) accepts only `beforeTs`, `action`, and `workflowId` upper bounds; there is no `afterTs`/`sinceTs` lower bound. Time-range filtering (Today, Week) requires an engine slice that adds `afterTs` support before a UI chip can be shipped. Do not add range chips without the engine prerequisite.
 
 Filter chips use class `active` for selected state. The workflow free-text filter uses `input.audit-workflow-filter` and debounces via the `input` event.
 
 ### Install-banner lifecycle
 
-`pwa/assets/views/install-banner.js` exports `createInstallBanner({ apiBase? }) → { element }`.
+`pwa/assets/views/install-banner.js` exports `createInstallBanner({ apiBase? }) → Promise<{ element: HTMLElement } | null>`.
 
-- Returns `{ element: null }` immediately if `localStorage.getItem('install-banner:dismissed')` is set.
-- Returns a live `div.install-banner` element that starts empty.
-- On creation, fetches `GET /push/vapid-public-key`. If the endpoint returns a `publicKey`, populates the banner with a subscribe button and dismiss button. If the endpoint returns an error or `publicKey` is absent/null, removes the element from the DOM.
-- The `app-v1.js` bootstrap holds a reference to the element in `installBannerEl` and re-appends it via `appendInstallBannerIfActive(container)` on every render cycle, guarding against re-injection by checking `localStorage` first.
+- Returns `null` immediately (as a resolved promise) if `localStorage.getItem('install-banner:dismissed')` is set.
+- Fetches `GET /push/vapid-public-key`. If the endpoint returns an error or `publicKey` is absent/null, resolves to `null` — no DOM element is ever created.
+- Only when a valid `publicKey` is returned does the function create and resolve to `{ element }` — a fully populated `div.install-banner` with subscribe and dismiss buttons.
+- `app-v1.js` calls `createInstallBanner()` in `mountInstallBanner()`, awaits the promise, and only assigns `installBannerEl` and triggers `render()` if a non-null result arrives. This means the banner element is never present in the DOM during the fetch, eliminating the vertical-shift race in screenshots.
+- The `appendInstallBannerIfActive(container)` helper re-appends the element on each render cycle, guarding against re-injection by checking `localStorage` first.
 - **Dismiss:** sets `install-banner:dismissed` in `localStorage` and calls `banner.remove()`. Any subsequent re-render of `app` will see the localStorage key and skip re-injection.
 
 ### Healthy-silent SSE indicator

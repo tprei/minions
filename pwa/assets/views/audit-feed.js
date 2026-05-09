@@ -23,9 +23,7 @@ export function createAuditFeed({ apiBase = '' } = {}) {
   let hasMore = false;
   let loading = false;
 
-  let filterAction = '';
   let filterWorkflow = '';
-  let filterRange = 'all';
 
   const root = document.createElement('div');
   root.className = 'audit-feed';
@@ -33,26 +31,11 @@ export function createAuditFeed({ apiBase = '' } = {}) {
   const chips = document.createElement('div');
   chips.className = 'audit-chips';
 
-  const rangeOptions = [
-    { id: 'all', label: 'All' },
-    { id: 'today', label: 'Today' },
-    { id: 'week', label: 'Week' },
-  ];
-
-  rangeOptions.forEach(({ id, label }) => {
-    const chip = document.createElement('button');
-    chip.className = 'audit-chip' + (id === filterRange ? ' active' : '');
-    chip.dataset.range = id;
-    chip.textContent = label;
-    chip.addEventListener('click', () => {
-      filterRange = id;
-      chips.querySelectorAll('.audit-chip[data-range]').forEach((c) => {
-        c.classList.toggle('active', c.dataset.range === filterRange);
-      });
-      reset();
-    });
-    chips.appendChild(chip);
-  });
+  const allChip = document.createElement('button');
+  allChip.className = 'audit-chip active';
+  allChip.dataset.range = 'all';
+  allChip.textContent = 'All';
+  chips.appendChild(allChip);
 
   const workflowInput = document.createElement('input');
   workflowInput.className = 'audit-workflow-filter';
@@ -85,16 +68,7 @@ export function createAuditFeed({ apiBase = '' } = {}) {
     const params = new URLSearchParams();
     params.set('limit', String(DEFAULT_LIMIT));
     if (beforeTs) params.set('beforeTs', beforeTs);
-    if (filterAction) params.set('action', filterAction);
     if (filterWorkflow) params.set('workflowId', filterWorkflow);
-    if (filterRange === 'today') {
-      const start = new Date();
-      start.setHours(0, 0, 0, 0);
-      params.set('beforeTs', new Date().toISOString());
-    } else if (filterRange === 'week') {
-      const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      params.set('beforeTs', new Date().toISOString());
-    }
     return `${apiBase}/audit/events?${params.toString()}`;
   }
 

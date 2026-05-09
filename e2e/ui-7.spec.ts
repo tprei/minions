@@ -205,52 +205,15 @@ test.describe("UI-7: Activity tab + audit feed + alert center + install banner +
     await expect(errCard).toHaveClass(/alert-card-error/);
   });
 
-  test("filter chip interaction: today chip triggers re-fetch with updated params", async ({ page }) => {
+  test("only All range chip is rendered — Today and Week are absent", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
-
-    const capturedUrls: string[] = [];
-
-    await page.route("**/workflows", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: EMPTY_WORKFLOWS_RESPONSE,
-      });
-    });
-    await page.route("**/push/vapid-public-key", async (route) => {
-      await route.fulfill({ status: 404, body: "not found" });
-    });
-    await page.route("**/audit/events**", async (route) => {
-      capturedUrls.push(route.request().url());
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ events: [] }),
-      });
-    });
-    await page.route("**/alerts**", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ alerts: [] }),
-      });
-    });
-
+    await setupBaseRoutes(page);
     await page.goto("/#/activity");
     await page.waitForSelector(".audit-chips", { timeout: 5_000 });
 
-    const todayChip = page.locator(".audit-chip[data-range='today']");
-    await expect(todayChip).toBeVisible();
-    await todayChip.click();
-
-    await page.waitForFunction(
-      () => (window as unknown as { _capturedCount?: number })._capturedCount !== undefined || true,
-      { timeout: 2_000 },
-    ).catch(() => {});
-
-    await page.waitForTimeout(500);
-    expect(capturedUrls.length).toBeGreaterThanOrEqual(2);
-    expect(capturedUrls.every((u) => u.includes("/audit/events"))).toBe(true);
+    await expect(page.locator(".audit-chip[data-range='all']")).toBeVisible();
+    await expect(page.locator(".audit-chip[data-range='today']")).toHaveCount(0);
+    await expect(page.locator(".audit-chip[data-range='week']")).toHaveCount(0);
   });
 
   test("install banner appears on first visit (VAPID configured)", async ({ page }) => {

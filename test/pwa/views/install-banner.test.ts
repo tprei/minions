@@ -18,16 +18,30 @@ afterEach(() => {
 });
 
 describe("createInstallBanner", () => {
-  it("returns null element when already dismissed", () => {
+  it("returns null when already dismissed", async () => {
     localStorage.setItem(DISMISSED_KEY, "1");
-    const { element } = createInstallBanner();
-    expect(element).toBeNull();
+    const result = await createInstallBanner();
+    expect(result).toBeNull();
   });
 
-  it("returns a banner element on first visit", () => {
-    const { element } = createInstallBanner();
-    expect(element).not.toBeNull();
-    expect(element!.className).toContain("install-banner");
+  it("returns null when VAPID endpoint returns error", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: false,
+      json: async () => ({}),
+    } as unknown as Response);
+
+    const result = await createInstallBanner();
+    expect(result).toBeNull();
+  });
+
+  it("returns null when VAPID key is absent (no public key)", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ publicKey: null }),
+    } as unknown as Response);
+
+    const result = await createInstallBanner();
+    expect(result).toBeNull();
   });
 
   it("fetches VAPID key from /push/vapid-public-key", async () => {
@@ -36,56 +50,24 @@ describe("createInstallBanner", () => {
       json: async () => ({ publicKey: "test-key" }),
     } as unknown as Response);
 
-    createInstallBanner();
+    await createInstallBanner();
 
-    await vi.waitFor(() => {
-      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
-        expect.stringContaining("/push/vapid-public-key"),
-      );
-    });
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      expect.stringContaining("/push/vapid-public-key"),
+    );
   });
 
-  it("removes banner when VAPID key is absent (no public key)", async () => {
-    vi.mocked(fetch).mockResolvedValue({
-      ok: true,
-      json: async () => ({ publicKey: null }),
-    } as unknown as Response);
-
-    const { element } = createInstallBanner();
-    document.body.appendChild(element!);
-
-    await vi.waitFor(() => {
-      expect(document.body.contains(element)).toBe(false);
-    });
-  });
-
-  it("removes banner when VAPID endpoint returns error", async () => {
-    vi.mocked(fetch).mockResolvedValue({
-      ok: false,
-      json: async () => ({}),
-    } as unknown as Response);
-
-    const { element } = createInstallBanner();
-    document.body.appendChild(element!);
-
-    await vi.waitFor(() => {
-      expect(document.body.contains(element)).toBe(false);
-    });
-  });
-
-  it("shows subscribe and dismiss buttons when VAPID available", async () => {
+  it("returns a banner element when VAPID available", async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
       json: async () => ({ publicKey: "vapid-test" }),
     } as unknown as Response);
 
-    const { element } = createInstallBanner();
-    document.body.appendChild(element!);
-
-    await vi.waitFor(() => {
-      expect(element!.querySelector(".install-banner-subscribe")).not.toBeNull();
-      expect(element!.querySelector(".install-banner-dismiss")).not.toBeNull();
-    });
+    const result = await createInstallBanner();
+    expect(result).not.toBeNull();
+    expect(result!.element.className).toContain("install-banner");
+    expect(result!.element.querySelector(".install-banner-subscribe")).not.toBeNull();
+    expect(result!.element.querySelector(".install-banner-dismiss")).not.toBeNull();
   });
 
   it("dismiss button sets localStorage and removes banner", async () => {
@@ -94,23 +76,20 @@ describe("createInstallBanner", () => {
       json: async () => ({ publicKey: "vapid-test" }),
     } as unknown as Response);
 
-    const { element } = createInstallBanner();
-    document.body.appendChild(element!);
+    const result = await createInstallBanner();
+    expect(result).not.toBeNull();
+    document.body.appendChild(result!.element);
 
-    await vi.waitFor(() => {
-      expect(element!.querySelector(".install-banner-dismiss")).not.toBeNull();
-    });
-
-    const dismissBtn = element!.querySelector(".install-banner-dismiss") as HTMLButtonElement;
+    const dismissBtn = result!.element.querySelector(".install-banner-dismiss") as HTMLButtonElement;
     dismissBtn.click();
 
     expect(localStorage.getItem(DISMISSED_KEY)).toBe("1");
-    expect(document.body.contains(element)).toBe(false);
+    expect(document.body.contains(result!.element)).toBe(false);
   });
 
-  it("does not show banner on subsequent visit after dismiss", () => {
+  it("does not return a banner on subsequent visit after dismiss", async () => {
     localStorage.setItem(DISMISSED_KEY, "1");
-    const { element } = createInstallBanner();
-    expect(element).toBeNull();
+    const result = await createInstallBanner();
+    expect(result).toBeNull();
   });
 });

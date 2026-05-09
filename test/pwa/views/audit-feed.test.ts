@@ -143,30 +143,14 @@ describe("createAuditFeed", () => {
     expect(btn.style.display).toBe("none");
   });
 
-  it("passes action filter in URL when chip is clicked", async () => {
-    vi.mocked(fetch).mockResolvedValue({
-      ok: true,
-      json: async () => ({ events: [] }),
-    } as unknown as Response);
-
+  it("renders All chip as the only range chip", () => {
     const { element } = createAuditFeed({ apiBase: "" });
     document.body.appendChild(element);
 
-    await vi.waitFor(() => {
-      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
-    });
-
     const rangeChips = element.querySelectorAll<HTMLButtonElement>(".audit-chip[data-range]");
-    const todayChip = Array.from(rangeChips).find((c) => c.dataset.range === "today");
-    expect(todayChip).not.toBeUndefined();
-    todayChip!.click();
-
-    await vi.waitFor(() => {
-      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
-    });
-
-    const url = vi.mocked(fetch).mock.calls[1]?.[0] as string;
-    expect(url).toContain("/audit/events");
+    expect(rangeChips.length).toBe(1);
+    expect(rangeChips[0]!.dataset.range).toBe("all");
+    expect(rangeChips[0]!.classList.contains("active")).toBe(true);
   });
 
   it("refresh() re-fetches and replaces events", async () => {
