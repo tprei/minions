@@ -445,7 +445,7 @@ export function createWorkspaceShell({ workflowId, taskId, eventBus }) {
     const showPanel = currentStatus === "finalizing" && !hasPr;
 
     if (showPanel && !draftPrPanel) {
-      draftPrPanel = createDraftPrPanel({ workflowId, taskId, onDraft: null });
+      draftPrPanel = createDraftPrPanel({ workflowId, taskId });
       slot.appendChild(draftPrPanel.element);
     } else if (!showPanel && draftPrPanel) {
       draftPrPanel.destroy();

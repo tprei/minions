@@ -8,7 +8,7 @@ export interface DraftPrPanelInstance {
 export interface DraftPrPanelOptions {
   workflowId: string;
   taskId: string;
-  onDraft: ((draft: { title: string; body: string }) => void) | null;
+  onDraft?: (draft: { title: string; body: string }) => void;
 }
 
 export declare function createDraftPrPanel(options: DraftPrPanelOptions): DraftPrPanelInstance;

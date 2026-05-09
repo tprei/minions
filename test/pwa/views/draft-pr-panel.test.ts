@@ -16,8 +16,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function mountPanel(onDraft?: ((draft: { title: string; body: string }) => void) | null) {
-  const panel = createDraftPrPanel({ workflowId: "wf-1", taskId: "T1", onDraft: onDraft ?? null });
+function mountPanel(onDraft?: (draft: { title: string; body: string }) => void) {
+  const opts = onDraft
+    ? { workflowId: "wf-1", taskId: "T1", onDraft }
+    : { workflowId: "wf-1", taskId: "T1" };
+  const panel = createDraftPrPanel(opts);
   document.body.appendChild(panel.element);
   return panel;
 }

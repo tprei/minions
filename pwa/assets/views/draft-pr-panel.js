@@ -8,7 +8,7 @@ function errorMessageFor(status, body) {
   if (status === 504 || (body && body.code === "draft_pr_timeout")) {
     return "Request timed out — the provider took more than 30s. Try again.";
   }
-  if (status === 503 || (body && body.code === "internal_error" && !body.code.startsWith("draft_pr"))) {
+  if (status === 503 || (body && body.code === "internal_error")) {
     return "Auto-draft is not configured on this engine.";
   }
   if (status === 422 || (body && body.code === "invalid_transition")) {
