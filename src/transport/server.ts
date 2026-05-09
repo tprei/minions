@@ -9,6 +9,8 @@ import type { CompletionDispatcher } from "../application/completion-dispatcher.
 import type { ContinueTaskService } from "../application/continue-task-service.js";
 import type { MergeService } from "../application/merge-service.js";
 import { MergeServiceError } from "../application/merge-service.js";
+import { draftPr, DraftPrError } from "../application/draft-pr-service.js";
+import type { DraftPrServiceDeps } from "../application/draft-pr-service.js";
 import type { RetryTaskService } from "../application/retry-task-service.js";
 import type { RecoveryService } from "../application/recovery-service.js";
 import type { WorkflowRepository } from "../application/repository.js";
@@ -31,6 +33,7 @@ export interface ServerDeps {
   continueTaskService?: ContinueTaskService;
   retryTaskService?: RetryTaskService;
   mergeService?: MergeService;
+  draftPrDeps?: DraftPrServiceDeps;
   ciBabysitter?: CIBabysitterService;
   qualityGateService?: QualityGateService;
   completionDispatcher?: CompletionDispatcher;
@@ -219,6 +222,29 @@ export function createServer(deps: ServerDeps): Hono {
           { code: "merge_state_inconsistent", message: "GitHub merged but internal state transition failed; operator must reconcile", details: { workflowId, taskId } },
           500,
         );
+      }
+      throw err;
+    }
+  });
+
+  app.post("/workflows/:id/tasks/:taskId/draft-pr", async (c) => {
+    if (!deps.draftPrDeps) {
+      return c.json({ code: "internal_error", message: "draft-pr service not configured" }, 503);
+    }
+    const workflowId = c.req.param("id");
+    const taskId = c.req.param("taskId");
+    try {
+      const result = await draftPr({ workflowId, taskId, deps: deps.draftPrDeps });
+      return c.json(result);
+    } catch (err) {
+      if (err instanceof DraftPrError) {
+        if (err.code === "timeout") {
+          return c.json({ code: "draft_pr_timeout", message: err.message, details: {} }, 504);
+        }
+        return c.json({ code: "draft_pr_parse_error", message: err.message, details: {} }, 500);
+      }
+      if (err instanceof DomainError && err.code === "invalid_transition") {
+        return c.json({ code: err.code, message: err.message, details: err.details }, 422);
       }
       throw err;
     }
