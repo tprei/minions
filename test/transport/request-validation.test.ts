@@ -274,4 +274,71 @@ describe("request shape validation", () => {
 
     expect(res.status).toBe(201);
   });
+
+  it("continue-task with valid attachments accepted", async () => {
+    const { app } = makeApp();
+
+    const res = await postCommand(app, {
+      kind: "continue-task",
+      workflowId: "wf-1",
+      taskId: "task-1",
+      prompt: "please fix",
+      attachments: [
+        { kind: "comment", path: "src/foo.ts", line: 10, body: "null check missing" },
+      ],
+    });
+
+    expect(res.status).not.toBe(400);
+  });
+
+  it("continue-task with attachment missing path returns 400 invalid_request", async () => {
+    const { app } = makeApp();
+
+    const res = await postCommand(app, {
+      kind: "continue-task",
+      workflowId: "wf-1",
+      taskId: "task-1",
+      prompt: "please fix",
+      attachments: [{ kind: "comment", line: 10, body: "missing path" }],
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { code: string; details: { field: string } };
+    expect(body.code).toBe("invalid_request");
+    expect(body.details.field).toBe("attachments[0].path");
+  });
+
+  it("continue-task with attachment extra property returns 400 invalid_request", async () => {
+    const { app } = makeApp();
+
+    const res = await postCommand(app, {
+      kind: "continue-task",
+      workflowId: "wf-1",
+      taskId: "task-1",
+      prompt: "please fix",
+      attachments: [{ kind: "comment", path: "src/foo.ts", line: 10, body: "ok", extra: "bad" }],
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { code: string; details: { field: string } };
+    expect(body.code).toBe("invalid_request");
+    expect(body.details.field).toBe("attachments[0].extra");
+  });
+
+  it("continue-task with attachment non-string body returns 400 invalid_request", async () => {
+    const { app } = makeApp();
+
+    const res = await postCommand(app, {
+      kind: "continue-task",
+      workflowId: "wf-1",
+      taskId: "task-1",
+      prompt: "please fix",
+      attachments: [{ kind: "comment", path: "src/foo.ts", line: 10, body: 99 }],
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { code: string; details: { field: string } };
+    expect(body.code).toBe("invalid_request");
+    expect(body.details.field).toBe("attachments[0].body");
+  });
 });
