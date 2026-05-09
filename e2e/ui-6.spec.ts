@@ -242,4 +242,40 @@ test.describe("UI-6: FAB + new-workflow sheet", () => {
     await page.waitForSelector(".sheet-panel.open", { timeout: 3_000 });
     await page.screenshot({ path: "e2e/ui-6.spec.ts-snapshots/new-workflow-sheet-mobile.png" });
   });
+
+  test("removing middle task clears stale dependsOn references", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await setupBaseRoutes(page);
+    await page.goto("/");
+    await page.waitForSelector(".fab", { timeout: 5_000 });
+    await page.locator(".fab").click();
+    await expect(page.locator(".sheet-panel")).toBeVisible({ timeout: 3_000 });
+
+    const multiBtn = page.locator(".nwf-segment").filter({ hasText: "multi-task" });
+    await multiBtn.click();
+    await expect(page.locator(".nwf-multi-task-section")).toBeVisible({ timeout: 2_000 });
+
+    const addTaskBtn = page.locator(".nwf-add-task-btn");
+    await addTaskBtn.click();
+    await addTaskBtn.click();
+
+    const prompts = page.locator(".nwf-task-prompt");
+    await expect(prompts).toHaveCount(3, { timeout: 2_000 });
+    await prompts.nth(0).fill("T1 prompt");
+    await prompts.nth(1).fill("T2 prompt");
+    await prompts.nth(2).fill("T3 prompt");
+
+    const t2chip = page.locator(".nwf-task-row:nth-child(3) .nwf-dep-chip[data-dep='T2']");
+    await expect(t2chip).toBeVisible({ timeout: 2_000 });
+    await t2chip.click();
+    await expect(t2chip).toHaveClass(/selected/);
+
+    const removeButtons = page.locator(".nwf-task-remove-btn");
+    await removeButtons.nth(1).click();
+
+    await expect(prompts).toHaveCount(2, { timeout: 2_000 });
+
+    const selectedChips = page.locator(".nwf-dep-chip.selected");
+    await expect(selectedChips).toHaveCount(0);
+  });
 });

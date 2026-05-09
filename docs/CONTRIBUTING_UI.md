@@ -294,9 +294,9 @@ Uses the `Sheet` component with `side: 'right'` (on desktop the sheet slides in 
 | Kind | Segmented control: `single-task` / `multi-task` | Yes (defaults to `single-task`) |
 | autoLand | Checkbox | No (defaults false) |
 | autoMergeOnGreen | Checkbox | No (defaults false) |
-| maxConcurrent | Number stepper | No (defaults 1) |
+| maxConcurrent | Number stepper | No (defaults 3, matching engine default) |
 
-In `multi-task` mode, a task list appears. Each task row has: local ID label (T1, T2, …), optional title input, prompt textarea, and depends-on chip selector (shows prior task IDs as toggleable chips).
+In `multi-task` mode, a task list appears. Each task row has: local ID label (T1, T2, …), optional title input, prompt textarea, and depends-on chip selector (shows prior task IDs as toggleable chips). When a task is removed, `dependsOn` references in all remaining tasks are remapped: IDs pointing to the removed task are dropped, and IDs pointing to tasks that shifted position are updated accordingly.
 
 **POST body shape** matches `WorkflowSpec` exactly:
 
@@ -304,12 +304,11 @@ In `multi-task` mode, a task list appears. Each task row has: local ID label (T1
 {
   "id": "<nanoid>",
   "kind": "single-task",
-  "tasks": [{ "id": "T1", "title": "", "prompt": "..." }],
-  "policy": { "autoLand": false, "autoMergeOnGreen": false, "maxConcurrent": 1 }
+  "tasks": [{ "id": "T1", "title": "optional title", "prompt": "..." }]
 }
 ```
 
-`policy` is omitted when all values are default (both booleans false, maxConcurrent falsy). `title` on the workflow is omitted when empty.
+For single-task workflows the optional title is placed on `tasks[0].title` (not at the top level). `policy` is omitted when all values are default (both booleans false, `maxConcurrent` equal to `3`); `policy.maxConcurrent` is included whenever the user sets a value other than `3`.
 
 **Validation:** prompt required (single-task), each task prompt required (multi-task). Errors render in `.nwf-error` at the top of the form; the sheet stays open.
 

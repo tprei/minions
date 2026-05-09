@@ -35,26 +35,28 @@ describe("buildPostBody", () => {
     expect(typeof task0?.title).toBe("string");
   });
 
-  it("single-task: omits title when empty", () => {
-    const body = buildPostBody({
-      title: "",
-      prompt: "Do something",
-      kind: "single-task",
-      policy: { autoLand: false, autoMergeOnGreen: false, maxConcurrent: 1 },
-      tasks: [],
-    });
-    expect("title" in body).toBe(false);
-  });
-
-  it("single-task: includes title when provided", () => {
+  it("single-task: title goes to tasks[0].title, not body.title", () => {
     const body = buildPostBody({
       title: "My Workflow",
       prompt: "Do something",
       kind: "single-task",
-      policy: { autoLand: false, autoMergeOnGreen: false, maxConcurrent: 1 },
+      policy: { autoLand: false, autoMergeOnGreen: false, maxConcurrent: 3 },
       tasks: [],
     });
-    expect(body.title).toBe("My Workflow");
+    expect("title" in body).toBe(false);
+    expect(body.tasks[0]?.title).toBe("My Workflow");
+  });
+
+  it("single-task: tasks[0].title is empty string when title omitted", () => {
+    const body = buildPostBody({
+      title: "",
+      prompt: "Do something",
+      kind: "single-task",
+      policy: { autoLand: false, autoMergeOnGreen: false, maxConcurrent: 3 },
+      tasks: [],
+    });
+    expect("title" in body).toBe(false);
+    expect(body.tasks[0]?.title).toBe("");
   });
 
   it("single-task: includes policy when non-default values present", () => {
@@ -67,7 +69,19 @@ describe("buildPostBody", () => {
     });
     expect(body.policy).toBeDefined();
     expect(body.policy?.autoLand).toBe(true);
-    expect(body.policy?.maxConcurrent).toBe(3);
+    expect(body.policy?.maxConcurrent).toBeUndefined();
+  });
+
+  it("single-task: includes maxConcurrent in policy when not equal to default 3", () => {
+    const body = buildPostBody({
+      title: "",
+      prompt: "Do something",
+      kind: "single-task",
+      policy: { autoLand: false, autoMergeOnGreen: false, maxConcurrent: 1 },
+      tasks: [],
+    });
+    expect(body.policy).toBeDefined();
+    expect(body.policy?.maxConcurrent).toBe(1);
   });
 
   it("multi-task: assigns T1, T2 ids and sets dependsOn", () => {
@@ -107,12 +121,12 @@ describe("buildPostBody", () => {
     expect(noDepTask !== undefined && "dependsOn" in noDepTask).toBe(false);
   });
 
-  it("policy is omitted when all values are falsy/default", () => {
+  it("policy is omitted when all values are falsy/default (maxConcurrent 3)", () => {
     const body = buildPostBody({
       title: "",
       prompt: "p",
       kind: "single-task",
-      policy: { autoLand: false, autoMergeOnGreen: false, maxConcurrent: 1 },
+      policy: { autoLand: false, autoMergeOnGreen: false, maxConcurrent: 3 },
       tasks: [],
     });
     expect("policy" in body).toBe(false);
@@ -317,5 +331,41 @@ describe("createNewWorkflowSheet", () => {
     expect(errorEl.style.display).not.toBe("none");
     expect(errorEl.textContent).toContain("Bad prompt");
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("removing middle task remaps dependsOn IDs correctly", () => {
+    const { sheet } = mountSheet();
+    sheet.open();
+
+    const multiBtn = document.querySelector(".nwf-segment:last-child") as HTMLButtonElement;
+    multiBtn.click();
+
+    const addBtn = document.querySelector(".nwf-add-task-btn") as HTMLButtonElement;
+    addBtn.click();
+    addBtn.click();
+
+    const prompts = document.querySelectorAll(".nwf-task-prompt") as NodeListOf<HTMLTextAreaElement>;
+    const p0 = prompts[0];
+    const p1 = prompts[1];
+    const p2 = prompts[2];
+    if (!p0 || !p1 || !p2) throw new Error("Expected 3 task prompts");
+    p0.value = "T1 prompt"; p0.dispatchEvent(new Event("input"));
+    p1.value = "T2 prompt"; p1.dispatchEvent(new Event("input"));
+    p2.value = "T3 prompt"; p2.dispatchEvent(new Event("input"));
+
+    const t2chip = document.querySelector(".nwf-task-row:nth-child(3) .nwf-dep-chip[data-dep='T2']") as HTMLButtonElement | null;
+    if (t2chip) t2chip.click();
+
+    const removeButtons = document.querySelectorAll(".nwf-task-remove-btn") as NodeListOf<HTMLButtonElement>;
+    const removeT2 = removeButtons[1];
+    if (!removeT2) throw new Error("Expected remove button for T2");
+    removeT2.click();
+
+    const remainingPrompts = document.querySelectorAll(".nwf-task-prompt") as NodeListOf<HTMLTextAreaElement>;
+    expect(remainingPrompts).toHaveLength(2);
+
+    const depChips = document.querySelectorAll(".nwf-dep-chip") as NodeListOf<HTMLButtonElement>;
+    const selectedChips = Array.from(depChips).filter((c) => c.classList.contains("selected"));
+    expect(selectedChips).toHaveLength(0);
   });
 });

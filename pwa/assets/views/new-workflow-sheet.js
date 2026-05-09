@@ -13,12 +13,8 @@ function buildPostBody({ title, prompt, kind, policy, tasks }) {
     tasks: [],
   };
 
-  if (title.trim()) {
-    body.title = title.trim();
-  }
-
   if (kind === 'single-task') {
-    body.tasks = [{ id: 'T1', title: '', prompt: prompt.trim() }];
+    body.tasks = [{ id: 'T1', title: title.trim(), prompt: prompt.trim() }];
   } else {
     body.tasks = tasks.map((t, i) => {
       const taskId = `T${i + 1}`;
@@ -33,7 +29,7 @@ function buildPostBody({ title, prompt, kind, policy, tasks }) {
   const policyObj = {};
   if (policy.autoLand) policyObj.autoLand = policy.autoLand;
   if (policy.autoMergeOnGreen) policyObj.autoMergeOnGreen = policy.autoMergeOnGreen;
-  if (policy.maxConcurrent !== undefined && policy.maxConcurrent > 1) policyObj.maxConcurrent = policy.maxConcurrent;
+  if (policy.maxConcurrent !== undefined && policy.maxConcurrent !== 3) policyObj.maxConcurrent = policy.maxConcurrent;
   if (Object.keys(policyObj).length > 0) {
     body.policy = policyObj;
   }
@@ -44,7 +40,7 @@ function buildPostBody({ title, prompt, kind, policy, tasks }) {
 export function createNewWorkflowSheet({ onSubmit, onClose } = {}) {
   let tasks = [{ title: '', prompt: '', dependsOn: [] }];
   let kind = 'single-task';
-  let policy = { autoLand: false, autoMergeOnGreen: false, maxConcurrent: 1 };
+  let policy = { autoLand: false, autoMergeOnGreen: false, maxConcurrent: 3 };
 
   const formEl = document.createElement('div');
   formEl.className = 'nwf-form';
@@ -179,7 +175,7 @@ export function createNewWorkflowSheet({ onSubmit, onClose } = {}) {
   maxConcInput.className = 'nwf-stepper';
   maxConcInput.min = '1';
   maxConcInput.max = '16';
-  maxConcInput.value = '1';
+  maxConcInput.value = '3';
   maxConcInput.setAttribute('aria-label', 'Max concurrent tasks');
   maxConcRow.appendChild(maxConcLbl);
   maxConcRow.appendChild(maxConcInput);
@@ -236,12 +232,18 @@ export function createNewWorkflowSheet({ onSubmit, onClose } = {}) {
       removeBtn.textContent = '×';
       removeBtn.setAttribute('aria-label', `Remove task T${idx + 1}`);
       removeBtn.addEventListener('click', () => {
-        tasks.splice(idx, 1);
-        tasks.forEach((t, i) => {
-          t.dependsOn = t.dependsOn.filter((dep) => {
-            const depIdx = parseInt(dep.slice(1), 10) - 1;
-            return depIdx < tasks.length && depIdx !== idx;
-          });
+        const removedIdx = idx;
+        tasks.splice(removedIdx, 1);
+        tasks.forEach((t) => {
+          t.dependsOn = t.dependsOn
+            .filter((dep) => {
+              const depOldIdx = parseInt(dep.slice(1), 10) - 1;
+              return depOldIdx !== removedIdx;
+            })
+            .map((dep) => {
+              const depOldIdx = parseInt(dep.slice(1), 10) - 1;
+              return depOldIdx > removedIdx ? `T${depOldIdx}` : dep;
+            });
         });
         renderTaskList();
       });
@@ -380,7 +382,7 @@ export function createNewWorkflowSheet({ onSubmit, onClose } = {}) {
     const policyValue = {
       autoLand: autoLandCheck.checked,
       autoMergeOnGreen: autoMergeCheck.checked,
-      maxConcurrent: parseInt(maxConcInput.value, 10) || 1,
+      maxConcurrent: parseInt(maxConcInput.value, 10) || 3,
     };
 
     const body = buildPostBody({
@@ -432,8 +434,8 @@ export function createNewWorkflowSheet({ onSubmit, onClose } = {}) {
     tasks = [{ title: '', prompt: '', dependsOn: [] }];
     autoLandCheck.checked = false;
     autoMergeCheck.checked = false;
-    maxConcInput.value = '1';
-    policy = { autoLand: false, autoMergeOnGreen: false, maxConcurrent: 1 };
+    maxConcInput.value = '3';
+    policy = { autoLand: false, autoMergeOnGreen: false, maxConcurrent: 3 };
     hideError();
     sheet.open();
   }
