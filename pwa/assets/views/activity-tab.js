@@ -1,7 +1,9 @@
 import { createAuditFeed } from './audit-feed.js';
 import { createAlertCenter } from './alert-center.js';
+import { createPassport } from './passport.js';
 
-export function createActivityTab({ apiBase = '' } = {}) {
+export function createActivityTab({ apiBase = '', workflows: initialWorkflows = [] } = {}) {
+  let workflows = initialWorkflows;
   const root = document.createElement('div');
   root.className = 'activity-tab';
 
@@ -18,8 +20,14 @@ export function createActivityTab({ apiBase = '' } = {}) {
   alertsBtn.dataset.view = 'alerts';
   alertsBtn.textContent = 'Alerts';
 
+  const passportBtn = document.createElement('button');
+  passportBtn.className = 'activity-segment';
+  passportBtn.dataset.view = 'passport';
+  passportBtn.textContent = 'Passport';
+
   segmented.appendChild(auditBtn);
   segmented.appendChild(alertsBtn);
+  segmented.appendChild(passportBtn);
   root.appendChild(segmented);
 
   const body = document.createElement('div');
@@ -28,12 +36,18 @@ export function createActivityTab({ apiBase = '' } = {}) {
 
   let auditFeed = null;
   let alertCenter = null;
+  let passportView = null;
   let currentView = 'audit';
+
+  function setActiveBtn(active) {
+    auditBtn.classList.toggle('active', active === 'audit');
+    alertsBtn.classList.toggle('active', active === 'alerts');
+    passportBtn.classList.toggle('active', active === 'passport');
+  }
 
   function showAudit() {
     currentView = 'audit';
-    auditBtn.classList.add('active');
-    alertsBtn.classList.remove('active');
+    setActiveBtn('audit');
     body.innerHTML = '';
 
     if (!auditFeed) {
@@ -44,14 +58,24 @@ export function createActivityTab({ apiBase = '' } = {}) {
 
   function showAlerts() {
     currentView = 'alerts';
-    alertsBtn.classList.add('active');
-    auditBtn.classList.remove('active');
+    setActiveBtn('alerts');
     body.innerHTML = '';
 
     if (!alertCenter) {
       alertCenter = createAlertCenter({ apiBase });
     }
     body.appendChild(alertCenter.element);
+  }
+
+  function showPassport() {
+    currentView = 'passport';
+    setActiveBtn('passport');
+    body.innerHTML = '';
+
+    if (!passportView) {
+      passportView = createPassport({ workflows });
+    }
+    body.appendChild(passportView.element);
   }
 
   auditBtn.addEventListener('click', () => {
@@ -62,7 +86,17 @@ export function createActivityTab({ apiBase = '' } = {}) {
     if (currentView !== 'alerts') showAlerts();
   });
 
+  passportBtn.addEventListener('click', () => {
+    if (currentView !== 'passport') showPassport();
+  });
+
   showAudit();
 
-  return { element: root };
+  return {
+    element: root,
+    updateWorkflows(newWorkflows) {
+      workflows = newWorkflows;
+      if (passportView) passportView.update(newWorkflows);
+    },
+  };
 }

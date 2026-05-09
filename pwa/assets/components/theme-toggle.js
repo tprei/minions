@@ -1,7 +1,6 @@
 const THEME_COLORS = {
   light: '#f7f4f0',
   dark: '#0a0908',
-  system: '#0a0908',
 };
 
 function getSystemTheme() {
@@ -16,9 +15,21 @@ function applyTheme(pref) {
   }
 
   const resolved = pref === 'system' ? getSystemTheme() : pref;
-  const metaThemeColor = document.querySelector('meta[name="theme-color"]');
-  if (metaThemeColor) {
-    metaThemeColor.setAttribute('content', THEME_COLORS[resolved]);
+
+  document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => {
+    const media = meta.getAttribute('media') ?? '';
+    if (media.includes('light')) {
+      meta.setAttribute('content', THEME_COLORS.light);
+    } else if (media.includes('dark')) {
+      meta.setAttribute('content', THEME_COLORS.dark);
+    } else {
+      meta.setAttribute('content', THEME_COLORS[resolved]);
+    }
+  });
+
+  const metaNoMedia = document.querySelector('meta[name="theme-color"]:not([media])');
+  if (metaNoMedia) {
+    metaNoMedia.setAttribute('content', THEME_COLORS[resolved]);
   }
 }
 

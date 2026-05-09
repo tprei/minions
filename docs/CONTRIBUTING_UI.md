@@ -466,3 +466,54 @@ State classes per step: `cs-step-idle | cs-step-active | cs-step-completed | cs-
 The stepper tracks `lastLifecycleStatus` internally so that when a terminal failure arrives, it can show the correct stopped-at position without needing the previous task state externally.
 
 `WorkspaceShell` mounts the stepper in a `.workspace-task-header` div above the phase panels. It calls `completionStepper.update(task)` on `setArtifacts` and `completionStepper.onTaskTransitioned(ev)` on task-transitioned events from `eventBus`. Events are scoped to the mounted `taskId` (UI-3 invariant).
+
+## UI-10 polish
+
+### Swipe-up actions drawer
+
+`pwa/assets/gestures/swipe-up.js` exports `attachSwipeUp(target, { threshold, edgeZone, onTrigger })`. The gesture only activates when `window.matchMedia('(display-mode: standalone)').matches` is true. It listens for `pointerdown` in the bottom `edgeZone` pixels of the viewport and fires `onTrigger` when the pointer moves upward by more than `threshold` pixels. Interactive targets (`button`, `input`, `textarea`, `select`, `a`, `label`, `[role="button"]`, `[contenteditable]`) are excluded via `closest()` guard.
+
+`pwa/assets/views/actions-drawer.js` exports `createActionsDrawer({ actions })` — a bottom-sheet action list built on `createSheet`. Each row has an icon and label; tapping calls `onClick` then closes the drawer. `createDefaultActionsDrawer` wires the four default actions (jump to workflow, switch view, toggle theme, open audit).
+
+### Passport sub-view
+
+`pwa/assets/views/passport.js` exports `createPassport({ workflows })`. It renders a sortable list of every workflow's city-name alias, status pill, and creation date. Sort options: `name` (alpha by alias), `created` (newest first), `status` (active → completed → failed → cancelled). Tapping a row navigates to `#/workflow/${id}`. The Activity tab exposes Passport as a third sub-tab alongside Audit and Alerts.
+
+### Cost burn-rate badge
+
+`pwa/assets/components/cost-badge.js` exports `createCostBadge({ onUsageEvent })`. It accumulates `costUsd` from `usage` provider events (type: `{ kind: "usage"; inputTokens: number; outputTokens: number; cachedInputTokens?: number; reasoningTokens?: number; costUsd?: number }`). Tier thresholds:
+
+| Tier   | Range         | CSS class            |
+|--------|---------------|----------------------|
+| green  | < $0.01       | `cost-badge-green`   |
+| yellow | $0.01–$0.10   | `cost-badge-yellow`  |
+| orange | $0.10–$1.00   | `cost-badge-orange`  |
+| red    | ≥ $1.00       | `cost-badge-red`     |
+
+### Agent color palette
+
+`pwa/assets/utils/agent-color.js` exports `agentColor(providerName)` returning `{ hue, accent, icon }`. Provider names come from the engine's `ProviderPlugin.name`:
+
+| Provider      | Family  | Hue | Accent    |
+|---------------|---------|-----|-----------|
+| `claude-code` | blue    | 210 | `#3b82f6` |
+| `codex`       | purple  | 270 | `#a855f7` |
+| `stub`        | grey    | 0   | `#9ca3af` |
+
+Unknown providers fall back to the grey family.
+
+### Dynamic theme-color meta
+
+`applyTheme` in `theme-toggle.js` updates all `<meta name="theme-color">` elements. Tags with `media="(prefers-color-scheme: light)"` receive the light color; tags with `media="(prefers-color-scheme: dark)"` receive the dark color; tags without a `media` attribute receive the resolved color for the current preference.
+
+### Long-press context menu
+
+`pwa/assets/components/context-menu.js` exports `createContextMenu({ target, items })`. Uses `attachLongPress` (500ms) to show a positioned `.context-menu` at the pointer location. Items call `onClick` then close. Outside click or Esc closes. `createKanbanCardContextMenu(card, { workflowId, taskId, hasPr, executionStatus })` wires the default kanban actions: Pin (toggles `pinned-workflows` in localStorage), Retry (only when `failed`/`cancelled`), Jump to PR (only when a `pr` artifact exists).
+
+### Pull-to-refresh coverage
+
+All paginated list views now have `attachPullToRefresh` wired:
+- Audit feed (`audit-feed.js`) — present since UI-7.
+- Alert center (`alert-center.js`) — present since UI-7.
+- Workflow list (`app-v1.js` `renderWorkflowList`) — added in UI-10.
+- Passport (`passport.js`) — added in UI-10.

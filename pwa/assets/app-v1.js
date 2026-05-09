@@ -9,6 +9,10 @@ import { createNewWorkflowSheet } from "./views/new-workflow-sheet.js";
 import { createBottomTabs } from "./components/bottom-tabs.js";
 import { createActivityTab } from "./views/activity-tab.js";
 import { createInstallBanner } from "./views/install-banner.js";
+import { attachSwipeUp } from "./gestures/swipe-up.js";
+import { createDefaultActionsDrawer } from "./views/actions-drawer.js";
+import { attachPullToRefresh } from "./hooks/use-pull-to-refresh.js";
+import { createKanbanCardContextMenu } from "./components/context-menu.js";
 
 export const state = {
   workflows: [],
@@ -59,10 +63,35 @@ function bootstrap() {
 
   mountBottomTabs();
   mountInstallBanner();
+  mountActionsDrawer();
 
   loadList();
   window.addEventListener("hashchange", onRoute);
   onRoute();
+}
+
+let actionsDrawer = null;
+
+function mountActionsDrawer() {
+  actionsDrawer = createDefaultActionsDrawer({
+    onToggleTheme() {
+      const toggle = document.querySelector('.theme-toggle');
+      if (!toggle) return;
+      const active = toggle.querySelector('.theme-btn.active');
+      const all = toggle.querySelectorAll('.theme-btn');
+      const idx = Array.from(all).indexOf(active);
+      const next = all[(idx + 1) % all.length];
+      if (next) next.click();
+    },
+  });
+
+  attachSwipeUp(document.body, {
+    threshold: 64,
+    edgeZone: 24,
+    onTrigger() {
+      actionsDrawer.open();
+    },
+  });
 }
 
 function mountBottomTabs() {
@@ -150,7 +179,9 @@ function renderActivity() {
   renderHeader(app);
   appendInstallBannerIfActive(app);
   if (!activityTabInstance) {
-    activityTabInstance = createActivityTab();
+    activityTabInstance = createActivityTab({ workflows: state.workflows });
+  } else {
+    activityTabInstance.updateWorkflows(state.workflows);
   }
   app.appendChild(activityTabInstance.element);
   if (bottomTabsNav) app.appendChild(bottomTabsNav);
@@ -182,6 +213,9 @@ function loadList() {
     .then((r) => r.json())
     .then((data) => {
       state.workflows = data;
+      if (activityTabInstance) {
+        activityTabInstance.updateWorkflows(state.workflows);
+      }
       render();
     })
     .catch((err) => {
@@ -717,6 +751,8 @@ function renderWorkflowList(container) {
     const list = document.createElement("div");
     list.className = "workflow-list";
 
+    attachPullToRefresh(list, { onRefresh: () => loadList() });
+
     for (const wf of state.workflows) {
       const item = document.createElement("div");
       const isActive = wf.id === state.currentId;
@@ -873,6 +909,14 @@ function renderKanban(container) {
       if (task.runs != null) parts.push(`runs: ${task.runs}`);
       if (parts.length) meta.textContent = parts.join(" · ");
       card.appendChild(meta);
+
+      const hasPr = Array.isArray(task.artifacts) && task.artifacts.some((a) => a.kind === "pr");
+      createKanbanCardContextMenu(card, {
+        workflowId: wf.id,
+        taskId: task.id,
+        hasPr,
+        executionStatus: task.executionStatus,
+      });
 
       col.appendChild(card);
     }
