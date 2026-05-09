@@ -41,9 +41,9 @@ describe("static serving with pwaRoot set", () => {
     expect(text).toContain("TEST FIXTURE — slice 16 pwa-stub");
   });
 
-  it("GET /manifest.json returns 200 with parseable JSON", async () => {
+  it("GET /manifest.webmanifest returns 200 with parseable JSON", async () => {
     const app = makeApp(pwaRoot);
-    const res = await app.request("/manifest.json");
+    const res = await app.request("/manifest.webmanifest");
     expect(res.status).toBe(200);
     const body = await res.json() as { name: string };
     expect(body.name).toBe("TEST FIXTURE — slice 16 pwa-stub");
@@ -89,9 +89,9 @@ describe("static serving without pwaRoot", () => {
     expect(res.status).toBe(404);
   });
 
-  it("GET /manifest.json returns 404", async () => {
+  it("GET /manifest.webmanifest returns 404", async () => {
     const app = makeApp();
-    const res = await app.request("/manifest.json");
+    const res = await app.request("/manifest.webmanifest");
     expect(res.status).toBe(404);
   });
 });

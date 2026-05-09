@@ -535,10 +535,11 @@ export function createServer(deps: ServerDeps): Hono {
     app.use("/", async (c, next) => { await next(); c.header("Cache-Control", "no-cache"); });
     app.use("/sw.js", async (c, next) => { await next(); c.header("Cache-Control", "no-cache"); });
     app.get("/", serveStatic({ root: deps.pwaRoot, path: "index.html" }));
-    app.get("/manifest.json", serveStatic({ root: deps.pwaRoot, path: "manifest.json" }));
+    app.get("/manifest.webmanifest", serveStatic({ root: deps.pwaRoot, path: "manifest.webmanifest" }));
     app.get("/sw.js", serveStatic({ root: deps.pwaRoot, path: "sw.js" }));
     app.get("/icons/*", serveStatic({ root: deps.pwaRoot }));
     app.get("/assets/*", serveStatic({ root: deps.pwaRoot }));
+    app.get("/*.js", serveStatic({ root: deps.pwaRoot }));
   }
 
   return app;
