@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import type { TaskNode, Workflow, WorkflowEvent } from "../domain/types";
 import type { ProviderEvent } from "../domain/providerEvent";
-import { getWorkflow } from "../transport/rest";
+import { getWorkflow, postCommand } from "../transport/rest";
 import { subscribeWorkflow } from "../transport/sse";
 import { useWorkflowStore, useWorkflowById } from "../store/useWorkflowStore";
 import { useConnectionStore } from "../store/useConnectionStore";
@@ -28,12 +28,12 @@ const STATUS_ORDER: Record<string, number> = {
 };
 
 const TERMINAL_STATUSES = new Set(["merged", "cancelled", "failed", "completed"]);
+const QUEUE_FLUSH_TARGET_STATUSES = new Set(["pending", "ready", "completed", "failed"]);
 
 function pickActiveTask(workflow: Workflow): TaskNode | undefined {
   const tasks = Object.values(workflow.graph);
   if (tasks.length === 0) return undefined;
 
-  // Prefer non-terminal tasks, sorted by how "active" they are
   const nonTerminal = tasks.filter((t) => !TERMINAL_STATUSES.has(t.executionStatus));
   if (nonTerminal.length > 0) {
     return nonTerminal.sort(
@@ -42,7 +42,6 @@ function pickActiveTask(workflow: Workflow): TaskNode | undefined {
     )[0];
   }
 
-  // Fall back to the last task by creation time
   return tasks.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }
 
@@ -59,6 +58,11 @@ interface Props {
   id: string;
 }
 
+interface QueuedSend {
+  taskId: string;
+  message: string;
+}
+
 export function WorkflowDetail({ id }: Props): JSX.Element {
   const setWorkflow = useWorkflowStore((s) => s.setWorkflow);
   const applyEvent = useWorkflowStore((s) => s.applyEvent);
@@ -67,10 +71,26 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
 
   const workflow = useWorkflowById(id);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [queueError, setQueueError] = useState<string | null>(null);
   const [dagOpen, setDagOpen] = useState(false);
   const [focusedTaskId, setFocusedTaskId] = useState<string | undefined>(undefined);
-  const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
+  const [queuedSend, setQueuedSend] = useState<QueuedSend | null>(null);
   const [pendingApproval, setPendingApproval] = useState<ProviderEvent | null>(null);
+
+  const queuedSendRef = useRef<QueuedSend | null>(null);
+  queuedSendRef.current = queuedSend;
+
+  const providerEventListenersRef = useRef<Set<(evt: WorkflowEvent) => void>>(new Set());
+
+  const subscribeProviderEvents = useCallback(
+    (listener: (evt: WorkflowEvent) => void): (() => void) => {
+      providerEventListenersRef.current.add(listener);
+      return () => {
+        providerEventListenersRef.current.delete(listener);
+      };
+    },
+    [],
+  );
 
   useEffect(() => {
     setCurrentWorkflowId(id);
@@ -87,6 +107,7 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
     const sub = subscribeWorkflow(id, {
       onEvent(evt: WorkflowEvent) {
         applyEvent(evt);
+
         if (evt.kind === "provider-event") {
           const pe = evt.payload.providerEvent as ProviderEvent;
           if (pe.kind === "permission_request") {
@@ -94,14 +115,33 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
           } else if (pe.kind === "final") {
             setPendingApproval(null);
           }
+          for (const listener of providerEventListenersRef.current) listener(evt);
         }
+
         if (evt.kind === "task-transitioned") {
-          const { toExecutionStatus } = evt.payload;
+          const { toExecutionStatus, taskId: transTaskId } = evt.payload;
+
           if (!["running", "quality-pending", "ci-pending"].includes(toExecutionStatus)) {
             setPendingApproval(null);
           }
-          if (queuedMessage && ["pending", "ready"].includes(toExecutionStatus)) {
-            setQueuedMessage(null);
+
+          const queued = queuedSendRef.current;
+          if (
+            queued !== null &&
+            queued.taskId === transTaskId &&
+            QUEUE_FLUSH_TARGET_STATUSES.has(toExecutionStatus)
+          ) {
+            queuedSendRef.current = null;
+            setQueuedSend(null);
+            const cmd = toExecutionStatus === "failed"
+              ? { kind: "retry-task" as const, workflowId: id, taskId: transTaskId, prompt: queued.message }
+              : { kind: "continue-task" as const, workflowId: id, taskId: transTaskId, prompt: queued.message };
+            postCommand(cmd).catch((err: unknown) => {
+              const msg = err instanceof Error ? err.message : "Failed to send queued message";
+              setQueueError(msg);
+              queuedSendRef.current = queued;
+              setQueuedSend(queued);
+            });
           }
         }
       },
@@ -115,12 +155,15 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
       sub.close();
       setConnectionState("idle");
     };
-  // queuedMessage intentionally excluded — we only want this to re-run on id change
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, setWorkflow, applyEvent, setConnectionState, setCurrentWorkflowId]);
 
-  const handleQueue = useCallback((msg: string) => {
-    setQueuedMessage(msg);
+  const handleQueue = useCallback((taskId: string, msg: string) => {
+    setQueueError(null);
+    setQueuedSend({ taskId, message: msg });
+  }, []);
+
+  const handleApprovalResolved = useCallback(() => {
+    setPendingApproval(null);
   }, []);
 
   const connectionState = useConnectionStore((s) => s.state);
@@ -144,6 +187,10 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
     : pickActiveTask(workflow);
 
   const status = activeTask?.executionStatus ?? "pending";
+  const queuedMessageForActive =
+    queuedSend !== null && activeTask && queuedSend.taskId === activeTask.id
+      ? queuedSend.message
+      : null;
 
   function renderPhase(): JSX.Element {
     if (!activeTask) {
@@ -165,8 +212,9 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
               taskId={activeTask.id}
               executionStatus={status}
               pendingApproval={pendingApproval}
-              queuedMessage={queuedMessage}
-              onQueue={handleQueue}
+              queuedMessage={queuedMessageForActive}
+              onQueue={(msg) => handleQueue(activeTask.id, msg)}
+              onApprovalResolved={handleApprovalResolved}
             />
           </div>
         );
@@ -176,14 +224,20 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
       case "ci-pending":
         return (
           <div className="flex flex-col h-full">
-            <TranscriptView workflowId={id} taskId={activeTask.id} />
+            <TranscriptView
+              workflowId={id}
+              taskId={activeTask.id}
+              subscribeProviderEvents={subscribeProviderEvents}
+              onApprovalResolved={handleApprovalResolved}
+            />
             <Composer
               workflowId={id}
               taskId={activeTask.id}
               executionStatus={status}
               pendingApproval={pendingApproval}
-              queuedMessage={queuedMessage}
-              onQueue={handleQueue}
+              queuedMessage={queuedMessageForActive}
+              onQueue={(msg) => handleQueue(activeTask.id, msg)}
+              onApprovalResolved={handleApprovalResolved}
             />
           </div>
         );
@@ -235,7 +289,8 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
                 executionStatus={status}
                 pendingApproval={null}
                 queuedMessage={null}
-                onQueue={handleQueue}
+                onQueue={(msg) => handleQueue(activeTask.id, msg)}
+                onApprovalResolved={handleApprovalResolved}
               />
             )}
           </div>
@@ -267,6 +322,15 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
           tone="warning"
           message={connectionState === "reconnecting" ? "Reconnecting…" : "Connection error — events may be delayed"}
           className="mx-4 mt-2"
+        />
+      )}
+
+      {queueError && (
+        <Banner
+          tone="error"
+          message={`Queued message failed: ${queueError}`}
+          className="mx-4 mt-2"
+          onDismiss={() => setQueueError(null)}
         />
       )}
 

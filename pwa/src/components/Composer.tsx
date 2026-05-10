@@ -38,6 +38,14 @@ function deriveMode(
   }
 }
 
+function isTextInputFocused(): boolean {
+  const ae = document.activeElement;
+  if (ae instanceof HTMLTextAreaElement) return true;
+  if (ae instanceof HTMLInputElement) return true;
+  if (ae instanceof HTMLElement && ae.isContentEditable) return true;
+  return false;
+}
+
 interface Props {
   workflowId: string;
   taskId: string;
@@ -45,6 +53,7 @@ interface Props {
   pendingApproval: ProviderEvent | null;
   queuedMessage: string | null;
   onQueue: (msg: string) => void;
+  onApprovalResolved?: () => void;
 }
 
 export function Composer({
@@ -54,32 +63,36 @@ export function Composer({
   pendingApproval,
   queuedMessage,
   onQueue,
+  onApprovalResolved,
 }: Props): JSX.Element | null {
   const mode = deriveMode(executionStatus, pendingApproval);
   const [draft, setDraft, clearDraft] = useDraftState(workflowId, taskId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const composerFocusedRef = useRef(false);
 
   useEffect(() => {
     if (mode !== "approval") return;
 
     function handleKey(e: KeyboardEvent): void {
-      if (composerFocusedRef.current) return;
+      if (isTextInputFocused()) return;
       if (pendingApproval?.kind !== "permission_request") return;
-      const { id: requestId, tool, input } = pendingApproval;
+      const requestId = pendingApproval.id;
 
       if (e.key === "a" || e.key === "A") {
         e.preventDefault();
-        void postCommand({ kind: "approve-permission", workflowId, taskId, requestId, decision: "approve" });
+        postCommand({ kind: "approve-permission", workflowId, taskId, requestId, decision: "approve" })
+          .then(() => onApprovalResolved?.())
+          .catch(() => undefined);
       } else if (e.key === "d" || e.key === "D") {
         e.preventDefault();
-        void postCommand({ kind: "approve-permission", workflowId, taskId, requestId, decision: "deny", reason: "Denied via hotkey" });
+        postCommand({ kind: "approve-permission", workflowId, taskId, requestId, decision: "deny", reason: "Denied via hotkey" })
+          .then(() => onApprovalResolved?.())
+          .catch(() => undefined);
       }
     }
 
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [mode, pendingApproval, workflowId, taskId]);
+  }, [mode, pendingApproval, workflowId, taskId, onApprovalResolved]);
 
   if (mode === "disabled") return null;
 
@@ -95,21 +108,29 @@ export function Composer({
   }
 
   if (mode === "approval" && pendingApproval?.kind === "permission_request") {
-    const { id: requestId } = pendingApproval;
+    const requestId = pendingApproval.id;
     return (
       <div className="border-t border-border bg-bg-soft px-3 py-2 flex items-center gap-2">
         <span className="text-xs text-warn flex-1">Permission requested — press A to approve, D to deny</span>
         <button
           type="button"
           className="btn-primary text-xs px-3 py-1"
-          onClick={() => void postCommand({ kind: "approve-permission", workflowId, taskId, requestId, decision: "approve" })}
+          onClick={() => {
+            postCommand({ kind: "approve-permission", workflowId, taskId, requestId, decision: "approve" })
+              .then(() => onApprovalResolved?.())
+              .catch(() => undefined);
+          }}
         >
           Approve (A)
         </button>
         <button
           type="button"
           className="btn-secondary text-xs px-3 py-1"
-          onClick={() => void postCommand({ kind: "approve-permission", workflowId, taskId, requestId, decision: "deny", reason: "Denied" })}
+          onClick={() => {
+            postCommand({ kind: "approve-permission", workflowId, taskId, requestId, decision: "deny", reason: "Denied" })
+              .then(() => onApprovalResolved?.())
+              .catch(() => undefined);
+          }}
         >
           Deny (D)
         </button>
@@ -121,20 +142,31 @@ export function Composer({
     const hasQueue = queuedMessage !== null;
     return (
       <div className="border-t border-border bg-bg-soft px-3 py-2 flex items-center gap-2">
-        <span className="text-xs text-fg-muted flex-1">
-          {hasQueue ? `Queued: "${queuedMessage}"` : "Agent is running…"}
-        </span>
-        {!hasQueue && (
-          <button
-            type="button"
-            className="btn-secondary text-xs px-3 py-1 flex items-center gap-1"
-            onClick={() => {
-              const text = draft.trim();
-              if (text) { onQueue(text); clearDraft(); }
-            }}
-          >
-            🕐 Queue
-          </button>
+        {hasQueue ? (
+          <span className="text-xs text-fg-muted flex-1">{`Queued: "${queuedMessage}"`}</span>
+        ) : (
+          <>
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Queue a follow-up…"
+              rows={1}
+              className="flex-1 resize-none bg-transparent text-sm text-fg placeholder:text-fg-subtle focus:outline-none min-h-[1.5rem] max-h-20 leading-6"
+              style={{ height: "auto" }}
+            />
+            <button
+              type="button"
+              className="btn-secondary text-xs px-3 py-1 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={!draft.trim()}
+              onClick={() => {
+                const text = draft.trim();
+                if (text) { onQueue(text); clearDraft(); }
+              }}
+            >
+              🕐 Queue
+            </button>
+          </>
         )}
       </div>
     );
@@ -155,8 +187,6 @@ export function Composer({
           ref={textareaRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onFocus={() => { composerFocusedRef.current = true; }}
-          onBlur={() => { composerFocusedRef.current = false; }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();

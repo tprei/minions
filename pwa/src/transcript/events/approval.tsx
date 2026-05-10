@@ -7,7 +7,7 @@ interface Props {
   input: unknown;
   workflowId: string;
   taskId: string;
-  onResolved?: (requestId: string) => void;
+  onResolved?: () => void;
 }
 
 type State = "idle" | "denying" | "resolved-approve" | "resolved-deny";
@@ -27,7 +27,7 @@ export function Approval({ id, tool, input, workflowId, taskId, onResolved }: Pr
     try {
       await postCommand({ kind: "approve-permission", workflowId, taskId, requestId: id, decision: "approve" });
       setUiState("resolved-approve");
-      onResolved?.(id);
+      onResolved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Request failed");
     } finally {
@@ -43,7 +43,7 @@ export function Approval({ id, tool, input, workflowId, taskId, onResolved }: Pr
     try {
       await postCommand({ kind: "approve-permission", workflowId, taskId, requestId: id, decision: "deny", reason });
       setUiState("resolved-deny");
-      onResolved?.(id);
+      onResolved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Request failed");
     } finally {

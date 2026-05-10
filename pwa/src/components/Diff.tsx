@@ -1,4 +1,3 @@
-import DOMPurify from "dompurify";
 import { cx } from "../util/cx";
 
 interface Props {
@@ -88,21 +87,12 @@ function parseDiff(raw: string): FileBlock[] {
   return files.filter((f) => f.hunks.length > 0);
 }
 
-function renderSafe(text: string): string {
-  const escaped = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  return DOMPurify.sanitize(escaped, { USE_PROFILES: { html: true } });
-}
-
 interface LineProps {
   line: DiffLine;
   wrapClass: string;
 }
 
 function Line({ line, wrapClass }: LineProps): JSX.Element {
-  const html = renderSafe(line.text);
   return (
     <div
       className={cx(
@@ -116,7 +106,7 @@ function Line({ line, wrapClass }: LineProps): JSX.Element {
       <span className="select-none mr-1 text-fg-subtle">
         {line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " "}
       </span>
-      <code className="diff-line-code" dangerouslySetInnerHTML={{ __html: html }} />
+      <code className="diff-line-code">{line.text}</code>
     </div>
   );
 }

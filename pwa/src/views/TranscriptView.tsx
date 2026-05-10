@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { ProviderEvent } from "../domain/providerEvent";
 import type { WorkflowEvent } from "../domain/types";
-import { subscribeWorkflow } from "../transport/sse";
 import { aggregateConsecutive, ClusterGroup, type AggregateItem } from "../transcript/aggregate";
 import { createStreamingBuffer } from "../transcript/streaming";
 import { AssistantText } from "../transcript/events/assistant-text";
@@ -14,9 +13,14 @@ import { Final } from "../transcript/events/final";
 import { Approval } from "../transcript/events/approval";
 import { ClusterHeader } from "../transcript/events/cluster-header";
 
+export type ProviderEventListener = (evt: WorkflowEvent) => void;
+export type ProviderEventSubscriber = (listener: ProviderEventListener) => () => void;
+
 interface Props {
   workflowId: string;
   taskId: string;
+  subscribeProviderEvents: ProviderEventSubscriber;
+  onApprovalResolved?: () => void;
 }
 
 interface ClusterState {
@@ -29,12 +33,14 @@ function EventRow({
   taskId,
   clusterState,
   onClusterToggle,
+  onApprovalResolved,
 }: {
   item: AggregateItem;
   workflowId: string;
   taskId: string;
   clusterState: Map<string, ClusterState>;
   onClusterToggle: (id: string) => void;
+  onApprovalResolved?: () => void;
 }): JSX.Element | null {
   if (item instanceof ClusterGroup) {
     const id = item._id ?? "";
@@ -50,6 +56,7 @@ function EventRow({
             taskId={taskId}
             clusterState={clusterState}
             onClusterToggle={onClusterToggle}
+            onApprovalResolved={onApprovalResolved}
           />
         ))}
       </div>
@@ -89,6 +96,7 @@ function EventRow({
           input={ev.input}
           workflowId={workflowId}
           taskId={taskId}
+          onResolved={onApprovalResolved}
         />
       );
     default:
@@ -96,7 +104,7 @@ function EventRow({
   }
 }
 
-export function TranscriptView({ workflowId, taskId }: Props): JSX.Element {
+export function TranscriptView({ workflowId, taskId, subscribeProviderEvents, onApprovalResolved }: Props): JSX.Element {
   const [events, setEvents] = useState<ProviderEvent[]>([]);
   const [aggregated, setAggregated] = useState<AggregateItem[]>([]);
   const [clusterState, setClusterState] = useState<Map<string, ClusterState>>(new Map());
@@ -114,6 +122,10 @@ export function TranscriptView({ workflowId, taskId }: Props): JSX.Element {
   }, []);
 
   useEffect(() => {
+    setEvents([]);
+    setAggregated([]);
+    previousGroupsRef.current = [];
+
     const buffer = createStreamingBuffer((batch) => {
       setEvents((prev) => {
         const next = [...prev, ...batch];
@@ -124,19 +136,17 @@ export function TranscriptView({ workflowId, taskId }: Props): JSX.Element {
       });
     });
 
-    const sub = subscribeWorkflow(workflowId, {
-      onEvent(evt: WorkflowEvent) {
-        if (evt.kind !== "provider-event") return;
-        if (evt.payload.taskId !== taskId) return;
-        buffer.push(evt.payload.providerEvent as ProviderEvent);
-      },
+    const unsub = subscribeProviderEvents((evt) => {
+      if (evt.kind !== "provider-event") return;
+      if (evt.payload.taskId !== taskId) return;
+      buffer.push(evt.payload.providerEvent as ProviderEvent);
     });
 
     return () => {
       buffer.stop();
-      sub.close();
+      unsub();
     };
-  }, [workflowId, taskId]);
+  }, [workflowId, taskId, subscribeProviderEvents]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -164,6 +174,7 @@ export function TranscriptView({ workflowId, taskId }: Props): JSX.Element {
           taskId={taskId}
           clusterState={clusterState}
           onClusterToggle={handleClusterToggle}
+          onApprovalResolved={onApprovalResolved}
         />
       ))}
       {events.length === 0 && (
