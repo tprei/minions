@@ -21,6 +21,8 @@ interface Props {
   taskId: string;
   subscribeProviderEvents: ProviderEventSubscriber;
   onApprovalResolved?: () => void;
+  agentProviderType?: string;
+  agentSessionId?: string;
 }
 
 interface ClusterState {
@@ -34,6 +36,8 @@ function EventRow({
   clusterState,
   onClusterToggle,
   onApprovalResolved,
+  agentProviderType,
+  agentSessionId,
 }: {
   item: AggregateItem;
   workflowId: string;
@@ -41,6 +45,8 @@ function EventRow({
   clusterState: Map<string, ClusterState>;
   onClusterToggle: (id: string) => void;
   onApprovalResolved?: () => void;
+  agentProviderType?: string;
+  agentSessionId?: string;
 }): JSX.Element | null {
   if (item instanceof ClusterGroup) {
     const id = item._id ?? "";
@@ -57,6 +63,8 @@ function EventRow({
             clusterState={clusterState}
             onClusterToggle={onClusterToggle}
             onApprovalResolved={onApprovalResolved}
+            agentProviderType={agentProviderType}
+            agentSessionId={agentSessionId}
           />
         ))}
       </div>
@@ -67,7 +75,13 @@ function EventRow({
 
   switch (ev.kind) {
     case "assistant_text":
-      return <AssistantText text={ev.text} />;
+      return (
+        <AssistantText
+          text={ev.text}
+          agentProviderType={agentProviderType}
+          agentSessionId={agentSessionId}
+        />
+      );
     case "thinking":
       return <Thinking text={ev.text} />;
     case "tool_call":
@@ -104,7 +118,14 @@ function EventRow({
   }
 }
 
-export function TranscriptView({ workflowId, taskId, subscribeProviderEvents, onApprovalResolved }: Props): JSX.Element {
+export function TranscriptView({
+  workflowId,
+  taskId,
+  subscribeProviderEvents,
+  onApprovalResolved,
+  agentProviderType,
+  agentSessionId,
+}: Props): JSX.Element {
   const [events, setEvents] = useState<ProviderEvent[]>([]);
   const [aggregated, setAggregated] = useState<AggregateItem[]>([]);
   const [clusterState, setClusterState] = useState<Map<string, ClusterState>>(new Map());
@@ -175,6 +196,8 @@ export function TranscriptView({ workflowId, taskId, subscribeProviderEvents, on
           clusterState={clusterState}
           onClusterToggle={handleClusterToggle}
           onApprovalResolved={onApprovalResolved}
+          agentProviderType={agentProviderType}
+          agentSessionId={agentSessionId}
         />
       ))}
       {events.length === 0 && (

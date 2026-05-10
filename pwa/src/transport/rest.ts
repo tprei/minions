@@ -28,6 +28,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers as Record<string, string> | undefined),
     },
     ...init,
+    signal: init?.signal,
   });
   if (!res.ok) {
     let body: unknown;
@@ -70,10 +71,10 @@ export function mergeTask(workflowId: string, taskId: string): Promise<void> {
   );
 }
 
-export function draftPr(workflowId: string, taskId: string): Promise<void> {
+export function draftPr(workflowId: string, taskId: string, signal?: AbortSignal): Promise<void> {
   return request<void>(
     `/workflows/${encodeURIComponent(workflowId)}/tasks/${encodeURIComponent(taskId)}/draft-pr`,
-    { method: "POST" },
+    { method: "POST", signal },
   );
 }
 

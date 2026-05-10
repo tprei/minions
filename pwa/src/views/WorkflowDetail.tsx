@@ -1,6 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import type { TaskNode, Workflow, WorkflowEvent } from "../domain/types";
+import type { Workflow, WorkflowEvent } from "../domain/types";
 import type { ProviderEvent } from "../domain/providerEvent";
+import { pickActiveTask } from "../utils/pickActiveTask";
+import { agentTone } from "../utils/agentColor";
+import { StatusDot } from "../components/StatusDot";
 import {
   getWorkflow,
   postCommand,
@@ -22,39 +25,12 @@ import { DagSheet } from "./DagSheet";
 import { PrTab } from "./PrTab";
 import { ArtifactList } from "../artifacts/ArtifactList";
 import { urlBase64ToUint8Array } from "../pwa/push";
+import { OperationsStrip } from "./OperationsStrip";
+import { DraftPrPanel } from "./DraftPrPanel";
+import { CompletionStepper } from "../components/CompletionStepper";
+import { CostBadge } from "../components/CostBadge";
 
-const STATUS_ORDER: Record<string, number> = {
-  running: 0,
-  "quality-pending": 1,
-  "ci-pending": 2,
-  finalizing: 3,
-  "pr-open": 4,
-  "needs-review": 5,
-  ready: 6,
-  pending: 7,
-  completed: 8,
-  merged: 9,
-  failed: 10,
-  cancelled: 11,
-};
-
-const TERMINAL_STATUSES = new Set(["merged", "cancelled", "failed", "completed"]);
 const QUEUE_FLUSH_TARGET_STATUSES = new Set(["pending", "ready", "completed", "failed"]);
-
-function pickActiveTask(workflow: Workflow): TaskNode | undefined {
-  const tasks = Object.values(workflow.graph);
-  if (tasks.length === 0) return undefined;
-
-  const nonTerminal = tasks.filter((t) => !TERMINAL_STATUSES.has(t.executionStatus));
-  if (nonTerminal.length > 0) {
-    return nonTerminal.sort(
-      (a, b) =>
-        (STATUS_ORDER[a.executionStatus] ?? 99) - (STATUS_ORDER[b.executionStatus] ?? 99),
-    )[0];
-  }
-
-  return tasks.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-}
 
 function workflowStatusTone(status: Workflow["status"]): "ok" | "err" | "warn" | "neutral" {
   switch (status) {
@@ -287,7 +263,8 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
 
       case "running":
       case "quality-pending":
-      case "ci-pending":
+      case "ci-pending": {
+        const latestRun = activeTask.runs[activeTask.runs.length - 1];
         return (
           <div className="flex flex-col h-full">
             <TranscriptView
@@ -295,6 +272,8 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
               taskId={activeTask.id}
               subscribeProviderEvents={subscribeProviderEvents}
               onApprovalResolved={handleApprovalResolved}
+              agentProviderType={latestRun?.providerType}
+              agentSessionId={latestRun?.runtimeSessionId}
             />
             {artifactSection}
             <Composer
@@ -308,6 +287,7 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
             />
           </div>
         );
+      }
 
       case "finalizing":
       case "pr-open":
@@ -320,11 +300,7 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
                 subscribeProviderEvents={subscribeProviderEvents}
               />
             ) : (
-              <div className="flex-1 p-4">
-                <div className="card p-4 text-sm text-fg-muted">
-                  Finalizing…
-                </div>
-              </div>
+              <DraftPrPanel workflowId={id} taskId={activeTask.id} />
             )}
             {artifactSection}
           </div>
@@ -413,28 +389,44 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
         />
       )}
 
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
-        <h1 className="text-sm font-medium text-fg truncate flex-1">{workflowTitle}</h1>
-        <Pill tone={workflowStatusTone(workflow.status)} className="text-[10px]">
-          {workflow.status}
-        </Pill>
-        <button
-          type="button"
-          title={pushSubscribed ? "Unsubscribe push" : "Subscribe push"}
-          onClick={() => void handleTogglePush()}
-          className={`text-xs transition-colors px-1 ${
-            pushSubscribed ? "text-accent" : "text-fg-subtle hover:text-fg"
-          }`}
-        >
-          {pushSubscribed ? "★" : "☆"}
-        </button>
-        <button
-          type="button"
-          className="text-xs text-fg-muted hover:text-fg transition-colors px-2 py-1 rounded hover:bg-bg-elev"
-          onClick={() => setDagOpen(true)}
-        >
-          Tasks ({Object.keys(workflow.graph).length})
-        </button>
+      <div className="flex flex-col shrink-0 border-b border-border">
+        <div className="flex items-center gap-2 px-4 py-2">
+          {activeTask && activeTask.runs.length > 0 && (
+            <StatusDot
+              status={activeTask.executionStatus}
+              size="md"
+              agentColor={agentTone(activeTask.runs[activeTask.runs.length - 1]!.providerType)}
+            />
+          )}
+          <h1 className="text-sm font-medium text-fg truncate flex-1">{workflowTitle}</h1>
+          <CostBadge workflowId={id} subscribeProviderEvents={subscribeProviderEvents} />
+          <Pill tone={workflowStatusTone(workflow.status)} className="text-[10px]">
+            {workflow.status}
+          </Pill>
+          <button
+            type="button"
+            title={pushSubscribed ? "Unsubscribe push" : "Subscribe push"}
+            onClick={() => void handleTogglePush()}
+            className={`text-xs transition-colors px-1 ${
+              pushSubscribed ? "text-accent" : "text-fg-subtle hover:text-fg"
+            }`}
+          >
+            {pushSubscribed ? "★" : "☆"}
+          </button>
+          <button
+            type="button"
+            className="text-xs text-fg-muted hover:text-fg transition-colors px-2 py-1 rounded hover:bg-bg-elev"
+            onClick={() => setDagOpen(true)}
+          >
+            Tasks ({Object.keys(workflow.graph).length})
+          </button>
+        </div>
+        {(status === "finalizing" || status === "pr-open" || status === "ci-pending" || status === "merged") && (
+          <div className="px-4 pb-1">
+            <CompletionStepper executionStatus={status} />
+          </div>
+        )}
+        <OperationsStrip workflow={workflow} />
       </div>
 
       <div className="flex-1 min-h-0">
