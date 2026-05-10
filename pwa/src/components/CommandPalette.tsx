@@ -6,6 +6,7 @@ export interface PaletteAction {
   label: string;
   group?: string;
   hint?: string;
+  disabled?: boolean;
   run: () => void;
 }
 
@@ -90,7 +91,7 @@ export function CommandPalette({ open, onClose, actions }: CommandPaletteProps):
 
   function runSelected(): void {
     const action = filtered[selected];
-    if (!action) return;
+    if (!action || action.disabled) return;
     onClose();
     queueMicrotask(() => action.run());
   }
@@ -165,15 +166,21 @@ export function CommandPalette({ open, onClose, actions }: CommandPaletteProps):
                 key={action.id}
                 data-action-index={idx}
                 type="button"
+                disabled={action.disabled}
                 onMouseEnter={() => setSelected(idx)}
                 onClick={() => {
+                  if (action.disabled) return;
                   setSelected(idx);
                   onClose();
                   queueMicrotask(() => action.run());
                 }}
                 className={cx(
                   "w-full flex items-center justify-between gap-3 px-3 py-1.5 text-left text-sm transition-colors",
-                  isSelected ? "bg-accent/20 text-fg" : "text-fg-muted hover:bg-bg-soft",
+                  action.disabled
+                    ? "text-fg-subtle cursor-not-allowed"
+                    : isSelected
+                      ? "bg-accent/20 text-fg"
+                      : "text-fg-muted hover:bg-bg-soft",
                 )}
               >
                 <span className="truncate">{action.label}</span>

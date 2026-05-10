@@ -101,8 +101,20 @@ export function WorkflowList(): JSX.Element {
   }
 
   function buildMenuItems(workflowId: string): ContextMenuItem[] {
-    const workflow = summaries?.find((w) => w.id === workflowId);
+    const cached = useWorkflowStore.getState().workflows.get(workflowId);
     const isPinned = pinned.includes(workflowId);
+
+    const failedTask = cached
+      ? Object.values(cached.graph).find((t) => t.executionStatus === "failed")
+      : undefined;
+
+    const tasksWithPr = cached
+      ? Object.values(cached.graph).flatMap((t) =>
+          t.artifacts.filter((a) => a.kind === "pr").map((a) => a.ref),
+        )
+      : [];
+    const prUrl = tasksWithPr[0];
+
     const items: ContextMenuItem[] = [
       {
         id: "pin",
@@ -111,15 +123,24 @@ export function WorkflowList(): JSX.Element {
       },
       {
         id: "retry",
-        label: "Retry",
-        disabled: !workflow || workflow.status !== "failed",
+        label: failedTask ? "Retry failed task" : "Retry",
+        disabled: !failedTask,
         onSelect: () => {
+          if (!failedTask) return;
           void postCommand({
             kind: "retry-task",
             workflowId,
-            taskId: workflowId,
-            prompt: "retry",
+            taskId: failedTask.id,
+            prompt: failedTask.prompt,
           });
+        },
+      },
+      {
+        id: "jump-to-pr",
+        label: prUrl ? "Jump to PR" : "Jump to PR (no PR yet)",
+        disabled: !prUrl,
+        onSelect: () => {
+          if (prUrl) window.open(prUrl, "_blank");
         },
       },
     ];

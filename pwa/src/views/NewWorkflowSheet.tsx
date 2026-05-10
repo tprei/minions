@@ -15,7 +15,6 @@ interface TaskRow {
 }
 
 interface DraftState {
-  displayTitle: string;
   kind: WorkflowKind;
   tasks: TaskRow[];
   autoLand: boolean;
@@ -51,7 +50,6 @@ function clearDraft(): void {
 
 function defaultState(): DraftState {
   return {
-    displayTitle: "",
     kind: "single-task",
     tasks: [{ id: "t1", title: "", prompt: "", dependsOn: [] }],
     autoLand: false,
@@ -177,17 +175,6 @@ export function NewWorkflowSheet(): ReactElement {
   return (
     <Modal open={open} onClose={handleClose} title="New workflow" className="max-w-2xl">
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs text-fg-muted font-medium">Title (display)</label>
-          <input
-            type="text"
-            className="input text-sm"
-            placeholder="What are you building?"
-            value={state.displayTitle}
-            onChange={(e) => update({ displayTitle: e.target.value })}
-          />
-        </div>
-
         <div className="flex flex-col gap-1.5">
           <label className="text-xs text-fg-muted font-medium">Kind</label>
           <select

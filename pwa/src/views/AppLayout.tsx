@@ -11,6 +11,10 @@ import { InstallBanner } from "./InstallBanner";
 import { CommandPalette, type PaletteAction } from "../components/CommandPalette";
 import { navigate } from "../routing/router";
 import { useTheme } from "../hooks/useTheme";
+import { useConnectionStore } from "../store/useConnectionStore";
+import { useWorkflowById } from "../store/useWorkflowStore";
+import { mergeTask } from "../transport/rest";
+import { pickActiveTask } from "../utils/pickActiveTask";
 import type { RouteName } from "../routing/parseUrl";
 
 const MOBILE_QUERY = "(max-width: 767px)";
@@ -60,12 +64,44 @@ export function AppLayout({ activeRoute, children }: AppLayoutProps): ReactEleme
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  const currentWorkflowId = useConnectionStore((s) => s.currentWorkflowId);
+  const currentWorkflow = useWorkflowById(currentWorkflowId ?? "");
+  const activeTask = currentWorkflow ? pickActiveTask(currentWorkflow) : undefined;
+  const prArtifact = activeTask?.artifacts.find((a) => a.kind === "pr");
+  const mergeable =
+    activeTask !== undefined &&
+    prArtifact !== undefined &&
+    (activeTask.executionStatus === "pr-open" || activeTask.executionStatus === "ci-pending");
+
   const paletteActions: PaletteAction[] = [
     { id: "new-workflow", label: "New workflow", group: "Navigation", run: () => navigate("#/new") },
     { id: "go-audit", label: "Go to audit", group: "Navigation", run: () => navigate("#/audit") },
     { id: "go-alerts", label: "Go to alerts", group: "Navigation", run: () => navigate("#/alerts") },
     { id: "toggle-theme", label: "Toggle theme", group: "Settings", run: () => toggleTheme() },
   ];
+
+  if (currentWorkflowId !== undefined) {
+    paletteActions.push({
+      id: "open-pr",
+      label: "Open current PR",
+      group: "Workflow",
+      disabled: prArtifact === undefined,
+      run: () => {
+        if (prArtifact !== undefined) window.open(prArtifact.ref, "_blank");
+      },
+    });
+    paletteActions.push({
+      id: "land-pr",
+      label: "Land current PR",
+      group: "Workflow",
+      disabled: !mergeable,
+      run: () => {
+        if (mergeable && activeTask !== undefined) {
+          void mergeTask(currentWorkflowId, activeTask.id);
+        }
+      },
+    });
+  }
 
   const closeMobileSidebar = (): void => {
     if (isMobile) setSidebarOpen(false);

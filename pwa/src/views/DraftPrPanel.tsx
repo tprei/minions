@@ -18,10 +18,10 @@ export function DraftPrPanel({ workflowId, taskId }: DraftPrPanelProps): ReactEl
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
-      await draftPr(workflowId, taskId);
+      await draftPr(workflowId, taskId, controller.signal);
     } catch (err: unknown) {
-      if (err instanceof Error && err.name === "AbortError") {
-        setError("Draft PR request timed out after 30s. The engine may still be processing.");
+      if (err instanceof Error && (err.name === "AbortError" || controller.signal.aborted)) {
+        setError("Timed out — retry?");
       } else {
         setError(err instanceof Error ? err.message : "Failed to draft PR");
       }
