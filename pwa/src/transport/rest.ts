@@ -107,3 +107,53 @@ export function listAlerts(): Promise<Alert[]> {
 export function getPrDetail(url: string): Promise<unknown> {
   return request<unknown>(`/github/pr-detail?url=${encodeURIComponent(url)}`);
 }
+
+export function getPrFiles(prUrl: string): Promise<unknown> {
+  const filesUrl = prUrl.replace(/\/pulls\/(\d+)$/, "/pulls/$1/files");
+  return request<unknown>(`/github/pr-detail?url=${encodeURIComponent(filesUrl)}`);
+}
+
+export function getPrChecks(repoBase: string, commitSha: string): Promise<unknown> {
+  const url = `${repoBase}/commits/${commitSha}/check-runs`;
+  return request<unknown>(`/github/pr-detail?url=${encodeURIComponent(url)}`);
+}
+
+export function getVapidPublicKey(): Promise<{ publicKey: string }> {
+  return request<{ publicKey: string }>("/push/vapid-public-key");
+}
+
+export interface PushSubscriptionBody {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+
+export function subscribeAlerts(subscription: PushSubscriptionBody): Promise<void> {
+  return request<void>("/alerts/subscribe", {
+    method: "POST",
+    body: JSON.stringify({ subscription }),
+  });
+}
+
+export function unsubscribeAlerts(endpoint: string): Promise<void> {
+  return request<void>("/alerts/subscribe", {
+    method: "DELETE",
+    body: JSON.stringify({ endpoint }),
+  });
+}
+
+export function subscribePush(
+  workflowId: string,
+  subscription: PushSubscriptionBody,
+): Promise<void> {
+  return request<void>("/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify({ workflowId, subscription }),
+  });
+}
+
+export function unsubscribePush(endpoint: string, workflowId: string): Promise<void> {
+  return request<void>("/push/subscribe", {
+    method: "DELETE",
+    body: JSON.stringify({ endpoint, workflowId }),
+  });
+}

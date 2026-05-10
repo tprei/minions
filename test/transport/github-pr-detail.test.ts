@@ -126,4 +126,35 @@ describe("GET /github/pr-detail", () => {
     const body = await res.json() as { code: string };
     expect(body.code).toBe("upstream_error");
   });
+
+  it("accepts /pulls/:n/files url", async () => {
+    const filesData = [{ filename: "src/foo.ts", patch: "@@ -1,1 +1,2 @@" }];
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify(filesData), { status: 200, headers: { "Content-Type": "application/json" } })
+    );
+    const app = makeApp();
+    const url = encodeURIComponent("https://api.github.com/repos/org/repo/pulls/42/files");
+    const res = await app.request(`/github/pr-detail?url=${url}`);
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts /commits/:sha/check-runs url", async () => {
+    const checkData = { check_runs: [] };
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify(checkData), { status: 200, headers: { "Content-Type": "application/json" } })
+    );
+    const app = makeApp();
+    const url = encodeURIComponent(
+      "https://api.github.com/repos/org/repo/commits/abc123def456abc1/check-runs"
+    );
+    const res = await app.request(`/github/pr-detail?url=${url}`);
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects /commits/:sha url (without check-runs)", async () => {
+    const app = makeApp();
+    const url = encodeURIComponent("https://api.github.com/repos/org/repo/commits/abc123def456abc1");
+    const res = await app.request(`/github/pr-detail?url=${url}`);
+    expect(res.status).toBe(400);
+  });
 });

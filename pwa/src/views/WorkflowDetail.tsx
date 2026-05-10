@@ -1,7 +1,15 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { TaskNode, Workflow, WorkflowEvent } from "../domain/types";
 import type { ProviderEvent } from "../domain/providerEvent";
-import { getWorkflow, postCommand } from "../transport/rest";
+import {
+  getWorkflow,
+  postCommand,
+  subscribePush,
+  unsubscribePush,
+  getVapidPublicKey,
+  type PushSubscriptionBody,
+} from "../transport/rest";
+import { getPushSubscription } from "../pwa/push";
 import { subscribeWorkflow } from "../transport/sse";
 import { useWorkflowStore, useWorkflowById } from "../store/useWorkflowStore";
 import { useConnectionStore } from "../store/useConnectionStore";
@@ -11,6 +19,9 @@ import { Banner } from "../components/Banner";
 import { TranscriptView } from "./TranscriptView";
 import { Composer } from "../components/Composer";
 import { DagSheet } from "./DagSheet";
+import { PrTab } from "./PrTab";
+import { ArtifactList } from "../artifacts/ArtifactList";
+import { urlBase64ToUint8Array } from "../pwa/push";
 
 const STATUS_ORDER: Record<string, number> = {
   running: 0,
@@ -54,6 +65,8 @@ function workflowStatusTone(status: Workflow["status"]): "ok" | "err" | "warn" |
   }
 }
 
+const PUSH_STORAGE_KEY = (id: string): string => `pushSubscribed:${id}`;
+
 interface Props {
   id: string;
 }
@@ -76,6 +89,10 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
   const [focusedTaskId, setFocusedTaskId] = useState<string | undefined>(undefined);
   const [queuedSend, setQueuedSend] = useState<QueuedSend | null>(null);
   const [pendingApproval, setPendingApproval] = useState<ProviderEvent | null>(null);
+  const [pushSubscribed, setPushSubscribed] = useState(
+    () => localStorage.getItem(PUSH_STORAGE_KEY(id)) === "1",
+  );
+  const [pushError, setPushError] = useState<string | null>(null);
 
   const queuedSendRef = useRef<QueuedSend | null>(null);
   queuedSendRef.current = queuedSend;
@@ -115,6 +132,10 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
           } else if (pe.kind === "final") {
             setPendingApproval(null);
           }
+          for (const listener of providerEventListenersRef.current) listener(evt);
+        }
+
+        if (evt.kind === "merge-phase") {
           for (const listener of providerEventListenersRef.current) listener(evt);
         }
 
@@ -166,6 +187,44 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
     setPendingApproval(null);
   }, []);
 
+  async function handleTogglePush(): Promise<void> {
+    setPushError(null);
+    try {
+      if (pushSubscribed) {
+        const sub = await getPushSubscription();
+        if (sub) {
+          await unsubscribePush(sub.endpoint, id);
+          await sub.unsubscribe();
+        }
+        localStorage.removeItem(PUSH_STORAGE_KEY(id));
+        setPushSubscribed(false);
+      } else {
+        const { publicKey } = await getVapidPublicKey();
+        const key = urlBase64ToUint8Array(publicKey);
+
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: key.buffer as ArrayBuffer,
+        });
+        const json = sub.toJSON();
+        const keys = json.keys as { p256dh: string; auth: string } | undefined;
+        if (!json.endpoint || !keys?.p256dh || !keys?.auth) {
+          throw new Error("Incomplete push subscription");
+        }
+        const body: PushSubscriptionBody = {
+          endpoint: json.endpoint,
+          keys: { p256dh: keys.p256dh, auth: keys.auth },
+        };
+        await subscribePush(id, body);
+        localStorage.setItem(PUSH_STORAGE_KEY(id), "1");
+        setPushSubscribed(true);
+      }
+    } catch (err: unknown) {
+      setPushError(err instanceof Error ? err.message : "Push toggle failed");
+    }
+  }
+
   const connectionState = useConnectionStore((s) => s.state);
 
   if (!workflow && loadError) {
@@ -197,6 +256,12 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
       return <p className="text-sm text-fg-muted p-4">No tasks in workflow.</p>;
     }
 
+    const artifactSection = activeTask.artifacts.length > 0 ? (
+      <div className="px-4 pb-4">
+        <ArtifactList artifacts={activeTask.artifacts} />
+      </div>
+    ) : null;
+
     switch (status) {
       case "pending":
       case "ready":
@@ -207,6 +272,7 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
                 Task is queued — send a prompt to start.
               </p>
             </div>
+            {artifactSection}
             <Composer
               workflowId={id}
               taskId={activeTask.id}
@@ -230,6 +296,7 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
               subscribeProviderEvents={subscribeProviderEvents}
               onApprovalResolved={handleApprovalResolved}
             />
+            {artifactSection}
             <Composer
               workflowId={id}
               taskId={activeTask.id}
@@ -245,12 +312,21 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
       case "finalizing":
       case "pr-open":
         return (
-          <div className="flex flex-col h-full">
-            <div className="flex-1 p-4">
-              <div className="card p-4 text-sm text-fg-muted">
-                PR card coming in S4
+          <div className="flex flex-col h-full overflow-y-auto">
+            {activeTask.artifacts.some((a) => a.kind === "pr") ? (
+              <PrTab
+                task={activeTask}
+                workflowId={id}
+                subscribeProviderEvents={subscribeProviderEvents}
+              />
+            ) : (
+              <div className="flex-1 p-4">
+                <div className="card p-4 text-sm text-fg-muted">
+                  Finalizing…
+                </div>
               </div>
-            </div>
+            )}
+            {artifactSection}
           </div>
         );
 
@@ -260,15 +336,7 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
           <div className="p-4">
             <div className="card p-4">
               <p className="text-sm font-medium text-fg">Task {status}</p>
-              {activeTask.artifacts.length > 0 && (
-                <ul className="mt-2 space-y-1">
-                  {activeTask.artifacts.map((a, i) => (
-                    <li key={i} className="text-xs text-fg-muted font-mono">
-                      {a.kind}: {a.ref}
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {artifactSection}
             </div>
           </div>
         );
@@ -281,6 +349,7 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
               <div className="card border-err/40 bg-err/5 p-4">
                 <p className="text-sm font-medium text-err">Task {status}</p>
               </div>
+              {artifactSection}
             </div>
             {status === "failed" && (
               <Composer
@@ -308,6 +377,7 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
                 View audit log →
               </a>
             </div>
+            {artifactSection}
           </div>
         );
     }
@@ -334,11 +404,30 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
         />
       )}
 
+      {pushError && (
+        <Banner
+          tone="error"
+          message={pushError}
+          className="mx-4 mt-2"
+          onDismiss={() => setPushError(null)}
+        />
+      )}
+
       <div className="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
         <h1 className="text-sm font-medium text-fg truncate flex-1">{workflowTitle}</h1>
         <Pill tone={workflowStatusTone(workflow.status)} className="text-[10px]">
           {workflow.status}
         </Pill>
+        <button
+          type="button"
+          title={pushSubscribed ? "Unsubscribe push" : "Subscribe push"}
+          onClick={() => void handleTogglePush()}
+          className={`text-xs transition-colors px-1 ${
+            pushSubscribed ? "text-accent" : "text-fg-subtle hover:text-fg"
+          }`}
+        >
+          {pushSubscribed ? "★" : "☆"}
+        </button>
         <button
           type="button"
           className="text-xs text-fg-muted hover:text-fg transition-colors px-2 py-1 rounded hover:bg-bg-elev"
