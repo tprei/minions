@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useWorkflowStore } from "./useWorkflowStore";
 import type { TaskExecutionStatus, TaskNode } from "../domain/types";
 
@@ -14,19 +15,23 @@ export function selectTasksByExecutionStatus(
 }
 
 export function useTasksByWorkflow(workflowId: string): TaskNode[] {
-  return useWorkflowStore((s) => {
-    const wf = s.workflows.get(workflowId);
-    return wf ? Object.values(wf.graph) : [];
-  });
+  return useWorkflowStore(
+    useShallow((s) => {
+      const wf = s.workflows.get(workflowId);
+      return wf ? Object.values(wf.graph) : [];
+    }),
+  );
 }
 
 export function useTasksByExecutionStatus(
   workflowId: string,
   status: TaskExecutionStatus,
 ): TaskNode[] {
-  return useWorkflowStore((s) => {
-    const wf = s.workflows.get(workflowId);
-    if (!wf) return [];
-    return Object.values(wf.graph).filter((t) => t.executionStatus === status);
-  });
+  return useWorkflowStore(
+    useShallow((s) => {
+      const wf = s.workflows.get(workflowId);
+      if (!wf) return [];
+      return Object.values(wf.graph).filter((t) => t.executionStatus === status);
+    }),
+  );
 }

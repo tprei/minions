@@ -1,30 +1,28 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listWorkflows } from "../transport/rest";
 import { RestError } from "../transport/rest";
 import { useWorkflowStore, useWorkflows } from "../store/useWorkflowStore";
 
-// FUTURE: replace polling with a global SSE channel once the engine provides one
 const POLL_INTERVAL_MS = 2000;
 
 export function WorkflowList(): JSX.Element {
   const setSummaries = useWorkflowStore((s) => s.setSummaries);
   const summaries = useWorkflows();
-  const errorRef = useRef<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;
-    errorRef.current = null;
 
     async function fetch(): Promise<void> {
       try {
         const list = await listWorkflows();
-        if (mountedRef.current) setSummaries(list);
+        if (!mountedRef.current) return;
+        setError(null);
+        setSummaries(list);
       } catch (err: unknown) {
         if (!mountedRef.current) return;
-        errorRef.current =
-          err instanceof RestError ? `HTTP ${err.status}` : "Failed to load workflows";
-        setSummaries([]);
+        setError(err instanceof RestError ? `HTTP ${err.status}` : "Failed to load workflows");
       }
     }
 
@@ -37,15 +35,15 @@ export function WorkflowList(): JSX.Element {
     };
   }, [setSummaries]);
 
-  if (summaries === undefined) {
+  if (summaries === undefined && error === null) {
     return <p className="text-sm opacity-60">Loading workflows…</p>;
   }
 
-  if (errorRef.current !== null) {
-    return <p className="text-sm text-red-500">{errorRef.current}</p>;
+  if (error !== null) {
+    return <p className="text-sm text-red-500">{error}</p>;
   }
 
-  if (summaries.length === 0) {
+  if (summaries === undefined || summaries.length === 0) {
     return <p className="text-sm opacity-60">No active workflows.</p>;
   }
 

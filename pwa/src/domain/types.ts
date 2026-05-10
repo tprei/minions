@@ -278,6 +278,7 @@ export interface Alert {
   workflowId?: string;
   taskId?: string;
   detail?: Record<string, unknown>;
+  acknowledgedAt?: string;
 }
 
 export interface AuditEvent {

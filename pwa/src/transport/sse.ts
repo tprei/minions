@@ -3,6 +3,9 @@ import type { SseConnectionState } from "./types";
 
 const WATCHDOG_MS = 70_000;
 const QUIET_THRESHOLD_MS = 5_000;
+const MAX_BACKOFF_MS = 30_000;
+const BASE_BACKOFF_MS = 1_000;
+const MAX_ATTEMPTS_BEFORE_ERROR = 5;
 
 const PERSISTENT_KINDS: ReadonlySet<WorkflowEventKind> = new Set([
   "task-transitioned",
@@ -31,6 +34,7 @@ export function subscribeWorkflow(
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
   let lastConnectAt = 0;
+  let attempt = 0;
   const cleanups: Array<() => void> = [];
 
   function setState(s: SseConnectionState): void {
@@ -60,21 +64,20 @@ export function subscribeWorkflow(
     }
   }
 
+  function buildUrl(): string {
+    const base = `/workflows/${encodeURIComponent(workflowId)}/events`;
+    if (lastEventCursor === undefined) return base;
+    return `${base}?since=${encodeURIComponent(String(lastEventCursor))}`;
+  }
+
   function open(): void {
     if (closed) return;
 
     lastConnectAt = Date.now();
 
-    const headers: Record<string, string> = {};
-    if (lastEventCursor !== undefined) {
-      headers["Last-Event-ID"] = String(lastEventCursor);
-    }
+    setState(currentState === "idle" ? "connecting" : currentState);
 
-    const url = `/workflows/${encodeURIComponent(workflowId)}/events`;
-
-    setState(currentState === "idle" ? "connecting" : "reconnecting");
-
-    es = new EventSource(url);
+    es = new EventSource(buildUrl());
 
     const KINDS: WorkflowEventKind[] = [
       "task-transitioned",
@@ -104,6 +107,7 @@ export function subscribeWorkflow(
     }
 
     es.addEventListener("open", () => {
+      attempt = 0;
       setState("connected");
       resetWatchdog();
     });
@@ -113,13 +117,18 @@ export function subscribeWorkflow(
       es = null;
       clearWatchdog();
       if (closed) return;
-      const gapMs = Date.now() - lastConnectAt;
-      if (gapMs < QUIET_THRESHOLD_MS) {
-        reconnectAfterDelay();
-      } else {
-        setState("reconnecting");
-        reconnectAfterDelay();
+
+      attempt += 1;
+      if (attempt >= MAX_ATTEMPTS_BEFORE_ERROR) {
+        setState("error");
+        return;
       }
+
+      const gapMs = Date.now() - lastConnectAt;
+      if (gapMs >= QUIET_THRESHOLD_MS) {
+        setState("reconnecting");
+      }
+      reconnectAfterDelay();
     });
   }
 
@@ -130,27 +139,34 @@ export function subscribeWorkflow(
     clearWatchdog();
     if (closed) return;
     setState("reconnecting");
+    attempt = 0;
     open();
   }
 
   function reconnectAfterDelay(): void {
-    const delay = 1000 + Math.random() * 2000;
+    const ceiling = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** Math.max(0, attempt - 1));
+    const delay = ceiling + Math.random() * 500;
     retryTimer = setTimeout(() => {
       if (!closed) open();
     }, delay);
   }
 
+  function isLive(): boolean {
+    if (es === null) return false;
+    return es.readyState === EventSource.OPEN;
+  }
+
   if (typeof window !== "undefined") {
     const onVisibility = (): void => {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+      if (typeof document !== "undefined" && document.visibilityState === "visible" && !isLive()) {
         reconnect();
       }
     };
     const onOnline = (): void => {
-      reconnect();
+      if (!isLive()) reconnect();
     };
     const onPageShow = (e: PageTransitionEvent): void => {
-      if (e.persisted) reconnect();
+      if (e.persisted && !isLive()) reconnect();
     };
 
     if (typeof document !== "undefined") {

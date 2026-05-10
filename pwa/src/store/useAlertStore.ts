@@ -10,6 +10,12 @@ interface AlertState {
   markRead: (alertId: string) => void;
 }
 
+function countUnread(alerts: Alert[]): number {
+  let n = 0;
+  for (const a of alerts) if (a.acknowledgedAt === undefined) n += 1;
+  return n;
+}
+
 export const useAlertStore = create<AlertState>((set, get) => ({
   alerts: [],
   loading: false,
@@ -20,7 +26,7 @@ export const useAlertStore = create<AlertState>((set, get) => ({
     set({ loading: true });
     try {
       const alerts = await listAlerts();
-      set({ alerts, loading: false, unreadCount: alerts.length });
+      set({ alerts, loading: false, unreadCount: countUnread(alerts) });
     } catch {
       set({ loading: false });
     }
@@ -30,7 +36,14 @@ export const useAlertStore = create<AlertState>((set, get) => ({
     set((s) => {
       const idx = s.alerts.findIndex((a) => a.id === alertId);
       if (idx === -1) return s;
-      return { unreadCount: Math.max(0, s.unreadCount - 1) };
+      const target = s.alerts[idx]!;
+      if (target.acknowledgedAt !== undefined) return s;
+      const nextAlerts = s.alerts.slice();
+      nextAlerts[idx] = { ...target, acknowledgedAt: new Date().toISOString() };
+      return {
+        alerts: nextAlerts,
+        unreadCount: Math.max(0, s.unreadCount - 1),
+      };
     });
   },
 }));
