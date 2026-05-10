@@ -31,6 +31,7 @@ function makeTransientEvent(workflowId: string): Extract<WorkflowEvent, { kind: 
       taskId: "t",
       runId: "run-1",
       providerEvent: { kind: "assistant_text", text: "hello" },
+      seq: 0,
     },
   };
 }

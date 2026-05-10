@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent, cleanup } from "@testing-library/react";
 import type { ProviderEvent } from "../../domain/providerEvent";
+import type { TaskExecutionStatus } from "../../domain/types";
 
 vi.mock("../../transport/rest", () => ({
   postCommand: vi.fn().mockResolvedValue(undefined),
@@ -29,6 +30,65 @@ function renderApprovalComposer(extraProps?: { onApprovalResolved?: () => void }
     />,
   );
 }
+
+function renderComposer(executionStatus: TaskExecutionStatus) {
+  return render(
+    <Composer
+      workflowId="wf-1"
+      taskId="t-1"
+      executionStatus={executionStatus}
+      pendingApproval={null}
+      queuedMessage={null}
+      onQueue={() => undefined}
+    />,
+  );
+}
+
+describe("Composer unavailable states", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders textarea and disabled submit button for merged status", () => {
+    const { container } = renderComposer("merged");
+    const textarea = container.querySelector("textarea");
+    const button = container.querySelector("button[disabled]");
+    expect(textarea).not.toBeNull();
+    expect(button).not.toBeNull();
+  });
+
+  it("renders textarea and disabled submit button for completed status", () => {
+    const { container } = renderComposer("completed");
+    const textarea = container.querySelector("textarea");
+    const button = container.querySelector("button[disabled]");
+    expect(textarea).not.toBeNull();
+    expect(button).not.toBeNull();
+  });
+
+  it("shows reason text for merged", () => {
+    const { getByRole } = renderComposer("merged");
+    const status = getByRole("status");
+    expect(status.textContent).toContain("complete");
+  });
+
+  it("shows reason text for cancelled", () => {
+    const { getByRole } = renderComposer("cancelled");
+    const status = getByRole("status");
+    expect(status.textContent).toContain("cancelled");
+  });
+
+  it("shows reason text for pending", () => {
+    const { getByRole } = renderComposer("pending");
+    const status = getByRole("status");
+    expect(status.textContent).toContain("waiting");
+  });
+
+  it("shows reason text for finalizing", () => {
+    const { getByRole } = renderComposer("finalizing");
+    const status = getByRole("status");
+    expect(status.textContent).toContain("finaliz");
+  });
+});
 
 describe("Composer approval mode", () => {
   beforeEach(() => {

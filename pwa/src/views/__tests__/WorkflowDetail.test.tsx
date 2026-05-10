@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent, cleanup, act } from "@testing-library/react";
-import type { Workflow, WorkflowEvent } from "../../domain/types";
+import type { Workflow, WorkflowEvent, TaskExecutionStatus } from "../../domain/types";
 
 vi.mock("../../transport/rest", () => ({
   getWorkflow: vi.fn(),
   postCommand: vi.fn().mockResolvedValue(undefined),
+  getTaskTranscript: vi.fn().mockResolvedValue({ events: [], cutoff: null }),
 }));
 
 class FakeEventSource {
@@ -41,10 +42,20 @@ class FakeEventSource {
 }
 
 import { WorkflowDetail } from "../WorkflowDetail";
-import { getWorkflow, postCommand } from "../../transport/rest";
+import { getWorkflow, postCommand, getTaskTranscript } from "../../transport/rest";
 import { useWorkflowStore } from "../../store/useWorkflowStore";
 
-function makeRunningWorkflow(): Workflow {
+const baseRun = {
+  id: "run-1",
+  taskId: "t-1",
+  attempt: 1,
+  providerType: "claude-code",
+  runtimeType: "tmux",
+  runtimeSessionId: "sess-abc",
+  startedAt: "2025-01-01T00:00:00Z",
+};
+
+function makeWorkflow(executionStatus: TaskExecutionStatus, withRun = false): Workflow {
   return {
     id: "wf-1",
     kind: "single-task",
@@ -56,13 +67,13 @@ function makeRunningWorkflow(): Workflow {
         title: "demo task",
         prompt: "do work",
         dependsOn: [],
-        executionStatus: "running",
+        executionStatus,
         stackStatus: "clean",
         priority: 0,
         claims: [],
         contract: { summary: "", expectedArtifacts: [] },
         artifacts: [],
-        runs: [],
+        runs: withRun ? [baseRun] : [],
         readiness: "ready",
         version: 1,
         createdAt: "2025-01-01T00:00:00Z",
@@ -75,6 +86,10 @@ function makeRunningWorkflow(): Workflow {
     createdAt: "2025-01-01T00:00:00Z",
     updatedAt: "2025-01-01T00:00:00Z",
   };
+}
+
+function makeRunningWorkflow(): Workflow {
+  return makeWorkflow("running");
 }
 
 describe("WorkflowDetail", () => {
@@ -186,6 +201,39 @@ describe("WorkflowDetail", () => {
     });
 
     expect(document.body.textContent).not.toContain("Queued: \"queued send\"");
+  });
+
+  it("mounts transcript when status is merged and task has runs", async () => {
+    vi.mocked(getWorkflow).mockResolvedValue(makeWorkflow("merged", true));
+    vi.mocked(getTaskTranscript).mockResolvedValue({ events: [], cutoff: null });
+    render(<WorkflowDetail id="wf-1" />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getTaskTranscript).toHaveBeenCalledWith("wf-1", "t-1");
+  });
+
+  it("mounts composer in merged state", async () => {
+    vi.mocked(getWorkflow).mockResolvedValue(makeWorkflow("merged", true));
+    render(<WorkflowDetail id="wf-1" />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const textarea = document.querySelector("textarea");
+    expect(textarea).not.toBeNull();
+  });
+
+  it("mounts composer in pending state (no runs)", async () => {
+    vi.mocked(getWorkflow).mockResolvedValue(makeWorkflow("pending", false));
+    render(<WorkflowDetail id="wf-1" />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const textarea = document.querySelector("textarea");
+    expect(textarea).not.toBeNull();
   });
 
   it("does NOT send the queued message if the transition is to a still-running status", async () => {

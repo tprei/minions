@@ -50,7 +50,7 @@ function makeOrchestrator(
   chunks: RuntimeOutputChunk[],
   applyCommand: (cmd: Command) => Promise<CommandResult>,
   shouldThrow?: Error,
-  publish?: (event: ProviderEvent) => void,
+  publish?: (event: ProviderEvent, seq: number) => void,
 ) {
   const provider = new StubProviderPlugin({ frames: providerFrames });
   const runtime = makeRuntime(chunks, shouldThrow);
@@ -388,7 +388,7 @@ describe("RunOrchestrator", () => {
       chunks,
       applyCommand,
       undefined,
-      (e) => published.push(e),
+      (e, _seq) => published.push(e),
     );
     await orchestrator.run();
 
@@ -413,7 +413,7 @@ describe("RunOrchestrator", () => {
       chunks,
       applyCommand,
       undefined,
-      () => { throw new Error("publish exploded"); },
+      (_e, _seq) => { throw new Error("publish exploded"); },
     );
     await expect(orchestrator.run()).resolves.toBeUndefined();
     expect(calls).toContain("mark-interrupted");
@@ -441,7 +441,7 @@ describe("RunOrchestrator", () => {
       chunks,
       applyCommand,
       undefined,
-      (e) => { if (e.kind === "final") throw new Error("publish exploded on final"); },
+      (e, _seq) => { if (e.kind === "final") throw new Error("publish exploded on final"); },
     );
     await expect(orchestrator.run()).resolves.toBeUndefined();
 
@@ -468,7 +468,7 @@ describe("RunOrchestrator", () => {
       chunks,
       applyCommand,
       undefined,
-      (e) => published.push(e),
+      (e, _seq) => published.push(e),
     );
     await orchestrator.run();
 

@@ -59,6 +59,7 @@ describe("PushService.buildPayload", () => {
         taskId: "t1",
         runId: "r1",
         providerEvent: { kind: "permission_request", id: "p1", tool: "bash", input: {} },
+        seq: 0,
       },
     };
     const decision = service.shouldNotify(event)!;
@@ -83,6 +84,7 @@ describe("PushService.buildPayload", () => {
         taskId: "t1",
         runId: "r1",
         providerEvent: { kind: "error", recoverable: false, message: "Fatal crash occurred" },
+        seq: 0,
       },
     };
     const decision = service.shouldNotify(event)!;

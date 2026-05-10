@@ -173,6 +173,7 @@ describe("GET /workflows/:id/events (SSE)", () => {
         taskId,
         runId: "run-1",
         providerEvent: { kind: "assistant_text", text: "hello" },
+        seq: 0,
       },
     };
 
