@@ -6,13 +6,13 @@ describe("DraftPrPanel", () => {
   let originalFetch: typeof fetch;
 
   beforeEach(() => {
-    originalFetch = global.fetch;
+    originalFetch = globalThis.fetch;
     vi.useFakeTimers();
   });
 
   afterEach(() => {
     cleanup();
-    global.fetch = originalFetch;
+    globalThis.fetch = originalFetch;
     vi.useRealTimers();
   });
 
@@ -20,7 +20,7 @@ describe("DraftPrPanel", () => {
     let capturedSignal: AbortSignal | undefined;
     let rejectFetch: ((reason: unknown) => void) | undefined;
 
-    global.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
       capturedSignal = init?.signal ?? undefined;
       return new Promise((_resolve, reject) => {
         rejectFetch = reject;
@@ -64,7 +64,7 @@ describe("DraftPrPanel", () => {
   });
 
   it("forwards a non-aborted fetch error verbatim", async () => {
-    global.fetch = vi.fn(() =>
+    globalThis.fetch = vi.fn(() =>
       Promise.resolve(
         new Response(JSON.stringify({ error: "bad" }), { status: 500 }),
       ),

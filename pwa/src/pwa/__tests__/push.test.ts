@@ -29,7 +29,7 @@ describe("urlBase64ToUint8Array", () => {
 describe("getPushSubscription", () => {
   it("returns null when serviceWorker is not available", async () => {
     const origNavigator = { ...navigator };
-    Object.defineProperty(global, "navigator", {
+    Object.defineProperty(globalThis, "navigator", {
       value: { ...origNavigator },
       writable: true,
     });
@@ -42,7 +42,7 @@ describe("getPushSubscription", () => {
     const mockReg = {
       pushManager: { getSubscription: vi.fn().mockResolvedValue(mockSub) },
     };
-    Object.defineProperty(global, "navigator", {
+    Object.defineProperty(globalThis, "navigator", {
       value: {
         serviceWorker: { ready: Promise.resolve(mockReg) },
       },
@@ -50,7 +50,7 @@ describe("getPushSubscription", () => {
     });
     const result = await getPushSubscription();
     expect(result).toBe(mockSub);
-    Object.defineProperty(global, "navigator", {
+    Object.defineProperty(globalThis, "navigator", {
       value: { serviceWorker: undefined },
       writable: true,
     });
@@ -64,7 +64,7 @@ describe("subscribeToPush", () => {
     const mockReg = {
       pushManager: { subscribe: mockSubscribe },
     };
-    Object.defineProperty(global, "navigator", {
+    Object.defineProperty(globalThis, "navigator", {
       value: {
         serviceWorker: { ready: Promise.resolve(mockReg) },
       },
@@ -77,7 +77,7 @@ describe("subscribeToPush", () => {
       userVisibleOnly: true,
       applicationServerKey: key.buffer,
     });
-    Object.defineProperty(global, "navigator", {
+    Object.defineProperty(globalThis, "navigator", {
       value: { serviceWorker: undefined },
       writable: true,
     });

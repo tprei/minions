@@ -1,6 +1,8 @@
 # PWA UI synthesis — competitor audit + slice plan
 
-> **Pre-cutover stamp (S0):** this doc reflects the vanilla-JS PWA shape. The vanilla-JS implementation has been deleted as of S0 and the React/Vite/TS port is underway. For the lifted vanilla-JS source preserved during the cutover see `pwa/S0-port-extracts.md`; for the new harness see `pwa/src/**`. This doc will be fully replaced by `docs/PWA_DEV.md` in S6.
+> Status (2026-05-10): the React PWA port is complete (slice-pwa-s0 through slice-pwa-s5).
+> This doc captures the original 17-slice vanilla-JS synthesis — historical only.
+> See [PWA_DEV.md](./PWA_DEV.md) for the current PWA architecture and `pwa/src/**` for the code.
 
 12-target audit of coding-agent control planes against minions-workflow-core PWA. Findings are UI-shape-specific; engine-shape findings live in the slice 5.2 audit synthesis (`SYNTHESIS.md` on `slice-5.2-audit`).
 
