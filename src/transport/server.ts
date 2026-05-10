@@ -1,8 +1,10 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { serveStatic } from "@hono/node-server/serve-static";
+import * as fsp from "node:fs/promises";
 import { applyCommand } from "../application/commands.js";
 import type { Command, CommandKind } from "../application/commands.js";
+import { parseFrame } from "../transcript/stream-json-parser.js";
 import type { CIBabysitterService } from "../application/ci-babysitter-service.js";
 import type { QualityGateService } from "../application/quality-gate-service.js";
 import type { CompletionDispatcher } from "../application/completion-dispatcher.js";
@@ -27,10 +29,18 @@ import type { ObservabilityService } from "../observability/observability-servic
 import type { Logger } from "../observability/logger.js";
 import type { SupervisorWithRepos } from "../supervisor/supervisor.js";
 
+export interface TranscriptEvent {
+  runId: string;
+  attempt: number;
+  seq: number;
+  event: import("../plugins/provider-plugin.js").ProviderEvent;
+}
+
 export interface ServerDeps {
   repo: WorkflowRepository;
   recoveryService: RecoveryService;
   executor: RestackExecutor;
+  dataDir?: string;
   continueTaskService?: ContinueTaskService;
   approvePermissionService?: ApprovePermissionService;
   retryTaskService?: RetryTaskService;
@@ -163,6 +173,53 @@ export function createServer(deps: ServerDeps): Hono {
       return c.json({ code: "not_found", message: "workflow not found", details: {} }, 404);
     }
     return c.json(workflow);
+  });
+
+  app.get("/workflows/:id/tasks/:taskId/transcript", async (c) => {
+    const workflowId = c.req.param("id");
+    const taskId = c.req.param("taskId");
+
+    const workflow = await repo.get(workflowId);
+    if (!workflow) {
+      return c.json({ code: "not_found", message: "workflow not found", details: {} }, 404);
+    }
+
+    const task = workflow.graph[taskId];
+    if (!task) {
+      return c.json({ code: "not_found", message: "task not found", details: {} }, 404);
+    }
+
+    const dataDir = deps.dataDir;
+    const transcriptEvents: TranscriptEvent[] = [];
+
+    if (dataDir !== undefined) {
+      const sortedRuns = task.runs.slice().sort((a, b) => a.attempt - b.attempt);
+
+      for (const run of sortedRuns) {
+        const logPath = `${dataDir}/sessions/${run.runtimeSessionId}.log`;
+        let content: string;
+        try {
+          content = await fsp.readFile(logPath, "utf-8");
+        } catch {
+          continue;
+        }
+        const lines = content.split("\n");
+        for (let seq = 0; seq < lines.length; seq++) {
+          const line = lines[seq];
+          if (line === undefined) continue;
+          const events = parseFrame(line);
+          for (const event of events) {
+            transcriptEvents.push({ runId: run.id, attempt: run.attempt, seq, event });
+          }
+        }
+      }
+    }
+
+    const cutoff = transcriptEvents.length > 0
+      ? { runId: transcriptEvents[transcriptEvents.length - 1]!.runId, seq: transcriptEvents[transcriptEvents.length - 1]!.seq }
+      : null;
+
+    return c.json({ events: transcriptEvents, cutoff });
   });
 
   app.post("/commands", async (c) => {
