@@ -81,6 +81,9 @@ export function PrTab({ task, workflowId, subscribeProviderEvents }: Props): JSX
   const [checks, setChecks] = useState<CheckRun[]>([]);
   const [checksError, setChecksError] = useState<string | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const checksRef = useRef<CheckRun[]>([]);
+  const prRef = useRef<PrData | null>(null);
+  prRef.current = pr;
 
   const [files, setFiles] = useState<PrFile[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
@@ -105,48 +108,49 @@ export function PrTab({ task, workflowId, subscribeProviderEvents }: Props): JSX
       });
   }, [prApiUrl]);
 
-  const fetchChecks = useCallback(
-    (headSha: string, repoBase: string, currentPr: PrData | null) => {
-      if (!headSha || !repoBase) return;
-      void getPrChecks(repoBase, headSha)
-        .then((data) => {
-          const resp = data as CheckRunsResponse;
-          setChecks(resp.check_runs ?? []);
-          setChecksError(null);
+  const fetchChecks = useCallback((headSha: string, repoBase: string) => {
+    if (!headSha || !repoBase) return;
+    void getPrChecks(repoBase, headSha)
+      .then((data) => {
+        const resp = data as CheckRunsResponse;
+        const next = resp.check_runs ?? [];
+        checksRef.current = next;
+        setChecks(next);
+        setChecksError(null);
 
-          if (
-            allChecksConclusive(resp.check_runs ?? []) &&
-            currentPr &&
-            ["clean", "blocked", "unknown"].includes(currentPr.mergeable_state)
-          ) {
-            if (pollTimerRef.current !== null) {
-              clearInterval(pollTimerRef.current);
-              pollTimerRef.current = null;
-            }
+        const currentPr = prRef.current;
+        if (
+          allChecksConclusive(next) &&
+          currentPr &&
+          currentPr.mergeable_state === "clean"
+        ) {
+          if (pollTimerRef.current !== null) {
+            clearInterval(pollTimerRef.current);
+            pollTimerRef.current = null;
           }
-        })
-        .catch((err: unknown) => {
-          setChecksError(err instanceof Error ? err.message : "Failed to load checks");
-        });
-    },
-    [],
-  );
+        }
+      })
+      .catch((err: unknown) => {
+        setChecksError(err instanceof Error ? err.message : "Failed to load checks");
+      });
+  }, []);
+
+  const headSha = pr?.head.sha;
 
   useEffect(() => {
-    if (!pr) return;
+    if (!headSha) return;
     const repoBase = extractRepoBase(prApiUrl);
-    const headSha = pr.head.sha;
 
-    fetchChecks(headSha, repoBase, pr);
+    fetchChecks(headSha, repoBase);
 
     if (pollTimerRef.current !== null) clearInterval(pollTimerRef.current);
     pollTimerRef.current = setInterval(() => {
-      fetchChecks(headSha, repoBase, pr);
+      fetchChecks(headSha, repoBase);
     }, CHECKS_POLL_MS);
 
     const onFocus = (): void => {
-      if (!allChecksConclusive(checks)) {
-        fetchChecks(headSha, repoBase, pr);
+      if (!allChecksConclusive(checksRef.current)) {
+        fetchChecks(headSha, repoBase);
       }
     };
     window.addEventListener("focus", onFocus);
@@ -158,7 +162,7 @@ export function PrTab({ task, workflowId, subscribeProviderEvents }: Props): JSX
       }
       window.removeEventListener("focus", onFocus);
     };
-  }, [pr, prApiUrl, fetchChecks, checks]);
+  }, [headSha, prApiUrl, fetchChecks]);
 
   function loadFiles(): void {
     if (filesLoading || files.length > 0) {

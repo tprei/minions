@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useAlertStore } from "../store/useAlertStore";
 import { Pill } from "../components/Pill";
 import { Spinner } from "../components/Spinner";
+import { Banner } from "../components/Banner";
 import type { AlertSeverity } from "../domain/types";
 
 function severityTone(severity: AlertSeverity): "warn" | "err" {
@@ -11,6 +12,7 @@ function severityTone(severity: AlertSeverity): "warn" | "err" {
 export function AlertCenter(): JSX.Element {
   const alerts = useAlertStore((s) => s.alerts);
   const loading = useAlertStore((s) => s.loading);
+  const error = useAlertStore((s) => s.error);
   const loadAlerts = useAlertStore((s) => s.loadAlerts);
   const markRead = useAlertStore((s) => s.markRead);
 
@@ -26,16 +28,16 @@ export function AlertCenter(): JSX.Element {
     );
   }
 
-  if (alerts.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-32 text-sm text-fg-muted">
-        No alerts
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col gap-2 p-4">
+      {error && <Banner tone="error" message={error} />}
+
+      {alerts.length === 0 && !error && (
+        <div className="flex items-center justify-center h-32 text-sm text-fg-muted">
+          No alerts
+        </div>
+      )}
+
       {alerts.map((alert) => (
         <div
           key={alert.id}

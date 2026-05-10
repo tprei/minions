@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useAuditStore, type AuditFilters } from "../store/useAuditStore";
 import { Spinner } from "../components/Spinner";
+import { Banner } from "../components/Banner";
 
 function formatRelative(ts: string): string {
   const diff = Date.now() - new Date(ts).getTime();
@@ -20,6 +21,7 @@ export function AuditFeed(): JSX.Element {
   const events = useAuditStore((s) => s.events);
   const loading = useAuditStore((s) => s.loading);
   const done = useAuditStore((s) => s.done);
+  const error = useAuditStore((s) => s.error);
   const loadInitial = useAuditStore((s) => s.loadInitial);
   const loadMore = useAuditStore((s) => s.loadMore);
 
@@ -32,6 +34,7 @@ export function AuditFeed(): JSX.Element {
 
   const touchStartY = useRef(0);
   const pulling = useRef(false);
+  const pullOffsetRef = useRef(0);
   const [pullOffset, setPullOffset] = useState(0);
 
   useEffect(() => {
@@ -64,6 +67,11 @@ export function AuditFeed(): JSX.Element {
     const el = listRef.current;
     if (!el) return;
 
+    function setOffset(value: number): void {
+      pullOffsetRef.current = value;
+      setPullOffset(value);
+    }
+
     function onTouchStart(e: TouchEvent): void {
       if (el!.scrollTop === 0 && e.touches[0]) {
         touchStartY.current = e.touches[0].clientY;
@@ -76,17 +84,17 @@ export function AuditFeed(): JSX.Element {
       const delta = e.touches[0].clientY - touchStartY.current;
       if (delta > 0) {
         e.preventDefault();
-        setPullOffset(Math.min(delta, PULL_THRESHOLD + 24));
+        setOffset(Math.min(delta, PULL_THRESHOLD + 24));
       }
     }
 
     function onTouchEnd(): void {
       if (!pulling.current) return;
       pulling.current = false;
-      if (pullOffset >= PULL_THRESHOLD) {
+      if (pullOffsetRef.current >= PULL_THRESHOLD) {
         void loadInitial();
       }
-      setPullOffset(0);
+      setOffset(0);
     }
 
     el.addEventListener("touchstart", onTouchStart, { passive: true });
@@ -97,7 +105,7 @@ export function AuditFeed(): JSX.Element {
       el.removeEventListener("touchmove", onTouchMove);
       el.removeEventListener("touchend", onTouchEnd);
     };
-  }, [loadInitial, pullOffset]);
+  }, [loadInitial]);
 
   function toggleExpand(id: string): void {
     setExpandedIds((prev) => {
@@ -149,7 +157,13 @@ export function AuditFeed(): JSX.Element {
       </div>
 
       <div ref={listRef} className="flex-1 overflow-y-auto">
-        {events.length === 0 && !loading && (
+        {error && (
+          <div className="px-4 pt-3">
+            <Banner tone="error" message={error} />
+          </div>
+        )}
+
+        {events.length === 0 && !loading && !error && (
           <div className="flex items-center justify-center h-32 text-sm text-fg-muted">
             No audit events
           </div>

@@ -108,4 +108,54 @@ describe("PrTab", () => {
     );
     expect(getByText(/No PR artifact/)).toBeTruthy();
   });
+
+  it("fires exactly one fetch per 8s tick when checks are non-conclusive", async () => {
+    const inflightChecks = {
+      check_runs: [
+        { id: 1, name: "CI", status: "in_progress", conclusion: null },
+      ],
+      total_count: 1,
+    };
+    vi.mocked(getPrChecks).mockResolvedValue(inflightChecks);
+
+    render(
+      <PrTab task={makeTask()} workflowId="wf-1" subscribeProviderEvents={noop} />,
+    );
+
+    await act(async () => {});
+
+    const callsAfterMount = vi.mocked(getPrChecks).mock.calls.length;
+    expect(callsAfterMount).toBe(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8000);
+    });
+
+    expect(vi.mocked(getPrChecks).mock.calls.length).toBe(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8000);
+    });
+
+    expect(vi.mocked(getPrChecks).mock.calls.length).toBe(3);
+  });
+
+  it("continues polling when mergeable_state is blocked even with conclusive checks", async () => {
+    vi.mocked(getPrDetail).mockResolvedValue({ ...prData, mergeable_state: "blocked" });
+    vi.mocked(getPrChecks).mockResolvedValue(concludedChecks);
+
+    render(
+      <PrTab task={makeTask()} workflowId="wf-1" subscribeProviderEvents={noop} />,
+    );
+
+    await act(async () => {});
+
+    const callsAfterMount = vi.mocked(getPrChecks).mock.calls.length;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8000);
+    });
+
+    expect(vi.mocked(getPrChecks).mock.calls.length).toBe(callsAfterMount + 1);
+  });
 });
