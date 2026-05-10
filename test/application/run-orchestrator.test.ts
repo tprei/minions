@@ -30,7 +30,7 @@ function makeChunks(lines: string[], startOffset: number = 0): RuntimeOutputChun
 function makeRuntime(chunks: RuntimeOutputChunk[], shouldThrow?: Error): RuntimeBackend {
   return {
     start: vi.fn(),
-    stop: vi.fn(),
+    stop: vi.fn().mockResolvedValue(undefined),
     probe: vi.fn().mockResolvedValue("live" as RuntimeProbeState),
     attach(_sessionId: string, _opts?: RuntimeAttachOptions): AsyncIterable<RuntimeOutputChunk> {
       return {
@@ -213,7 +213,7 @@ describe("RunOrchestrator", () => {
     let capturedAttachOpts: RuntimeAttachOptions | undefined;
     const runtime: RuntimeBackend = {
       start: vi.fn(),
-      stop: vi.fn(),
+      stop: vi.fn().mockResolvedValue(undefined),
       probe: vi.fn().mockResolvedValue("live" as RuntimeProbeState),
       attach(_sessionId: string, opts?: RuntimeAttachOptions): AsyncIterable<RuntimeOutputChunk> {
         capturedAttachOpts = opts;
@@ -285,7 +285,7 @@ describe("RunOrchestrator", () => {
 
     const runtime: RuntimeBackend = {
       start: vi.fn(),
-      stop: vi.fn(),
+      stop: vi.fn().mockResolvedValue(undefined),
       probe: vi.fn().mockResolvedValue("live" as RuntimeProbeState),
       attach(_sessionId: string, _opts?: RuntimeAttachOptions): AsyncIterable<RuntimeOutputChunk> {
         return { [Symbol.asyncIterator]: async function* () {} };
@@ -602,7 +602,7 @@ describe("RunOrchestrator", () => {
 
     const runtime: RuntimeBackend = {
       start: vi.fn(),
-      stop: vi.fn(),
+      stop: vi.fn().mockResolvedValue(undefined),
       probe: vi.fn().mockResolvedValue("live" as RuntimeProbeState),
       attach(_sessionId: string, _opts?: RuntimeAttachOptions): AsyncIterable<RuntimeOutputChunk> {
         return { [Symbol.asyncIterator]: async function* () {} };

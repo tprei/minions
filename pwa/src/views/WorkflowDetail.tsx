@@ -341,21 +341,45 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
           </div>
         );
 
-      case "needs-review":
+      case "needs-review": {
+        const latestRun = activeTask.runs[activeTask.runs.length - 1];
+        const runError = latestRun?.error;
+        const runTerminalReason = latestRun?.terminalReason;
         return (
           <div className="p-4">
-            <div className="card p-4">
+            <div className="card p-4 space-y-2">
               <p className="text-sm font-medium text-warn">Operator review required</p>
+              {runTerminalReason !== undefined && (
+                <p className="text-xs text-fg-muted">Reason: {runTerminalReason}</p>
+              )}
+              {runError !== undefined && (
+                <p className="text-xs text-err font-mono break-all">{runError}</p>
+              )}
               <a
                 href={`#/audit?workflowId=${encodeURIComponent(id)}`}
-                className="text-xs text-accent mt-1 block"
+                className="text-xs text-accent block"
               >
                 View audit log →
               </a>
+              <button
+                type="button"
+                className="mt-2 text-xs px-3 py-1 rounded bg-accent text-bg font-medium hover:opacity-80 transition-opacity"
+                onClick={() => {
+                  void postCommand({
+                    kind: "retry-task",
+                    workflowId: id,
+                    taskId: activeTask.id,
+                    prompt: activeTask.prompt,
+                  });
+                }}
+              >
+                Retry
+              </button>
             </div>
             {artifactSection}
           </div>
         );
+      }
     }
   }
 

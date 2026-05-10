@@ -35,6 +35,7 @@ export interface TransitionCommand {
   artifacts?: Artifact[];
   passed?: boolean;
   reason?: string;
+  error?: string;
   workspaceId?: string;
   now: string;
 }
@@ -44,7 +45,7 @@ interface TransitionEffect {
   clearSession?: boolean;
   runEffect?:
     | { kind: "append"; run: NodeRun }
-    | { kind: "close"; reason: NodeRunTerminalReason }
+    | { kind: "close"; reason: NodeRunTerminalReason; error?: string }
     | { kind: "patch-open-run"; patch: { providerSessionRef?: string; outputOffset?: number } };
 }
 
@@ -184,10 +185,14 @@ const TRANSITIONS: Record<TransitionKind, TransitionRule> = {
   },
   "mark-interrupted": {
     from: ["running"],
-    apply: () => ({
+    apply: (_task, command) => ({
       patch: { executionStatus: "needs-review" },
       clearSession: true,
-      runEffect: { kind: "close", reason: "interrupted" },
+      runEffect: {
+        kind: "close" as const,
+        reason: "interrupted" as const,
+        ...(command.error !== undefined ? { error: command.error } : {}),
+      },
     }),
   },
   "fail-task": {
@@ -258,7 +263,7 @@ function updateTask(task: TaskNode, command: TransitionCommand, effect: Transiti
     if (effect.runEffect.kind === "append") {
       updated.runs = appendRun(task.runs, effect.runEffect.run);
     } else if (effect.runEffect.kind === "close") {
-      updated.runs = closeLatestRun(task.runs, effect.runEffect.reason, command.now);
+      updated.runs = closeLatestRun(task.runs, effect.runEffect.reason, command.now, effect.runEffect.error);
     } else {
       updated.runs = patchOpenRun(task.runs, effect.runEffect.patch);
     }

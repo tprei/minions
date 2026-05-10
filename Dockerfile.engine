@@ -37,4 +37,6 @@ ENV MWF_PWA_DIR=/app/pwa/dist
 ENV NODE_ENV=production
 EXPOSE 8787
 
+USER 1001:1001
+
 CMD ["npm", "start"]

@@ -24,6 +24,7 @@ export interface WorkflowSummary {
   status: WorkflowStatus;
   createdAt: string;
   updatedAt: string;
+  firstTaskTitle?: string;
 }
 
 export interface Workflow {
@@ -106,6 +107,7 @@ export interface NodeRun {
   startedAt: string;
   endedAt?: string;
   terminalReason?: NodeRunTerminalReason;
+  error?: string;
   exitMetadata?: Record<string, unknown>;
 }
 
@@ -219,6 +221,7 @@ export interface RunEndedPayload {
   attempt: number;
   terminalReason: NodeRunTerminalReason;
   providerSessionRef?: string;
+  error?: string;
 }
 
 export interface WorkflowStatusChangedPayload {

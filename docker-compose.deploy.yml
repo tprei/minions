@@ -16,6 +16,8 @@ services:
       - ./data/engine:/data
       - ./data/sessions:/data/sessions
       - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "989"
     networks:
       default:
         aliases: [engine]

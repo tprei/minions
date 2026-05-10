@@ -123,8 +123,9 @@ export class RunOrchestrator {
         }
 
         if (lastNonRecoverableError !== undefined) {
+          const errorMsg = (lastNonRecoverableError as { message?: string }).message ?? "non-recoverable provider error";
           try {
-            await this.dispatchWithRetry({ kind: "mark-interrupted", taskId, now: now() });
+            await this.dispatchWithRetry({ kind: "mark-interrupted", taskId, error: errorMsg, now: now() });
             await workspace.cleanup(workspaceId).catch((err) => {
               log.error("workspace cleanup failed", { error: (err as Error).message });
             });
@@ -146,6 +147,7 @@ export class RunOrchestrator {
             throw err;
           }
         }
+        await runtime.stop(runtimeSessionId).catch(() => {});
         return;
       }
     } catch (err) {
@@ -154,6 +156,9 @@ export class RunOrchestrator {
         log.info("run-orchestrator exiting due to signal abort, leaving task running");
         return;
       }
+
+      const catchErrMsg = (err as Error).message;
+      log.error("run-orchestrator caught unexpected error, marking interrupted", { error: catchErrMsg });
 
       if (!finalReceived && latestOffset !== undefined) {
         try {
@@ -170,7 +175,7 @@ export class RunOrchestrator {
       }
 
       try {
-        await this.dispatchWithRetry({ kind: "mark-interrupted", taskId, now: now() });
+        await this.dispatchWithRetry({ kind: "mark-interrupted", taskId, error: catchErrMsg, now: now() });
         await workspace.cleanup(workspaceId).catch((err) => {
           log.error("workspace cleanup failed", { error: (err as Error).message });
         });
@@ -181,6 +186,7 @@ export class RunOrchestrator {
         }
         throw interruptErr;
       }
+      await runtime.stop(runtimeSessionId).catch(() => {});
       return;
     }
 
@@ -216,5 +222,6 @@ export class RunOrchestrator {
       }
       throw interruptErr;
     }
+    await runtime.stop(runtimeSessionId).catch(() => {});
   }
 }

@@ -54,6 +54,7 @@ export interface RunEndedPayload {
   attempt: number;
   terminalReason: NodeRunTerminalReason;
   providerSessionRef?: string;
+  error?: string;
 }
 
 export interface WorkflowStatusChangedPayload {
@@ -167,6 +168,9 @@ export function deriveEvents(
         };
         if (nextLast.providerSessionRef !== undefined) {
           endedPayload.providerSessionRef = nextLast.providerSessionRef;
+        }
+        if (nextLast.error !== undefined) {
+          endedPayload.error = nextLast.error;
         }
         events.push({ ...base, kind: "run-ended", payload: endedPayload });
       }

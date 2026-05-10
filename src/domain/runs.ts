@@ -18,6 +18,7 @@ export interface NodeRun {
   startedAt: string;
   endedAt?: string;
   terminalReason?: NodeRunTerminalReason;
+  error?: string;
   exitMetadata?: Record<string, unknown>;
 }
 
@@ -36,12 +37,13 @@ export function closeLatestRun(
   runs: NodeRun[],
   terminalReason: NodeRunTerminalReason,
   endedAt: string,
+  error?: string,
 ): NodeRun[] {
   const open = getOpenRun(runs);
   if (!open) return runs;
 
   const realIndex = runs.indexOf(open);
-  const closed: NodeRun = { ...open, endedAt, terminalReason };
+  const closed: NodeRun = { ...open, endedAt, terminalReason, ...(error !== undefined ? { error } : {}) };
   return [...runs.slice(0, realIndex), closed, ...runs.slice(realIndex + 1)];
 }
 

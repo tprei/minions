@@ -143,7 +143,18 @@ export function createServer(deps: ServerDeps): Hono {
   app.get("/workflows", async (c) => {
     const includeCompleted = c.req.query("include") === "completed";
     const workflows = await deps.repo.list({ includeCompleted });
-    return c.json(workflows);
+    const summaries = workflows.map((wf) => {
+      const firstTask = Object.values(wf.graph).sort((a, b) => a.id.localeCompare(b.id))[0];
+      return {
+        id: wf.id,
+        kind: wf.kind,
+        status: wf.status,
+        createdAt: wf.createdAt,
+        updatedAt: wf.updatedAt,
+        ...(firstTask !== undefined ? { firstTaskTitle: firstTask.title } : {}),
+      };
+    });
+    return c.json(summaries);
   });
 
   app.get("/workflows/:id", async (c) => {

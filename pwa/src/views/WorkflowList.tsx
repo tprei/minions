@@ -54,7 +54,7 @@ function WorkflowRow({ workflow, pinned, onLongPress, onClick }: WorkflowRowProp
       {...bind}
     >
       {pinned && <span className="text-accent" title="Pinned">📌</span>}
-      <span className="opacity-60 truncate flex-1">{workflow.id}</span>
+      <span className="opacity-60 truncate flex-1">{workflow.firstTaskTitle ?? workflow.id.slice(0, 8)}</span>
       <span>{workflow.status}</span>
     </button>
   );
