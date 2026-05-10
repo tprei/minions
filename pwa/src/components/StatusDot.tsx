@@ -1,11 +1,14 @@
 import type { ReactElement } from "react";
 import type { TaskExecutionStatus } from "../domain/types";
 import { cx } from "../util/cx";
+import type { AgentColorTone } from "../utils/agentColor";
+import { agentRingClass } from "../utils/agentColor";
 
 interface StatusDotProps {
   status: TaskExecutionStatus;
   size?: "sm" | "md";
   className?: string;
+  agentColor?: AgentColorTone;
 }
 
 const statusColor: Record<TaskExecutionStatus, string> = {
@@ -28,7 +31,7 @@ const sizeClass = {
   md: "w-2 h-2",
 };
 
-export function StatusDot({ status, size = "md", className }: StatusDotProps): ReactElement {
+export function StatusDot({ status, size = "md", className, agentColor }: StatusDotProps): ReactElement {
   return (
     <span
       aria-label={status}
@@ -36,6 +39,7 @@ export function StatusDot({ status, size = "md", className }: StatusDotProps): R
         "inline-block rounded-full flex-shrink-0",
         statusColor[status],
         sizeClass[size],
+        agentColor !== undefined ? cx("ring-1", agentRingClass(agentColor)) : undefined,
         className,
       )}
     />

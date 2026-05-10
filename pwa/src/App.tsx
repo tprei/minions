@@ -3,7 +3,7 @@ import { useRoute } from "./routing/router";
 import { AppLayout } from "./views/AppLayout";
 import { WorkflowList } from "./views/WorkflowList";
 import { WorkflowDetail } from "./views/WorkflowDetail";
-import { CompactNewWorkflowModal } from "./views/CompactNewWorkflowModal";
+import { NewWorkflowSheet } from "./views/NewWorkflowSheet";
 import { ActivityTab } from "./views/ActivityTab";
 
 function Placeholder({ label }: { label: string }): ReactElement {
@@ -24,7 +24,7 @@ export function App(): ReactElement {
       case "audit":
       case "alerts":
         return <ActivityTab activeRoute={route.name} />;
-      case "new-workflow": return <CompactNewWorkflowModal />;
+      case "new-workflow": return <NewWorkflowSheet />;
       case "account": return <Placeholder label="Account" />;
       case "not-found": return <WorkflowList />;
     }

@@ -22,6 +22,10 @@ import { DagSheet } from "./DagSheet";
 import { PrTab } from "./PrTab";
 import { ArtifactList } from "../artifacts/ArtifactList";
 import { urlBase64ToUint8Array } from "../pwa/push";
+import { OperationsStrip } from "./OperationsStrip";
+import { DraftPrPanel } from "./DraftPrPanel";
+import { CompletionStepper } from "../components/CompletionStepper";
+import { CostBadge } from "../components/CostBadge";
 
 const STATUS_ORDER: Record<string, number> = {
   running: 0,
@@ -320,11 +324,7 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
                 subscribeProviderEvents={subscribeProviderEvents}
               />
             ) : (
-              <div className="flex-1 p-4">
-                <div className="card p-4 text-sm text-fg-muted">
-                  Finalizing…
-                </div>
-              </div>
+              <DraftPrPanel workflowId={id} taskId={activeTask.id} />
             )}
             {artifactSection}
           </div>
@@ -413,28 +413,37 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
         />
       )}
 
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
-        <h1 className="text-sm font-medium text-fg truncate flex-1">{workflowTitle}</h1>
-        <Pill tone={workflowStatusTone(workflow.status)} className="text-[10px]">
-          {workflow.status}
-        </Pill>
-        <button
-          type="button"
-          title={pushSubscribed ? "Unsubscribe push" : "Subscribe push"}
-          onClick={() => void handleTogglePush()}
-          className={`text-xs transition-colors px-1 ${
-            pushSubscribed ? "text-accent" : "text-fg-subtle hover:text-fg"
-          }`}
-        >
-          {pushSubscribed ? "★" : "☆"}
-        </button>
-        <button
-          type="button"
-          className="text-xs text-fg-muted hover:text-fg transition-colors px-2 py-1 rounded hover:bg-bg-elev"
-          onClick={() => setDagOpen(true)}
-        >
-          Tasks ({Object.keys(workflow.graph).length})
-        </button>
+      <div className="flex flex-col shrink-0 border-b border-border">
+        <div className="flex items-center gap-2 px-4 py-2">
+          <h1 className="text-sm font-medium text-fg truncate flex-1">{workflowTitle}</h1>
+          <CostBadge workflowId={id} subscribeProviderEvents={subscribeProviderEvents} />
+          <Pill tone={workflowStatusTone(workflow.status)} className="text-[10px]">
+            {workflow.status}
+          </Pill>
+          <button
+            type="button"
+            title={pushSubscribed ? "Unsubscribe push" : "Subscribe push"}
+            onClick={() => void handleTogglePush()}
+            className={`text-xs transition-colors px-1 ${
+              pushSubscribed ? "text-accent" : "text-fg-subtle hover:text-fg"
+            }`}
+          >
+            {pushSubscribed ? "★" : "☆"}
+          </button>
+          <button
+            type="button"
+            className="text-xs text-fg-muted hover:text-fg transition-colors px-2 py-1 rounded hover:bg-bg-elev"
+            onClick={() => setDagOpen(true)}
+          >
+            Tasks ({Object.keys(workflow.graph).length})
+          </button>
+        </div>
+        {(status === "finalizing" || status === "pr-open" || status === "ci-pending" || status === "merged") && (
+          <div className="px-4 pb-1">
+            <CompletionStepper executionStatus={status} />
+          </div>
+        )}
+        <OperationsStrip workflow={workflow} />
       </div>
 
       <div className="flex-1 min-h-0">
