@@ -106,6 +106,7 @@ describe("ObservabilityService", () => {
         taskId: `${WORKFLOW_ID}:task`,
         runId: "run-1",
         providerEvent: { kind: "assistant_text", text: "hello" },
+        seq: 0,
       },
     });
 
@@ -133,6 +134,7 @@ describe("ObservabilityService", () => {
         taskId: `${WORKFLOW_ID}:task`,
         runId: "run-1",
         providerEvent: { kind: "assistant_text", text: "hello" },
+        seq: 0,
       },
     });
 

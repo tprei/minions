@@ -44,6 +44,7 @@ function providerEvent(kind: string, extra: Record<string, unknown> = {}): Workf
       taskId: "task-1",
       runId: "run-1",
       providerEvent: { kind, ...extra } as WorkflowEvent extends { kind: "provider-event" } ? never : never,
+      seq: 0,
     },
   } as WorkflowEvent;
 }

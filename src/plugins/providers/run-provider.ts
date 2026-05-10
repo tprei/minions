@@ -3,7 +3,7 @@ import type { ProviderEvent, ProviderPlugin } from "../provider-plugin.js";
 import { LineBuffer } from "../line-buffer.js";
 
 export type RunProviderItem =
-  | { kind: "provider"; event: ProviderEvent }
+  | { kind: "provider"; event: ProviderEvent; seq: number }
   | { kind: "offset"; offset: number };
 
 export interface RunProviderOptions {
@@ -23,24 +23,27 @@ export async function* runProvider(
   const buffer = new LineBuffer();
   const attachOpts: RuntimeAttachOptions = { fromOffset: opts.fromOffset ?? 0 };
   if (opts.signal !== undefined) attachOpts.signal = opts.signal;
+  let lineSeq = 0;
 
   for await (const chunk of runtime.attach(sessionId, attachOpts)) {
     const offset = chunk.offset + chunk.bytes.byteLength;
     yield { kind: "offset", offset };
     const lines = buffer.push(chunk.bytes);
     for (const line of lines) {
+      const seq = lineSeq++;
       const events = provider.parseFrame(line);
       for (const event of events) {
-        yield { kind: "provider", event };
+        yield { kind: "provider", event, seq };
       }
     }
   }
 
   const tail = buffer.flush();
   for (const line of tail) {
+    const seq = lineSeq++;
     const events = provider.parseFrame(line);
     for (const event of events) {
-      yield { kind: "provider", event };
+      yield { kind: "provider", event, seq };
     }
   }
 }

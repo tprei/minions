@@ -66,6 +66,7 @@ export interface ProviderEventPayload {
   taskId: string;
   runId: string;
   providerEvent: ProviderEvent;
+  seq: number;
 }
 
 export type MergePhase = "prepareMerge" | "commit" | "squash" | "rebase" | "applyMerge" | "finalize";

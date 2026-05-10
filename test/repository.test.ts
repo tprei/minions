@@ -134,7 +134,7 @@ describe("InMemoryWorkflowRepository", () => {
       workflowId: "wf-1",
       kind: "provider-event",
       occurredAt: now,
-      payload: { taskId: "t", runId: "run-1", providerEvent: { kind: "assistant_text", text: "hi" } },
+      payload: { taskId: "t", runId: "run-1", providerEvent: { kind: "assistant_text", text: "hi" }, seq: 0 },
     };
     repo.publishTransient("wf-1", transient);
 
@@ -159,7 +159,7 @@ describe("InMemoryWorkflowRepository", () => {
       workflowId: "wf-1",
       kind: "provider-event",
       occurredAt: now,
-      payload: { taskId: "t", runId: "run-1", providerEvent: { kind: "thinking", text: "reasoning" } },
+      payload: { taskId: "t", runId: "run-1", providerEvent: { kind: "thinking", text: "reasoning" }, seq: 0 },
     };
     repo.publishTransient("wf-1", transient);
 

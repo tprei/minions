@@ -20,7 +20,7 @@ export interface AutomationRunnerDeps {
   runtime: RuntimeBackend;
   workspace: WorkspaceBackend;
   spawnOrchestrator: (deps: Omit<RunOrchestratorDeps, "signal" | "log">) => void;
-  publish: (workflowId: string, taskId: string, runId: string, event: ProviderEvent) => void;
+  publish: (workflowId: string, taskId: string, runId: string, event: ProviderEvent, seq: number) => void;
   now: () => string;
   signal: AbortSignal;
   log: Logger;
@@ -182,7 +182,7 @@ export class AutomationRunner {
       workspace: this.deps.workspace,
       workspaceId: handle.workspaceId,
       applyCommand,
-      publish: (providerEvent) => publish(workflowId, taskId, runId, providerEvent),
+      publish: (providerEvent, seq) => publish(workflowId, taskId, runId, providerEvent, seq),
       now: nowFn,
     });
   }

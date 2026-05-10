@@ -18,7 +18,7 @@ export interface RunOrchestratorDeps {
   workspace: WorkspaceBackend;
   workspaceId: string;
   applyCommand: (cmd: Command) => Promise<CommandResult>;
-  publish: (event: ProviderEvent) => void;
+  publish: (event: ProviderEvent, seq: number) => void;
   now: () => string;
   signal?: AbortSignal;
   fromOffset?: number;
@@ -90,10 +90,11 @@ export class RunOrchestrator {
         }
 
         const event = item.event;
+        const seq = item.seq;
 
         // set finalReceived before publish so a publish throw on final still marks final as seen
         if (event.kind === "final") finalReceived = true;
-        this.deps.publish(event);
+        this.deps.publish(event, seq);
 
         if (event.kind === "error" && !event.recoverable) {
           lastNonRecoverableError = event;

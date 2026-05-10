@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { ProviderEvent } from "../domain/providerEvent";
-import type { WorkflowEvent } from "../domain/types";
+import type { TranscriptEvent, WorkflowEvent } from "../domain/types";
 import { aggregateConsecutive, ClusterGroup, type AggregateItem } from "../transcript/aggregate";
 import { createStreamingBuffer } from "../transcript/streaming";
 import { AssistantText } from "../transcript/events/assistant-text";
@@ -12,6 +12,8 @@ import { TranscriptError } from "../transcript/events/error";
 import { Final } from "../transcript/events/final";
 import { Approval } from "../transcript/events/approval";
 import { ClusterHeader } from "../transcript/events/cluster-header";
+import { getTaskTranscript } from "../transport/rest";
+import { useConnectionStore } from "../store/useConnectionStore";
 
 export type ProviderEventListener = (evt: WorkflowEvent) => void;
 export type ProviderEventSubscriber = (listener: ProviderEventListener) => () => void;
@@ -133,6 +135,12 @@ export function TranscriptView({
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
 
+  const historyLoadedRef = useRef(false);
+  const liveBufferRef = useRef<TranscriptEvent[]>([]);
+  const seenIdsRef = useRef<Set<string>>(new Set());
+
+  const connectionState = useConnectionStore((s) => s.state);
+
   const handleClusterToggle = useCallback((id: string) => {
     setClusterState((prev) => {
       const next = new Map(prev);
@@ -142,32 +150,130 @@ export function TranscriptView({
     });
   }, []);
 
+  const appendProviderEvents = useCallback((incoming: ProviderEvent[]) => {
+    if (incoming.length === 0) return;
+    setEvents((prev) => {
+      const next = [...prev, ...incoming];
+      const groups = aggregateConsecutive(next, previousGroupsRef.current);
+      previousGroupsRef.current = groups;
+      setAggregated(groups);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     setEvents([]);
     setAggregated([]);
     previousGroupsRef.current = [];
+    historyLoadedRef.current = false;
+    liveBufferRef.current = [];
+    seenIdsRef.current = new Set();
 
     const buffer = createStreamingBuffer((batch) => {
-      setEvents((prev) => {
-        const next = [...prev, ...batch];
-        const groups = aggregateConsecutive(next, previousGroupsRef.current);
-        previousGroupsRef.current = groups;
-        setAggregated(groups);
-        return next;
-      });
+      appendProviderEvents(batch);
     });
 
     const unsub = subscribeProviderEvents((evt) => {
       if (evt.kind !== "provider-event") return;
       if (evt.payload.taskId !== taskId) return;
-      buffer.push(evt.payload.providerEvent as ProviderEvent);
+      const pe = evt.payload.providerEvent as ProviderEvent;
+      const seq = evt.payload.seq ?? -1;
+      const runId = evt.payload.runId;
+      const dedupeKey = `${runId}:${seq}`;
+
+      if (historyLoadedRef.current) {
+        if (!seenIdsRef.current.has(dedupeKey)) {
+          seenIdsRef.current.add(dedupeKey);
+          buffer.push(pe);
+        }
+      } else {
+        if (!seenIdsRef.current.has(dedupeKey)) {
+          const te: TranscriptEvent = { runId, attempt: 0, seq, event: pe };
+          liveBufferRef.current.push(te);
+          seenIdsRef.current.add(dedupeKey);
+        }
+      }
     });
 
+    let cancelled = false;
+
+    getTaskTranscript(workflowId, taskId)
+      .then((result) => {
+        if (cancelled) return;
+
+        const historyEvents = result.events.filter((te) => {
+          const key = `${te.runId}:${te.seq}`;
+          return !seenIdsRef.current.has(key);
+        });
+
+        for (const te of historyEvents) {
+          seenIdsRef.current.add(`${te.runId}:${te.seq}`);
+        }
+
+        const historyProviderEvents = historyEvents.map((te) => te.event);
+
+        setEvents([]);
+        setAggregated([]);
+        previousGroupsRef.current = [];
+
+        if (historyProviderEvents.length > 0) {
+          appendProviderEvents(historyProviderEvents);
+        }
+
+        const drainedLive = liveBufferRef.current;
+        liveBufferRef.current = [];
+        historyLoadedRef.current = true;
+
+        const newLive = drainedLive
+          .filter((te) => !historyEvents.some((h) => h.runId === te.runId && h.seq === te.seq))
+          .map((te) => te.event);
+
+        if (newLive.length > 0) {
+          appendProviderEvents(newLive);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          historyLoadedRef.current = true;
+          liveBufferRef.current = [];
+        }
+      });
+
     return () => {
+      cancelled = true;
       buffer.stop();
       unsub();
     };
-  }, [workflowId, taskId, subscribeProviderEvents]);
+  }, [workflowId, taskId, subscribeProviderEvents, appendProviderEvents]);
+
+  useEffect(() => {
+    if (connectionState !== "connected") return;
+    if (!historyLoadedRef.current) return;
+
+    let cancelled = false;
+    getTaskTranscript(workflowId, taskId)
+      .then((result) => {
+        if (cancelled) return;
+
+        const newEvents = result.events.filter((te) => {
+          const key = `${te.runId}:${te.seq}`;
+          return !seenIdsRef.current.has(key);
+        });
+
+        if (newEvents.length === 0) return;
+
+        for (const te of newEvents) {
+          seenIdsRef.current.add(`${te.runId}:${te.seq}`);
+        }
+
+        appendProviderEvents(newEvents.map((te) => te.event));
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionState, workflowId, taskId, appendProviderEvents]);
 
   useEffect(() => {
     const el = scrollRef.current;

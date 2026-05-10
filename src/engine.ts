@@ -217,13 +217,13 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
           // workspaceId from task state; if absent the cleanup is a no-op (stub handles it)
           workspaceId: ctx.workspaceId ?? "",
           applyCommand: (cmd) => applyCommand(repo, cmd),
-          publish: (providerEvent) => {
+          publish: (providerEvent, seq) => {
             const envelope: WorkflowEvent = {
               cursor: 0,
               workflowId: ctx.workflowId,
               occurredAt: now(),
               kind: "provider-event",
-              payload: { taskId: ctx.taskId, runId: ctx.runId, providerEvent },
+              payload: { taskId: ctx.taskId, runId: ctx.runId, providerEvent, seq },
             };
             repo.publishTransient(ctx.workflowId, envelope);
           },
@@ -273,7 +273,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     pwaRoot = relative(process.cwd(), abs);
   }
 
-  const serverDeps: Parameters<typeof createServer>[0] = { repo, recoveryService, executor };
+  const serverDeps: Parameters<typeof createServer>[0] = { repo, recoveryService, executor, dataDir };
 
   if (vapid && pushService && subscriptions) {
     serverDeps.pushService = pushService;
@@ -324,13 +324,13 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
         runtime,
         workspace,
         spawnOrchestrator: spawnTracked,
-        publish: (workflowId, taskId, runId, providerEvent) => {
+        publish: (workflowId, taskId, runId, providerEvent, seq) => {
           const envelope: WorkflowEvent = {
             cursor: 0,
             workflowId,
             occurredAt: now(),
             kind: "provider-event",
-            payload: { taskId, runId, providerEvent },
+            payload: { taskId, runId, providerEvent, seq },
           };
           repo.publishTransient(workflowId, envelope);
         },

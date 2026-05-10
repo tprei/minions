@@ -143,13 +143,13 @@ export class ContinueTaskService {
         workspace,
         workspaceId: handle.workspaceId,
         applyCommand,
-        publish: (providerEvent) => {
+        publish: (providerEvent, seq) => {
           const envelope: WorkflowEvent = {
             cursor: 0,
             workflowId,
             occurredAt: now(),
             kind: "provider-event",
-            payload: { taskId, runId, providerEvent },
+            payload: { taskId, runId, providerEvent, seq },
           };
           repo.publishTransient(workflowId, envelope);
         },
