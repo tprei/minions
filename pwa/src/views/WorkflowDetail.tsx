@@ -365,15 +365,22 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
 
             {(status === "finalizing" || status === "pr-open") && (
               <div className="px-4 pt-3">
-                {hasPr ? (
-                  <PrTab
-                    task={activeTask}
-                    workflowId={id}
-                    subscribeProviderEvents={subscribeProviderEvents}
-                  />
-                ) : (
-                  <DraftPrPanel workflowId={id} taskId={activeTask.id} />
-                )}
+                <details open={!showTranscript} className="card">
+                  <summary className="px-4 py-2 text-sm font-medium text-fg cursor-pointer select-none">
+                    {hasPr ? "Pull request" : "Draft pull request"}
+                  </summary>
+                  <div className="px-4 pb-4 pt-1">
+                    {hasPr ? (
+                      <PrTab
+                        task={activeTask}
+                        workflowId={id}
+                        subscribeProviderEvents={subscribeProviderEvents}
+                      />
+                    ) : (
+                      <DraftPrPanel workflowId={id} taskId={activeTask.id} />
+                    )}
+                  </div>
+                </details>
               </div>
             )}
 
