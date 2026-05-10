@@ -187,10 +187,11 @@ export function TranscriptView({
           buffer.push(pe);
         }
       } else {
-        const te: TranscriptEvent = { runId, attempt: 0, seq, event: pe };
-        liveBufferRef.current.push(te);
-        seenIdsRef.current.add(dedupeKey);
-        buffer.push(pe);
+        if (!seenIdsRef.current.has(dedupeKey)) {
+          const te: TranscriptEvent = { runId, attempt: 0, seq, event: pe };
+          liveBufferRef.current.push(te);
+          seenIdsRef.current.add(dedupeKey);
+        }
       }
     });
 
