@@ -1,46 +1,57 @@
-import { useEffect, useState } from "react";
-import { listWorkflows, RestError } from "../transport/rest";
-import type { WorkflowSummary } from "../transport/rest";
+import { useEffect, useRef } from "react";
+import { listWorkflows } from "../transport/rest";
+import { RestError } from "../transport/rest";
+import { useWorkflowStore, useWorkflows } from "../store/useWorkflowStore";
 
-type State =
-  | { phase: "loading" }
-  | { phase: "error"; message: string }
-  | { phase: "ok"; workflows: WorkflowSummary[] };
+// FUTURE: replace polling with a global SSE channel once the engine provides one
+const POLL_INTERVAL_MS = 2000;
 
 export function WorkflowList(): JSX.Element {
-  const [state, setState] = useState<State>({ phase: "loading" });
+  const setSummaries = useWorkflowStore((s) => s.setSummaries);
+  const summaries = useWorkflows();
+  const errorRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    let cancelled = false;
-    listWorkflows()
-      .then((workflows) => {
-        if (!cancelled) setState({ phase: "ok", workflows });
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        const message = err instanceof RestError ? `HTTP ${err.status}` : "Failed to load workflows";
-        setState({ phase: "error", message });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    mountedRef.current = true;
+    errorRef.current = null;
 
-  if (state.phase === "loading") {
+    async function fetch(): Promise<void> {
+      try {
+        const list = await listWorkflows();
+        if (mountedRef.current) setSummaries(list);
+      } catch (err: unknown) {
+        if (!mountedRef.current) return;
+        errorRef.current =
+          err instanceof RestError ? `HTTP ${err.status}` : "Failed to load workflows";
+        setSummaries([]);
+      }
+    }
+
+    void fetch();
+    const timer = setInterval(() => { void fetch(); }, POLL_INTERVAL_MS);
+
+    return () => {
+      mountedRef.current = false;
+      clearInterval(timer);
+    };
+  }, [setSummaries]);
+
+  if (summaries === undefined) {
     return <p className="text-sm opacity-60">Loading workflows…</p>;
   }
 
-  if (state.phase === "error") {
-    return <p className="text-sm text-red-500">{state.message}</p>;
+  if (errorRef.current !== null) {
+    return <p className="text-sm text-red-500">{errorRef.current}</p>;
   }
 
-  if (state.workflows.length === 0) {
+  if (summaries.length === 0) {
     return <p className="text-sm opacity-60">No active workflows.</p>;
   }
 
   return (
     <ul className="space-y-2">
-      {state.workflows.map((w) => (
+      {summaries.map((w) => (
         <li key={w.id} className="flex gap-3 p-3 border rounded text-sm font-mono">
           <span className="opacity-60 truncate">{w.id}</span>
           <span>{w.status}</span>
