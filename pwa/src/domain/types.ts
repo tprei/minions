@@ -233,6 +233,19 @@ export interface ProviderEventPayload {
   taskId: string;
   runId: string;
   providerEvent: unknown;
+  seq?: number;
+}
+
+export interface TranscriptCursor {
+  runId: string;
+  seq: number;
+}
+
+export interface TranscriptEvent {
+  runId: string;
+  attempt: number;
+  seq: number;
+  event: import("./providerEvent").ProviderEvent;
 }
 
 export type MergePhase = "prepareMerge" | "commit" | "squash" | "rebase" | "applyMerge" | "finalize";

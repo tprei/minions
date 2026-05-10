@@ -2,6 +2,8 @@ import type {
   Alert,
   AuditEvent,
   Command,
+  TranscriptCursor,
+  TranscriptEvent,
   Workflow,
   WorkflowSpec,
   WorkflowSummary,
@@ -40,6 +42,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new RestError(res.status, body);
   }
   return res.json() as Promise<T>;
+}
+
+export function getTaskTranscript(
+  workflowId: string,
+  taskId: string,
+): Promise<{ events: TranscriptEvent[]; cutoff: TranscriptCursor | null }> {
+  return request<{ events: TranscriptEvent[]; cutoff: TranscriptCursor | null }>(
+    `/workflows/${encodeURIComponent(workflowId)}/tasks/${encodeURIComponent(taskId)}/transcript`,
+  );
 }
 
 export function listWorkflows(): Promise<WorkflowSummary[]> {
