@@ -74,9 +74,9 @@ export function AppLayout({ activeRoute, children }: AppLayoutProps): ReactEleme
     (activeTask.executionStatus === "pr-open" || activeTask.executionStatus === "ci-pending");
 
   const paletteActions: PaletteAction[] = [
-    { id: "new-workflow", label: "New workflow", group: "Navigation", run: () => navigate("#/new") },
-    { id: "go-audit", label: "Go to audit", group: "Navigation", run: () => navigate("#/audit") },
-    { id: "go-alerts", label: "Go to alerts", group: "Navigation", run: () => navigate("#/alerts") },
+    { id: "new-workflow", label: "New workflow", group: "Navigation", run: () => navigate("/new") },
+    { id: "go-audit", label: "Go to audit", group: "Navigation", run: () => navigate("/audit") },
+    { id: "go-alerts", label: "Go to alerts", group: "Navigation", run: () => navigate("/alerts") },
     { id: "toggle-theme", label: "Toggle theme", group: "Settings", run: () => toggleTheme() },
   ];
 
@@ -154,7 +154,7 @@ export function AppLayout({ activeRoute, children }: AppLayoutProps): ReactEleme
           type="button"
           title="New workflow"
           className="fixed bottom-6 right-6 w-12 h-12 rounded-full bg-accent text-white shadow-2xl flex items-center justify-center text-xl hover:bg-accent-soft transition-colors z-30"
-          onClick={() => navigate("#/new")}
+          onClick={() => navigate("/new")}
           aria-label="New workflow"
         >
           +

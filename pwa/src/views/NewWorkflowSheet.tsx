@@ -157,7 +157,7 @@ export function NewWorkflowSheet(): ReactElement {
         },
       });
       clearDraft();
-      navigate(`#/workflow/${workflowId}`);
+      navigate(`/workflow/${workflowId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create workflow");
       setSubmitting(false);
@@ -166,7 +166,7 @@ export function NewWorkflowSheet(): ReactElement {
 
   function handleClose(): void {
     setOpen(false);
-    navigate("#/");
+    navigate("/");
   }
 
   const otherTaskIds = (currentIdx: number): string[] =>

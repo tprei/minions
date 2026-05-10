@@ -174,7 +174,7 @@ export function WorkflowList(): JSX.Element {
               workflow={w}
               pinned={pinned.includes(w.id)}
               onLongPress={(id, x, y) => setMenu({ workflowId: id, x, y })}
-              onClick={(id) => navigate(`#/workflow/${id}`)}
+              onClick={(id) => navigate(`/workflow/${id}`)}
             />
           </li>
         ))}
