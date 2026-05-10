@@ -21,7 +21,7 @@ export default defineConfig({
   },
   webServer: {
     command:
-      "MWF_DB_PATH=./.e2e-db.sqlite MWF_PWA_DIR=pwa MWF_AUTOMATION_SCAN_MS=0 npm start",
+      "MWF_DB_PATH=./.e2e-db.sqlite MWF_PWA_DIR=pwa/dist MWF_AUTOMATION_SCAN_MS=0 npm start",
     url: process.env.PW_BASE_URL ?? "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

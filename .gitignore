@@ -10,3 +10,6 @@ node_modules
 .env
 .env.*
 data/
+pwa/dist/
+pwa/node_modules/
+pwa/dev-dist/
