@@ -227,163 +227,20 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
       ? queuedSend.message
       : null;
 
-  function renderPhase(): JSX.Element {
-    if (!activeTask) {
-      return <p className="text-sm text-fg-muted p-4">No tasks in workflow.</p>;
-    }
-
-    const artifactSection = activeTask.artifacts.length > 0 ? (
-      <div className="px-4 pb-4">
-        <ArtifactList artifacts={activeTask.artifacts} />
-      </div>
-    ) : null;
-
-    switch (status) {
-      case "pending":
-      case "ready":
-        return (
-          <div className="flex flex-col h-full">
-            <div className="flex-1 flex items-center justify-center p-4">
-              <p className="text-sm text-fg-muted text-center">
-                Task is queued — send a prompt to start.
-              </p>
-            </div>
-            {artifactSection}
-            <Composer
-              workflowId={id}
-              taskId={activeTask.id}
-              executionStatus={status}
-              pendingApproval={pendingApproval}
-              queuedMessage={queuedMessageForActive}
-              onQueue={(msg) => handleQueue(activeTask.id, msg)}
-              onApprovalResolved={handleApprovalResolved}
-            />
-          </div>
-        );
-
-      case "running":
-      case "quality-pending":
-      case "ci-pending": {
-        const latestRun = activeTask.runs[activeTask.runs.length - 1];
-        return (
-          <div className="flex flex-col h-full">
-            <TranscriptView
-              workflowId={id}
-              taskId={activeTask.id}
-              subscribeProviderEvents={subscribeProviderEvents}
-              onApprovalResolved={handleApprovalResolved}
-              agentProviderType={latestRun?.providerType}
-              agentSessionId={latestRun?.runtimeSessionId}
-            />
-            {artifactSection}
-            <Composer
-              workflowId={id}
-              taskId={activeTask.id}
-              executionStatus={status}
-              pendingApproval={pendingApproval}
-              queuedMessage={queuedMessageForActive}
-              onQueue={(msg) => handleQueue(activeTask.id, msg)}
-              onApprovalResolved={handleApprovalResolved}
-            />
-          </div>
-        );
-      }
-
-      case "finalizing":
-      case "pr-open":
-        return (
-          <div className="flex flex-col h-full overflow-y-auto">
-            {activeTask.artifacts.some((a) => a.kind === "pr") ? (
-              <PrTab
-                task={activeTask}
-                workflowId={id}
-                subscribeProviderEvents={subscribeProviderEvents}
-              />
-            ) : (
-              <DraftPrPanel workflowId={id} taskId={activeTask.id} />
-            )}
-            {artifactSection}
-          </div>
-        );
-
-      case "merged":
-      case "completed":
-        return (
-          <div className="p-4">
-            <div className="card p-4">
-              <p className="text-sm font-medium text-fg">Task {status}</p>
-              {artifactSection}
-            </div>
-          </div>
-        );
-
-      case "failed":
-      case "cancelled":
-        return (
-          <div className="flex flex-col h-full">
-            <div className="flex-1 p-4">
-              <div className="card border-err/40 bg-err/5 p-4">
-                <p className="text-sm font-medium text-err">Task {status}</p>
-              </div>
-              {artifactSection}
-            </div>
-            {status === "failed" && (
-              <Composer
-                workflowId={id}
-                taskId={activeTask.id}
-                executionStatus={status}
-                pendingApproval={null}
-                queuedMessage={null}
-                onQueue={(msg) => handleQueue(activeTask.id, msg)}
-                onApprovalResolved={handleApprovalResolved}
-              />
-            )}
-          </div>
-        );
-
-      case "needs-review": {
-        const latestRun = activeTask.runs[activeTask.runs.length - 1];
-        const runError = latestRun?.error;
-        const runTerminalReason = latestRun?.terminalReason;
-        return (
-          <div className="p-4">
-            <div className="card p-4 space-y-2">
-              <p className="text-sm font-medium text-warn">Operator review required</p>
-              {runTerminalReason !== undefined && (
-                <p className="text-xs text-fg-muted">Reason: {runTerminalReason}</p>
-              )}
-              {runError !== undefined && (
-                <p className="text-xs text-err font-mono break-all">{runError}</p>
-              )}
-              <a
-                href={`#/audit?workflowId=${encodeURIComponent(id)}`}
-                className="text-xs text-accent block"
-              >
-                View audit log →
-              </a>
-              <button
-                type="button"
-                className="mt-2 text-xs px-3 py-1 rounded bg-accent text-bg font-medium hover:opacity-80 transition-opacity"
-                onClick={() => {
-                  void postCommand({
-                    kind: "retry-task",
-                    workflowId: id,
-                    taskId: activeTask.id,
-                    prompt: activeTask.prompt,
-                  });
-                }}
-              >
-                Retry
-              </button>
-            </div>
-            {artifactSection}
-          </div>
-        );
-      }
-    }
-  }
-
   const workflowTitle = activeTask?.title ?? id.slice(0, 8);
+
+  const latestRun = activeTask?.runs[activeTask.runs.length - 1];
+
+  const artifactSection = activeTask && activeTask.artifacts.length > 0 ? (
+    <div className="px-4 pb-4">
+      <ArtifactList artifacts={activeTask.artifacts} />
+    </div>
+  ) : null;
+
+  const hasPr = activeTask?.artifacts.some((a) => a.kind === "pr") ?? false;
+
+  const showTranscript = activeTask !== undefined && activeTask.runs.length > 0;
+  const showComposer = activeTask !== undefined;
 
   return (
     <div className="flex flex-col h-full">
@@ -453,8 +310,115 @@ export function WorkflowDetail({ id }: Props): JSX.Element {
         <OperationsStrip workflow={workflow} />
       </div>
 
-      <div className="flex-1 min-h-0">
-        {renderPhase()}
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">
+        {!activeTask && (
+          <p className="text-sm text-fg-muted p-4">No tasks in workflow.</p>
+        )}
+
+        {activeTask && (
+          <>
+            {status === "needs-review" && (() => {
+              const runError = latestRun?.error;
+              const runTerminalReason = latestRun?.terminalReason;
+              return (
+                <div className="px-4 pt-3">
+                  <div className="card p-4 space-y-2">
+                    <p className="text-sm font-medium text-warn">Operator review required</p>
+                    {runTerminalReason !== undefined && (
+                      <p className="text-xs text-fg-muted">Reason: {runTerminalReason}</p>
+                    )}
+                    {runError !== undefined && (
+                      <p className="text-xs text-err font-mono break-all">{runError}</p>
+                    )}
+                    <a
+                      href={`#/audit?workflowId=${encodeURIComponent(id)}`}
+                      className="text-xs text-accent block"
+                    >
+                      View audit log →
+                    </a>
+                    <button
+                      type="button"
+                      className="mt-2 text-xs px-3 py-1 rounded bg-accent text-bg font-medium hover:opacity-80 transition-opacity"
+                      onClick={() => {
+                        void postCommand({
+                          kind: "retry-task",
+                          workflowId: id,
+                          taskId: activeTask.id,
+                          prompt: activeTask.prompt,
+                        });
+                      }}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {(status === "failed" || status === "cancelled") && (
+              <div className="px-4 pt-3">
+                <div className="card border-err/40 bg-err/5 p-4">
+                  <p className="text-sm font-medium text-err">Task {status}</p>
+                </div>
+              </div>
+            )}
+
+            {(status === "finalizing" || status === "pr-open") && (
+              <div className="px-4 pt-3">
+                {hasPr ? (
+                  <PrTab
+                    task={activeTask}
+                    workflowId={id}
+                    subscribeProviderEvents={subscribeProviderEvents}
+                  />
+                ) : (
+                  <DraftPrPanel workflowId={id} taskId={activeTask.id} />
+                )}
+              </div>
+            )}
+
+            {(status === "merged" || status === "completed") && (
+              <div className="px-4 pt-3">
+                <div className="card p-4">
+                  <p className="text-sm font-medium text-fg">Task {status}</p>
+                </div>
+              </div>
+            )}
+
+            {artifactSection}
+
+            {showTranscript && (
+              <TranscriptView
+                workflowId={id}
+                taskId={activeTask.id}
+                subscribeProviderEvents={subscribeProviderEvents}
+                onApprovalResolved={handleApprovalResolved}
+                agentProviderType={latestRun?.providerType}
+                agentSessionId={latestRun?.runtimeSessionId}
+              />
+            )}
+
+            {!showTranscript && (status === "pending" || status === "ready") && (
+              <div className="flex-1 flex items-center justify-center p-4">
+                <p className="text-sm text-fg-muted text-center">
+                  Task is queued — send a prompt to start.
+                </p>
+              </div>
+            )}
+
+            {showComposer && (
+              <Composer
+                workflowId={id}
+                taskId={activeTask.id}
+                executionStatus={status}
+                pendingApproval={pendingApproval}
+                queuedMessage={queuedMessageForActive}
+                onQueue={(msg) => handleQueue(activeTask.id, msg)}
+                onApprovalResolved={handleApprovalResolved}
+              />
+            )}
+          </>
+        )}
       </div>
 
       <DagSheet

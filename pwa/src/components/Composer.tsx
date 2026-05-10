@@ -3,38 +3,42 @@ import type { TaskExecutionStatus } from "../domain/types";
 import type { ProviderEvent } from "../domain/providerEvent";
 import { postCommand } from "../transport/rest";
 import { useDraftState } from "../hooks/useDraftState";
+import { Banner } from "./Banner";
 
-type ComposerMode = "idle" | "running" | "feedback" | "approval" | "disabled";
+type ComposerAvailability =
+  | { available: true; mode: "idle" | "running" | "feedback" | "approval" }
+  | { available: false; reason: string };
 
-function deriveMode(
+function deriveAvailability(
   status: TaskExecutionStatus,
   pendingApproval: ProviderEvent | null,
-): ComposerMode {
+): ComposerAvailability {
   if (
     pendingApproval !== null &&
     pendingApproval.kind === "permission_request" &&
     (status === "running" || status === "quality-pending" || status === "ci-pending")
   ) {
-    return "approval";
+    return { available: true, mode: "approval" };
   }
   switch (status) {
     case "pending":
     case "ready":
-      return "idle";
+      return { available: false, reason: "Task waiting for the runner to pick it up." };
     case "running":
     case "quality-pending":
     case "ci-pending":
-      return "running";
+      return { available: true, mode: "running" };
     case "finalizing":
     case "pr-open":
+      return { available: false, reason: "Task is finalizing. Reply will be available after merge or if it returns to needs-review." };
     case "merged":
-    case "cancelled":
-      return "disabled";
+    case "completed":
+      return { available: false, reason: "Task is complete. Reply isn't supported in this state yet." };
     case "failed":
     case "needs-review":
-      return "feedback";
-    case "completed":
-      return "disabled";
+      return { available: true, mode: "feedback" };
+    case "cancelled":
+      return { available: false, reason: "Task was cancelled." };
   }
 }
 
@@ -64,13 +68,13 @@ export function Composer({
   queuedMessage,
   onQueue,
   onApprovalResolved,
-}: Props): JSX.Element | null {
-  const mode = deriveMode(executionStatus, pendingApproval);
+}: Props): JSX.Element {
+  const availability = deriveAvailability(executionStatus, pendingApproval);
   const [draft, setDraft, clearDraft] = useDraftState(workflowId, taskId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if (mode !== "approval") return;
+    if (!availability.available || availability.mode !== "approval") return;
 
     function handleKey(e: KeyboardEvent): void {
       if (isTextInputFocused()) return;
@@ -92,9 +96,36 @@ export function Composer({
 
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [mode, pendingApproval, workflowId, taskId, onApprovalResolved]);
+  }, [availability, pendingApproval, workflowId, taskId, onApprovalResolved]);
 
-  if (mode === "disabled") return null;
+  if (!availability.available) {
+    return (
+      <div
+        className="border-t border-border bg-bg-soft"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
+        <Banner tone="info" message={availability.reason} className="mx-3 mt-2 mb-1" />
+        <div className="flex items-end gap-2 px-3 py-2">
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Reply unavailable…"
+            rows={1}
+            className="flex-1 resize-none bg-transparent text-sm text-fg placeholder:text-fg-subtle focus:outline-none min-h-[2rem] max-h-40 leading-6"
+            style={{ height: "auto", overflowY: draft.includes("\n") ? "auto" : "hidden" }}
+          />
+          <button
+            type="button"
+            disabled
+            className="btn-primary shrink-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Send
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   async function send(): Promise<void> {
     const text = draft.trim();
@@ -107,7 +138,7 @@ export function Composer({
     clearDraft();
   }
 
-  if (mode === "approval" && pendingApproval?.kind === "permission_request") {
+  if (availability.mode === "approval" && pendingApproval?.kind === "permission_request") {
     const requestId = pendingApproval.id;
     return (
       <div className="border-t border-border bg-bg-soft px-3 py-2 flex items-center gap-2">
@@ -138,7 +169,7 @@ export function Composer({
     );
   }
 
-  if (mode === "running") {
+  if (availability.mode === "running") {
     const hasQueue = queuedMessage !== null;
     return (
       <div className="border-t border-border bg-bg-soft px-3 py-2 flex items-center gap-2">
@@ -173,7 +204,7 @@ export function Composer({
   }
 
   const placeholder =
-    mode === "feedback"
+    availability.mode === "feedback"
       ? "Send a follow-up or retry with new instructions…"
       : "Send a message…";
 
@@ -209,7 +240,7 @@ export function Composer({
           onClick={() => void send()}
           className="btn-primary shrink-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {mode === "feedback" ? "Retry" : "Send"}
+          {availability.mode === "feedback" ? "Retry" : "Send"}
         </button>
       </div>
     </div>
