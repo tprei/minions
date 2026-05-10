@@ -6,6 +6,7 @@ import { Sheet } from "../components/Sheet";
 import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
 import { BottomTabs } from "./BottomTabs";
+import { InstallBanner } from "./InstallBanner";
 import type { RouteName } from "../routing/parseUrl";
 
 const MOBILE_QUERY = "(max-width: 767px)";
@@ -54,7 +55,10 @@ export function AppLayout({ activeRoute, children }: AppLayoutProps): ReactEleme
           </aside>
         )}
 
-        <main className="flex-1 min-w-0 overflow-y-auto">
+        <main className="flex-1 min-w-0 overflow-y-auto flex flex-col">
+          <div className="px-4 pt-2">
+            <InstallBanner />
+          </div>
           {children}
         </main>
       </div>

@@ -6,8 +6,13 @@ interface AlertState {
   alerts: Alert[];
   loading: boolean;
   unreadCount: number;
+  error: string | null;
   loadAlerts: () => Promise<void>;
   markRead: (alertId: string) => void;
+}
+
+function trunc(msg: string): string {
+  return msg.length > 200 ? `${msg.slice(0, 200)}…` : msg;
 }
 
 function countUnread(alerts: Alert[]): number {
@@ -20,15 +25,19 @@ export const useAlertStore = create<AlertState>((set, get) => ({
   alerts: [],
   loading: false,
   unreadCount: 0,
+  error: null,
 
   async loadAlerts() {
     if (get().loading) return;
-    set({ loading: true });
+    set({ loading: true, error: null });
     try {
       const alerts = await listAlerts();
       set({ alerts, loading: false, unreadCount: countUnread(alerts) });
-    } catch {
-      set({ loading: false });
+    } catch (err) {
+      set({
+        loading: false,
+        error: trunc(err instanceof Error ? err.message : "Failed to load alerts"),
+      });
     }
   },
 

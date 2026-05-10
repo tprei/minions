@@ -1,17 +1,14 @@
 {
   "compilerOptions": {
     "target": "ESNext",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": ["ES2022", "WebWorker"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "jsx": "react-jsx",
-    "types": ["vite/client", "vite-plugin-pwa/client"],
     "strict": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*", "vite.config.ts"],
-  "exclude": ["dist", "node_modules", "dev-dist", "src/sw"]
+  "include": ["./**/*"]
 }

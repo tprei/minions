@@ -499,7 +499,8 @@ export function createServer(deps: ServerDeps): Hono {
     return c.json({ ok: true });
   });
 
-  const PR_URL_RE = /^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+\/pulls\/\d+$/;
+  const PR_URL_RE =
+    /^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+\/(?:pulls\/\d+(?:\/files)?|commits\/[a-f0-9]+\/check-runs)$/;
 
   app.get("/github/pr-detail", async (c) => {
     const url = c.req.query("url");

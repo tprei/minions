@@ -6,6 +6,9 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      strategies: "injectManifest",
+      srcDir: "src/sw",
+      filename: "sw.ts",
       registerType: "autoUpdate",
       injectRegister: false,
       devOptions: { enabled: true, type: "module" },
@@ -30,20 +33,8 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
+      injectManifest: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,webp}"],
-        navigateFallback: "/index.html",
-        skipWaiting: true,
-        clientsClaim: true,
-        runtimeCaching: [
-          {
-            urlPattern: ({ url }) =>
-              ["/workflows", "/commands", "/audit", "/alerts", "/push", "/github"].some(
-                (p) => url.pathname.startsWith(p),
-              ),
-            handler: "NetworkOnly",
-          },
-        ],
       },
     }),
   ],
