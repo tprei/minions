@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { listWorkflows } from "../transport/rest";
 import { RestError } from "../transport/rest";
 import { useWorkflowStore, useWorkflows } from "../store/useWorkflowStore";
+import { navigate } from "../routing/router";
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -50,9 +51,15 @@ export function WorkflowList(): JSX.Element {
   return (
     <ul className="space-y-2">
       {summaries.map((w) => (
-        <li key={w.id} className="flex gap-3 p-3 border rounded text-sm font-mono">
-          <span className="opacity-60 truncate">{w.id}</span>
-          <span>{w.status}</span>
+        <li key={w.id}>
+          <button
+            type="button"
+            className="w-full flex gap-3 p-3 border border-border rounded text-sm font-mono hover:bg-bg-elev transition-colors text-left"
+            onClick={() => navigate(`#/workflow/${w.id}`)}
+          >
+            <span className="opacity-60 truncate flex-1">{w.id}</span>
+            <span>{w.status}</span>
+          </button>
         </li>
       ))}
     </ul>
