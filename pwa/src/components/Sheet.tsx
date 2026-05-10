@@ -1,0 +1,121 @@
+import { useEffect, useRef, type ReactElement, type ReactNode } from "react";
+import { cx } from "../util/cx";
+import { useDragToDismiss } from "../hooks/gestures";
+
+type SheetSide = "bottom" | "right" | "left";
+
+const sideDirection: Record<SheetSide, "down" | "right" | "left"> = {
+  bottom: "down",
+  right: "right",
+  left: "left",
+};
+
+interface SheetProps {
+  open: boolean;
+  onClose: () => void;
+  side?: SheetSide;
+  title?: string;
+  children: ReactNode;
+  className?: string;
+}
+
+const sideClass: Record<SheetSide, string> = {
+  bottom: "inset-x-0 bottom-0 rounded-t-2xl max-h-[80dvh] overflow-y-auto",
+  right: "right-0 top-0 bottom-0 w-full max-w-sm overflow-y-auto",
+  left: "left-0 top-0 bottom-0 w-full max-w-sm overflow-y-auto",
+};
+
+const slideIn: Record<SheetSide, string> = {
+  bottom: "translate-y-0",
+  right: "translate-x-0",
+  left: "translate-x-0",
+};
+
+const slideOut: Record<SheetSide, string> = {
+  bottom: "translate-y-full",
+  right: "translate-x-full",
+  left: "-translate-x-full",
+};
+
+export function Sheet({ open, onClose, side = "bottom", title, children, className }: SheetProps): ReactElement {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, onClose]);
+
+  const { dragging, offset, progress } = useDragToDismiss(containerRef, onClose, {
+    direction: sideDirection[side],
+    enabled:
+      side === "bottom"
+        ? () => (containerRef.current?.scrollTop ?? 0) === 0
+        : undefined,
+  });
+
+  const panelTransform =
+    side === "bottom"
+      ? `translateY(${offset}px)`
+      : side === "right"
+        ? `translateX(${offset}px)`
+        : `translateX(${-offset}px)`;
+
+  return (
+    <div
+      className={cx(
+        "fixed inset-0 z-40 transition-all duration-300",
+        open ? "pointer-events-auto" : "pointer-events-none",
+      )}
+    >
+      <div
+        className={cx(
+          "absolute inset-0 bg-black/50 backdrop-blur-sm",
+          !dragging && "transition-opacity duration-300",
+          !dragging && (open ? "opacity-100" : "opacity-0"),
+        )}
+        style={dragging ? { opacity: open ? Math.max(0.5, 1 - progress * 0.5) : 0 } : undefined}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div
+        ref={containerRef}
+        className={cx(
+          "absolute card shadow-2xl",
+          sideClass[side],
+          !dragging && "transition-transform duration-300",
+          !dragging && (open ? slideIn[side] : slideOut[side]),
+          className,
+        )}
+        style={dragging ? { transform: panelTransform } : undefined}
+      >
+        {side === "bottom" && (
+          <div className="flex justify-center mt-1 mb-2">
+            <div className="w-10 h-1 rounded-full bg-fg-subtle" />
+          </div>
+        )}
+        <div
+          className="p-4"
+          style={side === "bottom" ? { paddingBottom: "env(safe-area-inset-bottom)" } : undefined}
+        >
+          {title && (
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-fg">{title}</h2>
+              <button
+                onClick={onClose}
+                className="text-fg-subtle hover:text-fg transition-colors p-1 rounded"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}

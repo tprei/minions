@@ -2,17 +2,100 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --bg: 255 255 255;
-  --fg: 15 15 15;
+@layer base {
+  :root {
+    --bg: 248 250 252;
+    --bg-soft: 241 245 249;
+    --bg-elev: 226 232 240;
+    --border: 203 213 225;
+    --border-soft: 226 232 240;
+    --fg: 15 23 42;
+    --fg-muted: 51 65 85;
+    --fg-subtle: 100 116 139;
+    --accent: 79 70 229;
+    --accent-soft: 99 102 241;
+    --accent-muted: 224 231 255;
+    --ok: 22 163 74;
+    --warn: 234 88 12;
+    --err: 220 38 38;
+    --tone-info-bg: 219 234 254;
+    --tone-info-border: 96 165 250;
+    --tone-info-fg: 30 64 175;
+    --tone-warn-bg: 254 243 199;
+    --tone-warn-border: 251 191 36;
+    --tone-warn-fg: 146 64 14;
+    --tone-err-bg: 254 226 226;
+    --tone-err-border: 248 113 113;
+    --tone-err-fg: 153 27 27;
+    --tone-ok-bg: 209 250 229;
+    --tone-ok-border: 52 211 153;
+    --tone-ok-fg: 6 95 70;
+    --scrollbar-thumb: 148 163 184;
+  }
+  .dark {
+    --bg: 11 13 18;
+    --bg-soft: 17 20 27;
+    --bg-elev: 22 26 35;
+    --border: 38 42 54;
+    --border-soft: 28 32 48;
+    --fg: 244 244 245;
+    --fg-muted: 161 161 170;
+    --fg-subtle: 113 113 122;
+    --accent: 124 92 255;
+    --accent-soft: 167 139 250;
+    --accent-muted: 58 44 128;
+    --ok: 52 211 153;
+    --warn: 245 158 11;
+    --err: 248 113 113;
+    --tone-info-bg: 23 37 84;
+    --tone-info-border: 30 64 175;
+    --tone-info-fg: 147 197 253;
+    --tone-warn-bg: 69 26 3;
+    --tone-warn-border: 146 64 14;
+    --tone-warn-fg: 252 211 77;
+    --tone-err-bg: 69 10 10;
+    --tone-err-border: 153 27 27;
+    --tone-err-fg: 252 165 165;
+    --tone-ok-bg: 5 46 22;
+    --tone-ok-border: 6 95 70;
+    --tone-ok-fg: 110 231 183;
+    --scrollbar-thumb: 42 47 64;
+  }
+  html, body, #root { height: 100%; }
+  body {
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.5;
+    background-color: rgb(var(--bg));
+    color: rgb(var(--fg));
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: contain;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: rgb(var(--scrollbar-thumb)); border-radius: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  :focus-visible { outline: 2px solid #7c5cff; outline-offset: 2px; border-radius: 4px; }
 }
 
-.dark {
-  --bg: 15 15 15;
-  --fg: 240 240 240;
-}
-
-body {
-  background-color: rgb(var(--bg));
-  color: rgb(var(--fg));
+@layer components {
+  .card {
+    @apply bg-bg-elev border border-border rounded-xl;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs;
+  }
+  .btn {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-bg-soft hover:bg-bg-elev transition-colors text-sm;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-white border-accent hover:bg-accent-soft;
+  }
+  .input {
+    @apply bg-bg-soft border border-border rounded-lg px-3 py-1.5 text-sm placeholder:text-fg-subtle focus:outline-none focus:border-accent;
+  }
+  .kbd {
+    @apply font-mono text-[10px] px-1.5 py-0.5 rounded border border-border bg-bg-soft text-fg-subtle;
+  }
+  .frosted {
+    @apply backdrop-blur-md bg-bg/80 border-b border-border;
+  }
 }
