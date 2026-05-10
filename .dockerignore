@@ -12,3 +12,5 @@ Dockerfile*
 test
 .github
 .minions
+pwa/node_modules
+pwa/dist

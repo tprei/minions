@@ -41,6 +41,26 @@ jobs:
       - name: Run test suite
         run: MWF_HAS_GIT=1 npm test
 
+  pwa:
+    name: PWA (typecheck + build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install
+        run: cd pwa && pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: cd pwa && pnpm typecheck
+      - name: Build
+        run: cd pwa && pnpm build
+      - name: Test
+        run: cd pwa && pnpm test
+
   e2e:
     name: E2E
     runs-on: ubuntu-latest
